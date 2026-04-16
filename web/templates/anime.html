@@ -1,0 +1,9 @@
+<h1>{{.Title}}</h1>
+<img src="{{.Poster}}" width="200">
+<p>{{.Description}}</p>
+<h3>Эпизоды</h3>
+<ul>
+    {{range .Episodes}}
+    <li><a href="/watch?episode={{.ID}}">Эпизод {{.Num}}</a></li>
+    {{end}}
+</ul>

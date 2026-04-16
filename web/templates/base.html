@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ancen</title>
+    <style>
+        body { font-family: sans-serif; margin: 0; padding: 20px; background: #1a1a2e; color: #eee; }
+        a { color: #ffaa44; text-decoration: none; }
+        .container { max-width: 1000px; margin: 0 auto; }
+        nav { margin-bottom: 20px; }
+        button, input { padding: 8px; margin: 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <nav>
+            <a href="/">Главная</a> |
+            <a href="/search">Поиск</a> |
+            <a href="/profile">Профиль</a> |
+            <a href="/logout">Выход</a>
+        </nav>
+        <hr>
+        {{.Content}}
+    </div>
+</body>
+</html>

@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Ancen - просмотр</title>
+    <!-- Video.js CSS -->
+    <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
+    <style>
+        body { background: #1a1a2e; color: #eee; font-family: sans-serif; padding: 20px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .emotion-buttons { margin: 20px 0; }
+        .emotion-buttons button { font-size: 2rem; margin: 0 5px; cursor: pointer; background: #2a2a3e; border: none; border-radius: 10px; padding: 10px; transition: transform 0.1s; }
+        .emotion-buttons button:hover { transform: scale(1.1); background: #3a3a4e; }
+        #emotion-list { list-style: none; padding: 0; }
+        #emotion-list li { padding: 5px; border-bottom: 1px solid #333; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h2>Эпизод {{.EpisodeNum}}</h2>
+
+    <!-- Видеоплеер -->
+    <video
+        id="my-video"
+        class="video-js vjs-default-skin"
+        controls
+        preload="auto"
+        width="640"
+        height="360"
+        data-setup="{}">
+        <source src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4" type="video/mp4">
+        <p class="vjs-no-js">Для просмотра видео включите JavaScript</p>
+    </video>
+
+    <!-- Кнопки эмоций -->
+    <div class="emotion-buttons">
+        <button class="emotion-btn" data-emotion="😭">😭</button>
+        <button class="emotion-btn" data-emotion="🔥">🔥</button>
+        <button class="emotion-btn" data-emotion="🤯">🤯</button>
+        <button class="emotion-btn" data-emotion="🥰">🥰</button>
+        <button class="emotion-btn" data-emotion="💢">💢</button>
+    </div>
+
+    <h3>Эмоции зрителей:</h3>
+    <ul id="emotion-list">
+        <li>Загрузка...</li>
+    </ul>
+</div>
+
+<!-- Video.js JS -->
+<script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
+<script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
+<script>
+    var player = videojs('my-video');
+    const episodeId = 1;
+
+    let ws;   // <--- ГЛОБАЛЬНАЯ ПЕРЕМЕННАЯ
+
+    function connectWebSocket() {
+        ws = new WebSocket(`ws://localhost:8080/ws?episode_id=${episodeId}`);
+        ws.onopen = function() {
+            console.log("✅ WebSocket connected");
+        };
+        ws.onmessage = function(event) {
+            const msg = JSON.parse(event.data);
+            if (msg.type === 'emotion') {
+                addEmotionToList(msg.username, msg.emotion_type, msg.timestamp_sec);
+            }
+        };
+        ws.onclose = function() {
+            console.log("🔌 WebSocket closed, reconnecting in 3s...");
+            setTimeout(connectWebSocket, 3000);
+        };
+        ws.onerror = function(err) {
+            console.error("❌ WebSocket error", err);
+        };
+    }
+
+    function addEmotionToList(username, emotionType, timestampSec) {
+        const list = document.getElementById('emotion-list');
+        const minutes = Math.floor(timestampSec / 60);
+        const seconds = timestampSec % 60;
+        const timeStr = `${minutes}:${seconds.toString().padStart(2,'0')}`;
+        const newItem = document.createElement('li');
+        newItem.innerHTML = `<strong>${escapeHtml(username)}</strong> ${emotionType} на ${timeStr}`;
+        list.prepend(newItem);
+        if (list.children.length > 50) list.removeChild(list.lastChild);
+    }
+
+    async function loadEmotions() {
+        try {
+            const response = await fetch(`/api/emotions?episode_id=${episodeId}`);
+            const emotions = await response.json();
+            const list = document.getElementById('emotion-list');
+            if (emotions.length === 0) {
+                list.innerHTML = '<li>Пока нет эмоций. Будьте первым!</li>';
+                return;
+            }
+            list.innerHTML = emotions.map(e => {
+                const minutes = Math.floor(e.timestamp_sec / 60);
+                const seconds = e.timestamp_sec % 60;
+                const timeStr = `${minutes}:${seconds.toString().padStart(2,'0')}`;
+                return `<li><strong>${escapeHtml(e.username)}</strong> ${e.emotion_type} на ${timeStr}</li>`;
+            }).join('');
+        } catch(err) {
+            console.error('Ошибка загрузки эмоций:', err);
+        }
+    }
+
+    async function sendEmotion(emotionType) {
+        console.log("sendEmotion called with", emotionType);
+        const currentTime = player.currentTime();
+        const timestamp = Math.floor(currentTime);
+        
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            const message = JSON.stringify({
+                type: 'emotion',
+                episode_id: episodeId,
+                timestamp_sec: timestamp,
+                emotion_type: emotionType
+            });
+            console.log("Sending via WS:", message);
+            ws.send(message);
+        } else {
+            console.log("WebSocket not open, fallback to HTTP");
+            try {
+                const response = await fetch('/api/emotion', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        episode_id: episodeId,
+                        timestamp_sec: timestamp,
+                        emotion_type: emotionType
+                    })
+                });
+                if (response.ok) loadEmotions();
+                else alert('Ошибка: не авторизованы');
+            } catch(err) {
+                console.error(err);
+            }
+        }
+        // Анимация
+        const btn = document.querySelector(`.emotion-btn[data-emotion="${emotionType}"]`);
+        if (btn) btn.style.transform = 'scale(1.2)';
+        setTimeout(() => { if(btn) btn.style.transform = ''; }, 200);
+    }
+
+    function escapeHtml(str) {
+        return str.replace(/[&<>]/g, function(m) {
+            if(m === '&') return '&amp;';
+            if(m === '<') return '&lt;';
+            if(m === '>') return '&gt;';
+            return m;
+        });
+    }
+
+    // Навешиваем обработчики на кнопки
+    document.querySelectorAll('.emotion-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const emotion = btn.getAttribute('data-emotion');
+            sendEmotion(emotion);
+        });
+    });
+
+    // Инициализация
+    loadEmotions();
+    connectWebSocket();
+</script>
+</body>
+</html>
