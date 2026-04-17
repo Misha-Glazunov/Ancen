@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Поиск — Ancen</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<div class="container">
+    <nav>
+        <a href="/">Главная</a>
+        <form method="GET" action="/search" style="display: inline-block;">
+            <input type="text" name="q" placeholder="Поиск..." value="{{.Query}}">
+            <button type="submit">🔍</button>
+        </form>
+        <a href="/profile">Профиль</a>
+        <a href="/logout">Выход</a>
+    </nav>
+    <hr>
+    <h1>Поиск аниме</h1>
+    <!-- остальное без изменений, но можно оставить и дополнительную форму -->
+    <form method="GET" action="/search">
+        <input type="text" name="q" placeholder="Название, жанр, описание..." value="{{.Query}}" style="width: 70%;">
+        <button type="submit">Найти</button>
+    </form>
+    {{if .Query}}
+        <h2>Результаты по запросу «{{.Query}}»</h2>
+        {{if .Results}}
+            <div class="anime-grid">
+            {{range .Results}}
+                <div class="anime-card">
+                    <a href="/anime/{{.ID}}">
+                        <img src="{{.Poster}}" alt="{{.Title}}" class="anime-poster">
+                        <h3>{{.Title}}</h3>
+                        <p>{{.Genres}}</p>
+                    </a>
+                </div>
+            {{end}}
+            </div>
+        {{else}}
+            <p>Ничего не найдено.</p>
+        {{end}}
+    {{end}}
+</div>
+</body>
+</html>

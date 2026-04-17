@@ -17,6 +17,16 @@
 </head>
 <body>
 <div class="container">
+        <nav>
+        <a href="/">Главная</a>
+        <form method="GET" action="/search" style="display: inline-block;">
+            <input type="text" name="q" placeholder="Поиск...">
+            <button type="submit">🔍</button>
+        </form>
+        <a href="/profile">Профиль</a>
+        <a href="/logout">Выход</a>
+    </nav>
+    <hr>
     <h2>Эпизод {{.EpisodeNum}}</h2>
 
     <!-- Видеоплеер -->
@@ -28,7 +38,7 @@
         width="640"
         height="360"
         data-setup="{}">
-        <source src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4" type="video/mp4">
+        <source src="{{.VideoURL}}" type="video/mp4">
         <p class="vjs-no-js">Для просмотра видео включите JavaScript</p>
     </video>
 
@@ -41,30 +51,47 @@
         <button class="emotion-btn" data-emotion="💢">💢</button>
     </div>
 
+    <canvas id="emotionChart" width="640" height="150" style="background: #2a2a3e; border-radius: 8px; margin: 10px 0;"></canvas>
+
     <h3>Эмоции зрителей:</h3>
     <ul id="emotion-list">
+        <li>Загрузка...</li>
+    </ul>
+
+    <h3>Комментарии к таймкодам</h3>
+    <div>
+        <input type="text" id="commentText" placeholder="Ваш комментарий" style="width: 70%;">
+        <button id="sendCommentBtn">Отправить</button>
+        <span>Таймкод: <span id="currentTimeDisplay">0:00</span></span>
+    </div>
+    <ul id="comments-list">
         <li>Загрузка...</li>
     </ul>
 </div>
 
 <!-- Video.js JS -->
 <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
-<script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
 <script>
     var player = videojs('my-video');
-    const episodeId = 1;
+    
+    // Получаем ID эпизода из URL
+    const urlParams = new URLSearchParams(window.location.search);
+    let episodeId = parseInt(urlParams.get('episode'));
+    if (isNaN(episodeId)) episodeId = 1;
 
-    let ws;   // <--- ГЛОБАЛЬНАЯ ПЕРЕМЕННАЯ
+    let ws;
 
+    // --- WebSocket ---
     function connectWebSocket() {
         ws = new WebSocket(`ws://localhost:8080/ws?episode_id=${episodeId}`);
         ws.onopen = function() {
-            console.log("✅ WebSocket connected");
+            console.log("✅ WebSocket connected for episode", episodeId);
         };
         ws.onmessage = function(event) {
             const msg = JSON.parse(event.data);
             if (msg.type === 'emotion') {
                 addEmotionToList(msg.username, msg.emotion_type, msg.timestamp_sec);
+                loadStats();   // обновить график
             }
         };
         ws.onclose = function() {
@@ -76,8 +103,13 @@
         };
     }
 
+    // --- Лента эмоций ---
     function addEmotionToList(username, emotionType, timestampSec) {
         const list = document.getElementById('emotion-list');
+        // Убираем заглушку "Пока нет эмоций", если она есть
+        if (list.children.length === 1 && list.children[0].innerText.includes('Пока нет эмоций')) {
+            list.innerHTML = '';
+        }
         const minutes = Math.floor(timestampSec / 60);
         const seconds = timestampSec % 60;
         const timeStr = `${minutes}:${seconds.toString().padStart(2,'0')}`;
@@ -92,6 +124,7 @@
             const response = await fetch(`/api/emotions?episode_id=${episodeId}`);
             const emotions = await response.json();
             const list = document.getElementById('emotion-list');
+            list.innerHTML = ''; // очищаем
             if (emotions.length === 0) {
                 list.innerHTML = '<li>Пока нет эмоций. Будьте первым!</li>';
                 return;
@@ -107,6 +140,7 @@
         }
     }
 
+    // --- Отправка эмоции ---
     async function sendEmotion(emotionType) {
         console.log("sendEmotion called with", emotionType);
         const currentTime = player.currentTime();
@@ -139,12 +173,140 @@
                 console.error(err);
             }
         }
-        // Анимация
+        // Анимация кнопки
         const btn = document.querySelector(`.emotion-btn[data-emotion="${emotionType}"]`);
         if (btn) btn.style.transform = 'scale(1.2)';
         setTimeout(() => { if(btn) btn.style.transform = ''; }, 200);
     }
 
+    // --- График эмоций ---
+    let currentStats = [];
+
+    async function loadStats() {
+        try {
+            const response = await fetch(`/api/emotions/stats?episode_id=${episodeId}`);
+            if (!response.ok) throw new Error('Stats API error');
+            const stats = await response.json();
+            currentStats = stats;
+            drawChart(stats);
+        } catch(err) {
+            console.error('Ошибка загрузки статистики:', err);
+        }
+    }
+
+    function drawChart(stats) {
+    const canvas = document.getElementById('emotionChart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width;
+    const height = canvas.height;
+    ctx.clearRect(0, 0, width, height);
+    
+    if (!stats || stats.length === 0) {
+        ctx.fillStyle = '#aaa';
+        ctx.font = '14px sans-serif';
+        ctx.fillText('Нет эмоций', width/2-40, height/2);
+        canvas.onclick = null;
+        return;
+    }
+    
+    const maxCount = Math.max(...stats.map(s => s.count), 1);
+    const barWidth = (width / stats.length) * 0.8;
+    const barSpacing = (width / stats.length) * 0.2;
+    
+    stats.forEach((stat, i) => {
+        const barHeight = (stat.count / maxCount) * (height - 30);
+        const x = i * (barWidth + barSpacing) + barSpacing/2;
+        const y = height - barHeight - 10;
+        ctx.fillStyle = '#ffaa44';
+        ctx.fillRect(x, y, barWidth, barHeight);
+        
+        const minutes = Math.floor(stat.interval_start / 60);
+        const seconds = stat.interval_start % 60;
+        const label = `${minutes}:${seconds.toString().padStart(2,'0')}`;
+        ctx.fillStyle = '#ccc';
+        ctx.font = '10px sans-serif';
+        ctx.fillText(label, x+2, height-2);
+    });
+    
+    // Добавляем обработчик клика по канвасу
+    canvas.onclick = function(e) {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;   // учитываем фактический размер canvas
+        let mouseX = (e.clientX - rect.left) * scaleX;
+        if (mouseX < 0) mouseX = 0;
+        if (mouseX > canvas.width) mouseX = canvas.width;
+        const index = Math.floor(mouseX / (canvas.width / stats.length));
+        if (index >= 0 && index < stats.length) {
+            const targetTime = stats[index].interval_start;
+            player.currentTime(targetTime);
+            player.play();
+            // Небольшая визуальная обратная связь (подсветка столбца)
+            ctx.fillStyle = '#ffaa44';
+            stats.forEach((stat, i) => {
+                const barHeight = (stat.count / maxCount) * (height - 30);
+                const x = i * (barWidth + barSpacing) + barSpacing/2;
+                const y = height - barHeight - 10;
+                if (i === index) ctx.fillStyle = '#ff8844';
+                else ctx.fillStyle = '#ffaa44';
+                ctx.fillRect(x, y, barWidth, barHeight);
+            });
+            setTimeout(() => drawChart(stats), 200); // перерисовать нормально
+        }
+    };
+}
+
+    // --- Комментарии ---
+    async function loadComments() {
+        try {
+            const response = await fetch(`/api/comments?episode_id=${episodeId}`);
+            const comments = await response.json();
+            const list = document.getElementById('comments-list');
+            list.innerHTML = ''; // очищаем
+            if (comments.length === 0) {
+                list.innerHTML = '<li>Пока нет комментариев. Будьте первым!</li>';
+                return;
+            }
+            list.innerHTML = comments.map(c => {
+                const minutes = Math.floor(c.timestamp_sec / 60);
+                const seconds = c.timestamp_sec % 60;
+                const timeStr = `${minutes}:${seconds.toString().padStart(2,'0')}`;
+                return `<li><strong>${escapeHtml(c.username)}</strong> [${timeStr}]: ${escapeHtml(c.text)}</li>`;
+            }).join('');
+        } catch(err) {
+            console.error('Ошибка загрузки комментариев:', err);
+        }
+    }
+
+    // Отправка комментария
+    document.getElementById('sendCommentBtn').onclick = async () => {
+        const text = document.getElementById('commentText').value.trim();
+        if (!text) return;
+        const timestamp = Math.floor(player.currentTime());
+        try {
+            const response = await fetch('/api/comment', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    episode_id: episodeId,
+                    timestamp_sec: timestamp,
+                    text: text
+                })
+            });
+            if (response.ok) {
+                document.getElementById('commentText').value = '';
+                loadComments();
+            } else {
+                const errData = await response.json();
+                alert('Ошибка: ' + (errData.error || 'неизвестная ошибка'));
+            }
+        } catch(err) {
+            console.error(err);
+            alert('Ошибка при отправке комментария');
+        }
+    };
+
+    // --- Вспомогательные ---
     function escapeHtml(str) {
         return str.replace(/[&<>]/g, function(m) {
             if(m === '&') return '&amp;';
@@ -154,7 +316,7 @@
         });
     }
 
-    // Навешиваем обработчики на кнопки
+    // --- Навешиваем обработчики на кнопки эмоций ---
     document.querySelectorAll('.emotion-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             const emotion = btn.getAttribute('data-emotion');
@@ -162,9 +324,20 @@
         });
     });
 
-    // Инициализация
+    // --- Отображение текущего времени ---
+    setInterval(() => {
+        const t = player.currentTime();
+        const minutes = Math.floor(t / 60);
+        const seconds = Math.floor(t % 60);
+        const display = document.getElementById('currentTimeDisplay');
+        if (display) display.innerText = `${minutes}:${seconds.toString().padStart(2,'0')}`;
+    }, 500);
+
+    // --- Инициализация ---
     loadEmotions();
     connectWebSocket();
+    loadStats();
+    loadComments();
 </script>
 </body>
 </html>

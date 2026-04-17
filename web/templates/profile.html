@@ -1,3 +1,13 @@
+<nav>
+    <a href="/">Главная</a>
+    <form method="GET" action="/search" style="display: inline-block;">
+        <input type="text" name="q" placeholder="Поиск...">
+        <button type="submit">🔍</button>
+    </form>
+    <a href="/profile">Профиль</a>
+    <a href="/logout">Выход</a>
+</nav>
+<hr>
 <h2>Профиль пользователя: {{.Username}}</h2>
 <p>Здесь будут ваши эмоции и комментарии.</p>
 <a href="/">На главную</a>

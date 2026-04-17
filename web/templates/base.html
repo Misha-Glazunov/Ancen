@@ -15,9 +15,12 @@
 <body>
     <div class="container">
         <nav>
-            <a href="/">Главная</a> |
-            <a href="/search">Поиск</a> |
-            <a href="/profile">Профиль</a> |
+            <a href="/">Главная</a>
+            <form method="GET" action="/search" style="display: inline-block; margin: 0 10px;">
+                <input type="text" name="q" placeholder="Поиск аниме..." value="{{.Query}}" style="padding: 5px;">
+                <button type="submit" style="padding: 5px 10px;">🔍</button>
+            </form>
+            <a href="/profile">Профиль</a>
             <a href="/logout">Выход</a>
         </nav>
         <hr>

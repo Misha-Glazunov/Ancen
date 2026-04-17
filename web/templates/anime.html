@@ -1,9 +1,22 @@
-<h1>{{.Title}}</h1>
-<img src="{{.Poster}}" width="200">
-<p>{{.Description}}</p>
+<nav>
+    <a href="/">Главная</a>
+    <form method="GET" action="/search" style="display: inline-block;">
+        <input type="text" name="q" placeholder="Поиск...">
+        <button type="submit">🔍</button>
+    </form>
+    <a href="/profile">Профиль</a>
+    <a href="/logout">Выход</a>
+</nav>
+<hr>
+<h1>{{.Anime.Title}}</h1>
+<img src="{{.Anime.Poster}}" width="200">
+<p>{{.Anime.Description}}</p>
+<p><strong>Жанры:</strong> {{.Anime.Genres}}</p>
 <h3>Эпизоды</h3>
 <ul>
     {{range .Episodes}}
-    <li><a href="/watch?episode={{.ID}}">Эпизод {{.Num}}</a></li>
+    <li>
+        <a href="/watch?episode={{.ID}}">Серия {{.Num}}: {{.Title}}</a>
+    </li>
     {{end}}
 </ul>

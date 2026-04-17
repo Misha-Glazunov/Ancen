@@ -7,14 +7,17 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 
+	"sync"
+
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/gorilla/sessions"
-	"golang.org/x/crypto/bcrypt"
 	"github.com/gorilla/websocket"
-	"sync"
+	"github.com/joho/godotenv"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // Глобальные переменные
@@ -35,6 +38,8 @@ type PageData struct {
 // Инициализация: загружаем все шаблоны из папки web/templates
 func init() {
 	templates = template.Must(template.ParseGlob("web/templates/*.html"))
+    fs := http.FileServer(http.Dir("web/static"))
+    http.Handle("/static/", http.StripPrefix("/static/", fs))
 }
 
 // render — вспомогательная функция для отрисовки шаблонов
@@ -134,43 +139,129 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func animeHandler(w http.ResponseWriter, r *http.Request) {
-	 w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	// Данные для страницы аниме (временная заглушка)
-	data := struct {
-		Title       string
-		Poster      string
-		Description string
-		Episodes    []struct{ ID, Num int }
-	}{
-		Title:       "Наруто",
-		Poster:      "https://via.placeholder.com/200",
-		Description: "История о ниндзя, который мечтает стать Хокаге.",
-		Episodes:    []struct{ ID, Num int }{{1, 1}, {2, 2}},
-	}
-	err := templates.ExecuteTemplate(w, "anime.html", data)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+    w.Header().Set("Content-Type", "text/html; charset=utf-8")
+    // Получаем ID из URL: /anime/1
+    idStr := strings.TrimPrefix(r.URL.Path, "/anime/")
+    id, err := strconv.Atoi(idStr)
+    if err != nil {
+        http.NotFound(w, r)
+        return
+    }
+
+    var anime struct {
+        ID          int
+        Title       string
+        Description string
+        Poster      string
+        Genres      string
+    }
+    err = db.QueryRow("SELECT id, title, description, poster_url, genres FROM anime WHERE id = ?", id).Scan(
+        &anime.ID, &anime.Title, &anime.Description, &anime.Poster, &anime.Genres)
+    if err != nil {
+        if err == sql.ErrNoRows {
+            http.NotFound(w, r)
+        } else {
+            http.Error(w, "Database error", http.StatusInternalServerError)
+        }
+        return
+    }
+
+    // Получаем список эпизодов
+    rows, err := db.Query("SELECT id, episode_num, title FROM episodes WHERE anime_id = ? ORDER BY episode_num", id)
+    if err != nil {
+        http.Error(w, "Database error", http.StatusInternalServerError)
+        return
+    }
+    defer rows.Close()
+
+    type Episode struct {
+        ID  int
+        Num int
+        Title string
+    }
+    episodes := []Episode{}
+    for rows.Next() {
+        var ep Episode
+        if err := rows.Scan(&ep.ID, &ep.Num, &ep.Title); err != nil {
+            continue
+        }
+        episodes = append(episodes, ep)
+    }
+
+    data := struct {
+        Anime     interface{}
+        Episodes  []Episode
+    }{Anime: anime, Episodes: episodes}
+
+    err = templates.ExecuteTemplate(w, "anime.html", data)
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+    }
 }
 
 func watchHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	episodeID := r.URL.Query().Get("episode")
-	data := struct{ EpisodeNum string }{EpisodeNum: episodeID}
-	err := templates.ExecuteTemplate(w, "watch.html", data)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+    w.Header().Set("Content-Type", "text/html; charset=utf-8")
+    episodeIDStr := r.URL.Query().Get("episode")
+    if episodeIDStr == "" {
+        http.Error(w, "episode parameter required", http.StatusBadRequest)
+        return
+    }
+    episodeID, err := strconv.Atoi(episodeIDStr)
+    if err != nil {
+        http.Error(w, "invalid episode id", http.StatusBadRequest)
+        return
+    }
+
+    var episode struct {
+        ID        int
+        AnimeID   int
+        EpisodeNum int
+        Title     string
+        VideoURL  string
+    }
+    err = db.QueryRow("SELECT id, anime_id, episode_num, title, video_url FROM episodes WHERE id = ?", episodeID).Scan(
+        &episode.ID, &episode.AnimeID, &episode.EpisodeNum, &episode.Title, &episode.VideoURL)
+    if err != nil {
+        if err == sql.ErrNoRows {
+            http.NotFound(w, r)
+        } else {
+            http.Error(w, "Database error", http.StatusInternalServerError)
+        }
+        return
+    }
+
+    data := struct {
+        EpisodeNum int
+        VideoURL   string
+        Title      string
+    }{
+        EpisodeNum: episode.EpisodeNum,
+        VideoURL:   episode.VideoURL,
+        Title:      episode.Title,
+    }
+
+    err = templates.ExecuteTemplate(w, "watch.html", data)
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+    }
 }
 
 func profileHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	// Пока заглушка — позже будем получать имя пользователя из сессии
-	data := struct{ Username string }{Username: "Гость"}
-	err := templates.ExecuteTemplate(w, "profile.html", data)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+    w.Header().Set("Content-Type", "text/html; charset=utf-8")
+    username := "Гость"
+    userID, err := getUserIDFromSession(r)
+    if err == nil {
+        // Получаем имя пользователя из БД
+        err = db.QueryRow("SELECT username FROM users WHERE id = ?", userID).Scan(&username)
+        if err != nil {
+            username = "Гость"
+        }
+    }
+    data := struct{ Username string }{Username: username}
+    err = templates.ExecuteTemplate(w, "profile.html", data)
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+    }
 }
 
 func getUserIDFromSession(r *http.Request) (int, error) {
@@ -187,21 +278,15 @@ func getUserIDFromSession(r *http.Request) (int, error) {
 
 func apiEmotionPost(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Content-Type", "application/json")
-    
-    // Только POST
     if r.Method != http.MethodPost {
         http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
         return
     }
-    
-    // Проверка авторизации
     userID, err := getUserIDFromSession(r)
     if err != nil {
         http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
         return
     }
-    
-    // Парсим JSON
     var req struct {
         EpisodeID    int    `json:"episode_id"`
         TimestampSec int    `json:"timestamp_sec"`
@@ -211,21 +296,24 @@ func apiEmotionPost(w http.ResponseWriter, r *http.Request) {
         http.Error(w, `{"error":"Invalid JSON"}`, http.StatusBadRequest)
         return
     }
-    
-    // Валидация
     if req.EpisodeID == 0 || req.TimestampSec < 0 || req.EmotionType == "" {
         http.Error(w, `{"error":"Missing fields"}`, http.StatusBadRequest)
         return
     }
-    
-    // Вставляем в БД
+    // Белый список эмоций
+    validEmotions := map[string]bool{
+        "😭": true, "🔥": true, "🤯": true, "🥰": true, "💢": true,
+    }
+    if !validEmotions[req.EmotionType] {
+        http.Error(w, `{"error":"Invalid emotion type"}`, http.StatusBadRequest)
+        return
+    }
     _, err = db.Exec("INSERT INTO emotions (user_id, episode_id, timestamp_sec, emotion_type) VALUES (?, ?, ?, ?)",
         userID, req.EpisodeID, req.TimestampSec, req.EmotionType)
     if err != nil {
         http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
         return
     }
-    
     w.WriteHeader(http.StatusCreated)
     fmt.Fprint(w, `{"status":"ok"}`)
 }
@@ -435,12 +523,193 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
     }()
 }
 
+func apiEmotionsStats(w http.ResponseWriter, r *http.Request) {
+    w.Header().Set("Content-Type", "application/json")
+    episodeIDStr := r.URL.Query().Get("episode_id")
+    if episodeIDStr == "" {
+        http.Error(w, `{"error":"episode_id required"}`, http.StatusBadRequest)
+        return
+    }
+    episodeID, err := strconv.Atoi(episodeIDStr)
+    if err != nil {
+        http.Error(w, `{"error":"invalid episode_id"}`, http.StatusBadRequest)
+        return
+    }
+
+    // Интервал в секундах (например, 10)
+    interval := 10
+
+    // Запрос: группировка по timestamp_sec / interval
+    rows, err := db.Query(`
+        SELECT 
+            FLOOR(timestamp_sec / ?) * ? AS interval_start,
+            COUNT(*) as cnt
+        FROM emotions
+        WHERE episode_id = ?
+        GROUP BY interval_start
+        ORDER BY interval_start ASC
+    `, interval, interval, episodeID)
+    if err != nil {
+        http.Error(w, `{"error":"DB error"}`, http.StatusInternalServerError)
+        return
+    }
+    defer rows.Close()
+
+    type Stat struct {
+        IntervalStart int `json:"interval_start"`
+        Count         int `json:"count"`
+    }
+    stats := []Stat{}
+    for rows.Next() {
+        var start int
+        var cnt int
+        if err := rows.Scan(&start, &cnt); err != nil {
+            continue
+        }
+        stats = append(stats, Stat{IntervalStart: start, Count: cnt})
+    }
+    json.NewEncoder(w).Encode(stats)
+}
+
+type Comment struct {
+    ID           int    `json:"id"`
+    Username     string `json:"username"`
+    TimestampSec int    `json:"timestamp_sec"`
+    Text         string `json:"text"`
+    CreatedAt    string `json:"created_at"`
+}
+
+func apiCommentPost(w http.ResponseWriter, r *http.Request) {
+    w.Header().Set("Content-Type", "application/json")
+    if r.Method != http.MethodPost {
+        http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+        return
+    }
+    userID, err := getUserIDFromSession(r)
+    if err != nil {
+        http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+        return
+    }
+    var req struct {
+        EpisodeID    int    `json:"episode_id"`
+        TimestampSec int    `json:"timestamp_sec"`
+        Text         string `json:"text"`
+    }
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        http.Error(w, `{"error":"Invalid JSON"}`, http.StatusBadRequest)
+        return
+    }
+    if req.EpisodeID == 0 || req.Text == "" {
+        http.Error(w, `{"error":"Missing fields"}`, http.StatusBadRequest)
+        return
+    }
+    _, err = db.Exec("INSERT INTO comments (user_id, episode_id, timestamp_sec, text) VALUES (?, ?, ?, ?)",
+        userID, req.EpisodeID, req.TimestampSec, req.Text)
+    if err != nil {
+        http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
+        return
+    }
+    w.WriteHeader(http.StatusCreated)
+    fmt.Fprint(w, `{"status":"ok"}`)
+}
+
+func apiCommentsGet(w http.ResponseWriter, r *http.Request) {
+    w.Header().Set("Content-Type", "application/json")
+    episodeIDStr := r.URL.Query().Get("episode_id")
+    if episodeIDStr == "" {
+        http.Error(w, `{"error":"episode_id required"}`, http.StatusBadRequest)
+        return
+    }
+    episodeID, _ := strconv.Atoi(episodeIDStr)
+
+    rows, err := db.Query(`
+        SELECT c.id, u.username, c.timestamp_sec, c.text, c.created_at
+        FROM comments c
+        JOIN users u ON c.user_id = u.id
+        WHERE c.episode_id = ?
+        ORDER BY c.created_at DESC
+        LIMIT 100
+    `, episodeID)
+    if err != nil {
+        http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
+        return
+    }
+    defer rows.Close()
+
+    comments := []Comment{}
+    for rows.Next() {
+        var c Comment
+        var createdAt sql.NullTime
+        if err := rows.Scan(&c.ID, &c.Username, &c.TimestampSec, &c.Text, &createdAt); err != nil {
+            continue
+        }
+        if createdAt.Valid {
+            c.CreatedAt = createdAt.Time.Format("2006-01-02 15:04:05")
+        }
+        comments = append(comments, c)
+    }
+    json.NewEncoder(w).Encode(comments)
+}
+
+func searchHandler(w http.ResponseWriter, r *http.Request) {
+    w.Header().Set("Content-Type", "text/html; charset=utf-8")
+    query := strings.TrimSpace(r.URL.Query().Get("q"))
+    if query == "" {
+        templates.ExecuteTemplate(w, "search.html", struct{ Query string; Results interface{} }{Query: "", Results: nil})
+        return
+    }
+
+    // Поиск по таблице anime
+    rows, err := db.Query(`
+        SELECT id, title, description, poster_url, genres
+        FROM anime
+        WHERE title LIKE ? OR description LIKE ? OR genres LIKE ?
+        ORDER BY title
+        LIMIT 25
+    `, "%"+query+"%", "%"+query+"%", "%"+query+"%")
+    if err != nil {
+        http.Error(w, "Database error", http.StatusInternalServerError)
+        return
+    }
+    defer rows.Close()
+
+    type Anime struct {
+        ID          int
+        Title       string
+        Description string
+        Poster      string
+        Genres      string
+    }
+    results := []Anime{}
+    for rows.Next() {
+        var a Anime
+        if err := rows.Scan(&a.ID, &a.Title, &a.Description, &a.Poster, &a.Genres); err != nil {
+            continue
+        }
+        results = append(results, a)
+    }
+
+    data := struct {
+        Query   string
+        Results []Anime
+    }{Query: query, Results: results}
+    templates.ExecuteTemplate(w, "search.html", data)
+}
+
+func logoutHandler(w http.ResponseWriter, r *http.Request) {
+    session, _ := store.Get(r, "ancen-session")
+    session.Options.MaxAge = -1 // удаляем cookie
+    session.Save(r, w)
+    http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
 // ---------- Запуск сервера ----------
 func main() {
+    godotenv.Load()
+    dsn := os.Getenv("DB_USER") + ":" + os.Getenv("DB_PASS") + "@tcp(" + os.Getenv("DB_HOST") + ":" + os.Getenv("DB_PORT") + ")/" + os.Getenv("DB_NAME") + "?charset=utf8mb4&parseTime=true"
+    store = sessions.NewCookieStore([]byte(os.Getenv("SESSION_SECRET")))
 	// Подключение к MySQL
 	var err error
-	// Формат: "пользователь:пароль@tcp(хост:порт)/имя_бд?charset=utf8mb4&parseTime=true"
-	dsn := "ancen_user:ancen123@tcp(localhost:3306)/ancen?charset=utf8mb4&parseTime=true"
 	db, err = sql.Open("mysql", dsn)
 	if err != nil {
 		log.Fatal("Ошибка подключения к БД:", err)
@@ -466,6 +735,11 @@ func main() {
 	http.HandleFunc("/api/emotion", apiEmotionPost)
 	http.HandleFunc("/api/emotions", apiEmotionsGet)  
 	http.HandleFunc("/ws", wsHandler)
+    http.HandleFunc("/api/emotions/stats", apiEmotionsStats)
+    http.HandleFunc("/api/comment", apiCommentPost)
+    http.HandleFunc("/api/comments", apiCommentsGet)
+    http.HandleFunc("/search", searchHandler)
+    http.HandleFunc("/logout", logoutHandler)
 
 	log.Println("Сервер Ancen запущен на http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
