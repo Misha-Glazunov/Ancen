@@ -703,6 +703,120 @@ func logoutHandler(w http.ResponseWriter, r *http.Request) {
     http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
+func apiProgressPost(w http.ResponseWriter, r *http.Request) {
+    log.Println("apiProgressPost called")
+    w.Header().Set("Content-Type", "application/json")
+    if r.Method != http.MethodPost {
+        http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+        return
+    }
+    userID, err := getUserIDFromSession(r)
+    if err != nil {
+        http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+        return
+    }
+    var req struct {
+        EpisodeID    int `json:"episode_id"`
+        TimestampSec int `json:"timestamp_sec"`
+    }
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        http.Error(w, `{"error":"Invalid JSON"}`, http.StatusBadRequest)
+        return
+    }
+    if req.EpisodeID == 0 || req.TimestampSec < 0 {
+        http.Error(w, `{"error":"Missing fields"}`, http.StatusBadRequest)
+        return
+    }
+    _, err = db.Exec(`
+    INSERT INTO user_progress (user_id, episode_id, last_timestamp_sec)
+    VALUES (?, ?, ?)
+    ON DUPLICATE KEY UPDATE last_timestamp_sec = VALUES(last_timestamp_sec)
+    `, userID, req.EpisodeID, req.TimestampSec)
+    if err != nil {
+    log.Println("DB error in progress save:", err)
+    http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
+    return
+    
+}
+    w.WriteHeader(http.StatusCreated)
+    fmt.Fprint(w, `{"status":"ok"}`)
+}
+
+func apiProgressGet(w http.ResponseWriter, r *http.Request) {
+    w.Header().Set("Content-Type", "application/json")
+    userID, err := getUserIDFromSession(r)
+    if err != nil {
+        http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+        return
+    }
+    episodeIDStr := r.URL.Query().Get("episode_id")
+    if episodeIDStr == "" {
+        http.Error(w, `{"error":"episode_id required"}`, http.StatusBadRequest)
+        return
+    }
+    episodeID, err := strconv.Atoi(episodeIDStr)
+    if err != nil {
+        http.Error(w, `{"error":"invalid episode_id"}`, http.StatusBadRequest)
+        return
+    }
+    var timestamp int
+    err = db.QueryRow(`
+        SELECT last_timestamp_sec FROM user_progress
+        WHERE user_id = ? AND episode_id = ?
+    `, userID, episodeID).Scan(&timestamp)
+    if err != nil {
+        if err == sql.ErrNoRows {
+            log.Println("No progress for user", userID, "episode", episodeID)
+            fmt.Fprint(w, `{"timestamp_sec":0}`)
+            return
+        }
+        log.Println("DB error:", err)
+        http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
+        return
+    }
+    log.Printf("Returning timestamp %d for user %d episode %d", timestamp, userID, episodeID)
+    fmt.Fprintf(w, `{"timestamp_sec":%d}`, timestamp)
+}
+
+func apiProgressDelete(w http.ResponseWriter, r *http.Request) {
+    w.Header().Set("Content-Type", "application/json")
+    if r.Method != http.MethodDelete {
+        http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+        return
+    }
+    userID, err := getUserIDFromSession(r)
+    if err != nil {
+        http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+        return
+    }
+    var req struct {
+        EpisodeID int `json:"episode_id"`
+    }
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        http.Error(w, `{"error":"Invalid JSON"}`, http.StatusBadRequest)
+        return
+    }
+    _, err = db.Exec("DELETE FROM user_progress WHERE user_id = ? AND episode_id = ?", userID, req.EpisodeID)
+    if err != nil {
+        http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
+        return
+    }
+    w.WriteHeader(http.StatusOK)
+    fmt.Fprint(w, `{"status":"ok"}`)
+}
+
+func apiProgressHandler(w http.ResponseWriter, r *http.Request) {
+    switch r.Method {
+    case http.MethodPost:
+        apiProgressPost(w, r)
+    case http.MethodGet:
+        apiProgressGet(w, r)
+        
+    default:
+        http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+    }
+}
+
 // ---------- Запуск сервера ----------
 func main() {
     godotenv.Load()
@@ -720,8 +834,6 @@ func main() {
 		log.Fatal("БД не отвечает:", err)
 	}
 	log.Println("Подключено к MySQL")
-
-	store = sessions.NewCookieStore([]byte("fdjeoifwjf"))
 	
 	go hub.run()
 
@@ -740,6 +852,18 @@ func main() {
     http.HandleFunc("/api/comments", apiCommentsGet)
     http.HandleFunc("/search", searchHandler)
     http.HandleFunc("/logout", logoutHandler)
+    http.HandleFunc("/api/progress", func(w http.ResponseWriter, r *http.Request) {
+    switch r.Method {
+    case http.MethodPost:
+        apiProgressPost(w, r)
+    case http.MethodGet:
+        apiProgressGet(w, r)
+    case http.MethodDelete:
+        apiProgressDelete(w, r)
+    default:
+        http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+    }
+})
 
 	log.Println("Сервер Ancen запущен на http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))

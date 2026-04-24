@@ -29,6 +29,12 @@
     <hr>
     <h2>Эпизод {{.EpisodeNum}}</h2>
 
+    <div id="resumeDialog" style="display: none; background: #2a2a3e; border: 2px solid #ffaa44; border-radius: 12px; padding: 15px; margin: 10px 0; text-align: center;">
+    <p>У вас есть сохранённый прогресс: <span id="resumeTime">0:00</span></p>
+    <button id="resumeBtn" style="margin-right: 10px;">Продолжить</button>
+    <button id="restartBtn">Начать сначала</button>
+    </div>
+
     <!-- Видеоплеер -->
     <video
         id="my-video"
@@ -50,6 +56,12 @@
         <button class="emotion-btn" data-emotion="🥰">🥰</button>
         <button class="emotion-btn" data-emotion="💢">💢</button>
     </div>
+
+    <div id="resumeDialog" style="display: none; background: #2a2a3e; border: 2px solid #ffaa44; border-radius: 12px; padding: 15px; margin: 10px 0; text-align: center;">
+    <p>У вас есть сохранённый прогресс: <span id="resumeTime">0:00</span></p>
+    <button id="resumeBtn" style="margin-right: 10px;">Продолжить</button>
+    <button id="restartBtn">Начать сначала</button>
+</div>
 
     <canvas id="emotionChart" width="640" height="150" style="background: #2a2a3e; border-radius: 8px; margin: 10px 0;"></canvas>
 
@@ -306,6 +318,110 @@
         }
     };
 
+    let saveInterval = null;
+    let lastSavedTimestamp = 0;
+
+    async function saveProgress() {
+    const currentTime = Math.floor(player.currentTime());
+    console.log("saveProgress called, currentTime:", currentTime, "lastSaved:", lastSavedTimestamp);
+    if (Math.abs(currentTime - lastSavedTimestamp) < 2) return;
+    lastSavedTimestamp = currentTime;
+    try {
+        const response = await fetch('/api/progress', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                episode_id: episodeId,
+                timestamp_sec: currentTime
+            })
+        });
+        console.log("Progress saved response:", response.status);
+    } catch(err) {
+        console.error("Failed to save progress:", err);
+    }
+}
+
+    // Сохраняем прогресс каждые 5 секунд
+    saveInterval = setInterval(() => {
+    console.log("Interval tick");
+    saveProgress();
+    }, 5000);
+
+    // Сохраняем при паузе (если пользователь остановил)
+    player.on('pause', saveProgress);
+    // Сохраняем перед закрытием страницы (не всегда срабатывает, но полезно)
+    window.addEventListener('beforeunload', saveProgress);
+
+    let savedTimestamp = 0;
+
+    async function loadProgress() {
+    try {
+        console.log("loadProgress called for episode", episodeId);
+        const response = await fetch(`/api/progress?episode_id=${episodeId}`);
+        const data = await response.json();
+        console.log("Progress API response:", data);
+        savedTimestamp = data.timestamp_sec || 0;
+        if (savedTimestamp > 0) {
+            // Ждём загрузки метаданных видео
+            if (player.readyState() === 0) {
+                console.log("Waiting for loadedmetadata");
+                await new Promise(resolve => player.one('loadedmetadata', resolve));
+            }
+            const duration = player.duration();
+            console.log("Duration:", duration, "savedTimestamp:", savedTimestamp);
+            if (duration && savedTimestamp < duration - 5) {
+                const minutes = Math.floor(savedTimestamp / 60);
+                const seconds = savedTimestamp % 60;
+                const timeStr = `${minutes}:${seconds.toString().padStart(2,'0')}`;
+                document.getElementById('resumeTime').innerText = timeStr;
+                const dialog = document.getElementById('resumeDialog');
+                if (!dialog) {
+                    console.error("resumeDialog element not found");
+                    return;
+                }
+                dialog.style.display = 'block';
+
+                // Обработчики кнопок (удаляем старые через clone)
+                const resumeBtn = document.getElementById('resumeBtn');
+                const restartBtn = document.getElementById('restartBtn');
+                if (!resumeBtn || !restartBtn) {
+                    console.error("Buttons not found");
+                    return;
+                }
+                const newResumeBtn = resumeBtn.cloneNode(true);
+                const newRestartBtn = restartBtn.cloneNode(true);
+                resumeBtn.parentNode.replaceChild(newResumeBtn, resumeBtn);
+                restartBtn.parentNode.replaceChild(newRestartBtn, restartBtn);
+
+                newResumeBtn.addEventListener('click', () => {
+                    console.log("Resume clicked, setting time to", savedTimestamp);
+                    player.currentTime(savedTimestamp);
+                    player.play();
+                    dialog.style.display = 'none';
+                });
+                newRestartBtn.addEventListener('click', async () => {
+                    console.log("Restart clicked, deleting progress");
+                    await fetch('/api/progress', {
+                        method: 'DELETE',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ episode_id: episodeId })
+                    });
+                    dialog.style.display = 'none';
+                    player.currentTime(0);
+                    player.play();
+                });
+            } else {
+                console.log("Saved timestamp is near the end, starting from 0");
+                player.currentTime(0);
+            }
+        } else {
+            console.log("No saved progress");
+        }
+    } catch(err) {
+        console.error("Failed to load progress:", err);
+    }
+}
+
     // --- Вспомогательные ---
     function escapeHtml(str) {
         return str.replace(/[&<>]/g, function(m) {
@@ -334,10 +450,13 @@
     }, 500);
 
     // --- Инициализация ---
+    player.ready(() => {
+    loadProgress();
     loadEmotions();
     connectWebSocket();
     loadStats();
     loadComments();
+    });
 </script>
 </body>
 </html>
