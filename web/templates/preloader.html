@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Загрузка — AniMemory</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600&family=Manrope:wght@400;500;600&family=MuseoModerno:wght@400;700;800&family=Nothing+You+Could+Do&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        /* ===== ПРЕЛОАДЕР НА ВЕСЬ ЭКРАН ===== */
+        body {
+            display: grid;
+            place-items: center;
+            width: 100vw;
+            height: 100vh;
+            background: #000;
+            overflow: hidden;
+            font-family: 'Jost', sans-serif;
+        }
+
+        /* ===== КОНТЕЙНЕР ПРЕЛОАДЕРА (для анимации исчезновения) ===== */
+        .preloader {
+            display: grid;
+            place-items: center;
+            width: 100vw;
+            height: 100vh;
+            background: #000;
+            transition: opacity 0.5s ease;
+        }
+        .preloader.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        /* ===== ЛОГОТИП ===== */
+        .logo-preloader {
+            width: 554px;
+            height: 542px;
+            opacity: 1;
+            transition: opacity 0.5s ease;
+        }
+        .logo-preloader.fade {
+            opacity: 0;
+        }
+
+        .logo-preloader img {
+            width: 100%;
+            height: 100%;
+            display: block;
+            object-fit: contain;
+        }
+
+        /* ===== АДАПТИВ ===== */
+        @media (max-width: 768px) {
+            .logo-preloader {
+                width: 280px;
+                height: 274px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .logo-preloader {
+                width: 200px;
+                height: 196px;
+            }
+        }
+    </style>
+    <script>
+        // Последовательность:
+        // 1. Логотип виден сразу (по умолчанию)
+        // 2. Через 1.5с логотип fade out за 0.5с
+        // 3. После исчезновения логотипа прелоадер fade out за 0.5с
+        // 4. Редирект на /home
+        setTimeout(function() {
+            // Шаг 1: исчезает логотип
+            document.querySelector('.logo-preloader').classList.add('fade');
+
+            // Шаг 2: через 0.5с исчезает прелоадер
+            setTimeout(function() {
+                document.querySelector('.preloader').classList.add('hidden');
+
+                // Шаг 3: после исчезновения прелоадера редирект
+                setTimeout(function() {
+                    window.location.href = '/home';
+                }, 500);
+            }, 500);
+        }, 1500);
+    </script>
+</head>
+<body>
+    <div class="preloader" id="preloader">
+        <div class="logo-preloader" id="logo">
+            <img src="/static/img/preloader/logo_preloader.png" alt="AniMemory">
+        </div>
+    </div>
+</body>
+</html>

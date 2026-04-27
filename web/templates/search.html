@@ -42,5 +42,53 @@
         {{end}}
     {{end}}
 </div>
+<script>
+    // --- Пагинация поиска ---
+    let currentPage = 1;
+    const pageSize = 25; // Количество результатов на странице
+
+    function updateSearchResults() {
+        const query = document.querySelector('input[name="q"]').value.trim();
+        fetch(`/search?q=${query}&page=${currentPage}&pageSize=${pageSize}`)
+            .then(response => response.text())
+            .then(html => {
+                // Заменяем только результаты поиска, а не всю страницу
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(html, 'text/html');
+                const results = doc.querySelector('.anime-grid');
+                const pagination = doc.getElementById('pagination');
+                if (results) {
+                    document.querySelector('.anime-grid').innerHTML = results.innerHTML;
+                } else {
+                    document.querySelector('.anime-grid').innerHTML = '<p>Ничего не найдено.</p>';
+                }
+                if (pagination) {
+                    document.getElementById('pagination').innerHTML = pagination.innerHTML;
+                }
+                // Обновляем обработчики событий для кнопок пагинации
+                setupPagination();
+            })
+            .catch(err => console.error('Ошибка загрузки результатов поиска:', err));
+    }
+
+    function setupPagination() {
+        document.getElementById('prevPageBtn').addEventListener('click', () => {
+            if (currentPage > 1) {
+                currentPage--;
+                updateSearchResults();
+                document.getElementById('currentPage').innerText = currentPage;
+            }
+        });
+
+        document.getElementById('nextPageBtn').addEventListener('click', () => {
+            currentPage++;
+            updateSearchResults();
+            document.getElementById('currentPage').innerText = currentPage;
+        });
+    }
+
+    setupPagination();
+</script>
+{{template "footer" .}}
 </body>
 </html>

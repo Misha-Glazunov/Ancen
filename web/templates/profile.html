@@ -1,13 +1,88 @@
-<nav>
-    <a href="/">Главная</a>
-    <form method="GET" action="/search" style="display: inline-block;">
-        <input type="text" name="q" placeholder="Поиск...">
-        <button type="submit">🔍</button>
-    </form>
-    <a href="/profile">Профиль</a>
-    <a href="/logout">Выход</a>
-</nav>
-<hr>
-<h2>Профиль пользователя: {{.Username}}</h2>
-<p>Здесь будут ваши эмоции и комментарии.</p>
-<a href="/">На главную</a>
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Профиль — Ancen</title>
+    <style>
+        body { background: #1a1a2e; color: #eee; font-family: sans-serif; padding: 20px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        nav a { color: #ffaa44; margin-right: 15px; text-decoration: none; }
+        nav a:hover { text-decoration: underline; }
+        .level-box { background: #2a2a3e; border-radius: 12px; padding: 20px; margin: 20px 0; text-align: center; }
+        .level-box .level { font-size: 3rem; font-weight: bold; color: #ffaa44; }
+        .level-box .xp-bar { background: #3a3a4e; border-radius: 10px; height: 20px; margin: 10px 0; overflow: hidden; }
+        .level-box .xp-fill { background: linear-gradient(90deg, #ffaa44, #ff8844); height: 100%; border-radius: 10px; transition: width 0.3s; }
+        .stats { display: flex; justify-content: space-around; margin: 20px 0; }
+        .stat-item { text-align: center; background: #2a2a3e; padding: 15px; border-radius: 10px; min-width: 100px; }
+        .stat-item .num { font-size: 1.5rem; font-weight: bold; color: #ffaa44; }
+        .achievements { margin: 20px 0; }
+        .achievement { display: inline-block; background: #2a2a3e; border-radius: 10px; padding: 10px 15px; margin: 5px; text-align: center; }
+        .achievement .icon { font-size: 2rem; }
+        .achievement .name { font-size: 0.9rem; color: #ccc; }
+        .achievement .date { font-size: 0.7rem; color: #888; }
+        .no-achievements { color: #888; text-align: center; padding: 20px; }
+        hr { border-color: #333; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <nav>
+        <a href="/">Главная</a>
+        <form method="GET" action="/search" style="display: inline-block;">
+            <input type="text" name="q" placeholder="Поиск...">
+            <button type="submit">🔍</button>
+        </form>
+        <a href="/profile">Профиль</a>
+        <a href="/logout">Выход</a>
+    </nav>
+    <hr>
+    <h2>Профиль пользователя: {{.Username}}</h2>
+
+    {{if .Level}}
+    <div class="level-box">
+        <div class="level">Уровень {{.Level.Level}}</div>
+        <p>Опыт: {{.Level.XP}} / {{.Level.NextLevelXP}} XP</p>
+        <div class="xp-bar">
+            <div class="xp-fill" data-width="{{.Level.XPPercent}}"></div>
+        </div>
+    </div>
+    <script>
+        document.querySelector('.xp-fill').style.width = document.querySelector('.xp-fill').dataset.width + '%';
+    </script>
+    {{end}}
+
+    <div class="stats">
+        <div class="stat-item">
+            <div class="num">{{.EmotionCount}}</div>
+            <div>Эмоций</div>
+        </div>
+        <div class="stat-item">
+            <div class="num">{{.CommentCount}}</div>
+            <div>Комментариев</div>
+        </div>
+        <div class="stat-item">
+            <div class="num">{{.EpisodeCount}}</div>
+            <div>Эпизодов</div>
+        </div>
+    </div>
+
+    <h3>Достижения</h3>
+    <div class="achievements">
+        {{if .Achievements}}
+            {{range .Achievements}}
+            <div class="achievement">
+                <div class="icon">{{.Icon}}</div>
+                <div class="name">{{.Name}}</div>
+                <div class="date">{{.UnlockedAt}}</div>
+            </div>
+            {{end}}
+        {{else}}
+            <div class="no-achievements">Пока нет достижений. Смотрите аниме и ставьте эмоции!</div>
+        {{end}}
+    </div>
+
+    <a href="/">На главную</a>
+</div>
+{{template "footer" .}}
+</body>
+</html>

@@ -1,9 +1,268 @@
-<h2>Регистрация</h2>
-<form method="POST" action="/register">
-    <input type="text" name="username" placeholder="Логин" required><br>
-    <input type="password" name="password" placeholder="Пароль" required><br>
-    <button type="submit">Зарегистрироваться</button>
-</form>
-<p>Уже есть аккаунт? <a href="/login">Войти</a></p>
-{{if .Error}}<p style="color:red;">{{.Error}}</p>{{end}}
-{{if .Success}}<p style="color:green;">{{.Success}}</p>{{end}}
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Регистрация — AniMemory</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600&family=Manrope:wght@400;500;600&family=MuseoModerno:wght@400;700;800&family=Nothing+You+Could+Do&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        html, body {
+            height: 100%;
+            margin: 0;
+            overflow-x: hidden;
+        }
+        body {
+            font-family: 'Jost', sans-serif;
+            background: #000 url('/static/img/register/background_blure.png') no-repeat top center;
+            background-size: cover;
+            color: #fff;
+            position: relative;
+        }
+        .page-fullscreen {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        /* ===== HEADER ===== */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 20px 140px;
+            flex-wrap: wrap;
+            gap: 16px;
+            position: relative;
+            z-index: 1;
+        }
+        .header-logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .header-logo-img { width: 244px; height: 57px; flex-shrink: 0; object-fit: contain; }
+        .header-logo-text {
+            display: flex;
+            flex-direction: column;
+        }
+        .header-logo-text .brand {
+            font-family: 'MuseoModerno', sans-serif;
+            font-size: 32px;
+            font-weight: 400;
+            color: #fff;
+            line-height: 1;
+        }
+        .header-logo-text .tagline {
+            font-family: 'Nothing You Could Do', cursive;
+            font-size: 12px;
+            color: #fff;
+            margin-top: 2px;
+        }
+        .button-login-registry {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-sizing: border-box;
+            position: absolute;
+            width: 177px;
+            height: 40px;
+            right: 140px;
+            top: 29px;
+            background: rgba(0, 0, 0, 0.01);
+            backdrop-filter: blur(20px);
+            border-radius: 10px;
+            font-family: 'Jost', sans-serif;
+            font-size: 16px;
+            font-weight: 400;
+            cursor: pointer;
+            color: white;
+            transition: background 0.2s;
+            border: 1px solid transparent;
+            background-clip: padding-box;
+        }
+        .button-login-registry::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: 10px;
+            padding: 1px;
+            background: linear-gradient(135deg, #5E0135, #331C76);
+            -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+            -webkit-mask-composite: xor;
+            mask-composite: exclude;
+            pointer-events: none;
+        }
+        .button-login-registry:hover { background: rgb(255, 255, 255); color: #000; }
+
+        /* ===== MAIN ===== */
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            bottom: 30px;
+            padding: 40px 140px;
+            position: relative;
+            z-index: 1;
+            transform: translateX(225px);
+        }
+        .register-title {
+            font-size: 36px;
+            font-weight: 400;
+            color: #ffffff;
+            margin-bottom: 40px;
+        }
+
+        /* ===== FORM ===== */
+        .form {
+            display: flex;
+            flex-direction: column;
+            width: 350px;
+            gap: 20px;
+        }
+        .form-field {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .form-field label {
+            font-size: 20px;
+            font-weight: 400;
+            color: #fff;
+        }
+        .form-lines {
+            width: 100%;
+            height: 1px;
+            background: transparent;
+            border-bottom: 1px solid #fff;
+        }
+        .form-field input {
+            width: 100%;
+            height: 40px;
+            border: none;
+            border-bottom: 1px solid #fff;
+            background: transparent;
+            color: #fff;
+            font-family: 'Jost', sans-serif;
+            font-size: 18px;
+            outline: none;
+            padding: 0 4px;
+            transition: border-color 0.2s;
+        }
+        .form-field input:focus { border-bottom-color: #d82d7e; }
+        .form-field input::placeholder { color: rgba(255,255,255,0.3); }
+
+        .button-form {
+            width: 100%;
+            height: 50px;
+            border-radius: 10px;
+            border: none;
+            background: #fff;
+            color: #000;
+            font-family: 'Jost', sans-serif;
+            font-size: 20px;
+            font-weight: 400;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.1s;
+            margin-top: 10px;
+        }
+        .button-form:hover { background: #e0e0e0; }
+        .button-form:active { transform: scale(0.98); }
+
+        .form-actions-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            width: 100%;
+        }
+        .form-actions-row span {
+            font-size: 16px;
+            color: #ffffff;
+        }
+        .login-link {
+            color: #d82d7e;
+            text-decoration: none;
+            font-weight: 400;
+            font-size: 16px;
+            transition: opacity 0.2s;
+        }
+        .login-link:hover { opacity: 0.8; }
+
+        /* ===== ALERT ===== */
+        .alert {
+            width: 350px;
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 16px;
+            text-align: center;
+        }
+        .alert-error { background: rgba(255,80,80,0.15); border: 1px solid #ff5050; color: #ff5050; }
+        .alert-success { background: rgba(80,255,80,0.15); border: 1px solid #50ff50; color: #50ff50; }
+
+        /* ===== RESPONSIVE ===== */
+        @media (max-width: 768px) {
+            .header { padding: 16px 20px; }
+            .header-logo-text .brand { font-size: 24px; }
+            .button-login-registry { width: 140px; font-size: 14px; }
+            .register-title { font-size: 28px; }
+            .form { width: 100%; max-width: 350px; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="page-fullscreen">
+
+        <!-- ===== HEADER ===== -->
+        <header class="header">
+            <a href="/" class="header-logo">
+                <img src="/static/img/header/logo_header.png" alt="AniMemory" class="header-logo-img">
+            </a>
+            <a href="/login" class="button-login-registry">Вход \ Регистрация</a>
+        </header>
+
+        <!-- ===== MAIN ===== -->
+        <main class="main">
+            <h1 class="register-title">Регистрация</h1>
+
+            {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
+            {{if .Success}}<div class="alert alert-success">{{.Success}}</div>{{end}}
+
+            <form class="form" method="POST" action="/register">
+                <div class="form-field">
+                    <label for="username"></label>
+                    <input type="text" id="username" name="username" placeholder="Логин" required>
+                </div>
+
+                <div class="form-field">
+                    <label for="email"></label>
+                    <input type="email" id="email" name="email" placeholder="Почта" required>
+                </div>
+
+                <div class="form-field">
+                    <label for="password"></label>
+                    <input type="password" id="password" name="password" placeholder="Пароль" required>
+                </div>
+
+                <button type="submit" class="button-form">Зарегистрироваться</button>
+
+                <div class="form-actions-row">
+                    <span>Уже есть аккаунт?</span>
+                    <a href="/login" class="login-link">Войти</a>
+                </div>
+            </form>
+        </main>
+    </div>
+
+    {{template "footer" .}}
+
+</body>
+</html>

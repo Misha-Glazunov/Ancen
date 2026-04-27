@@ -57,12 +57,6 @@
         <button class="emotion-btn" data-emotion="💢">💢</button>
     </div>
 
-    <div id="resumeDialog" style="display: none; background: #2a2a3e; border: 2px solid #ffaa44; border-radius: 12px; padding: 15px; margin: 10px 0; text-align: center;">
-    <p>У вас есть сохранённый прогресс: <span id="resumeTime">0:00</span></p>
-    <button id="resumeBtn" style="margin-right: 10px;">Продолжить</button>
-    <button id="restartBtn">Начать сначала</button>
-</div>
-
     <canvas id="emotionChart" width="640" height="150" style="background: #2a2a3e; border-radius: 8px; margin: 10px 0;"></canvas>
 
     <h3>Эмоции зрителей:</h3>
@@ -79,6 +73,11 @@
     <ul id="comments-list">
         <li>Загрузка...</li>
     </ul>
+    <div id="pagination" style="text-align: center; margin-top: 10px;">
+        <button id="prevPageBtn">Предыдущая</button>
+        <span id="currentPage">1</span>
+        <button id="nextPageBtn">Следующая</button>
+    </div>
 </div>
 
 <!-- Video.js JS -->
@@ -268,13 +267,16 @@
     };
 }
 
-    // --- Комментарии ---
+    // --- Пагинация комментариев ---
+    let currentPage = 1;
+    const pageSize = 10;
+
     async function loadComments() {
         try {
-            const response = await fetch(`/api/comments?episode_id=${episodeId}`);
+            const response = await fetch(`/api/comments?episode_id=${episodeId}&page=${currentPage}&pageSize=${pageSize}`);
             const comments = await response.json();
             const list = document.getElementById('comments-list');
-            list.innerHTML = ''; // очищаем
+            list.innerHTML = '';
             if (comments.length === 0) {
                 list.innerHTML = '<li>Пока нет комментариев. Будьте первым!</li>';
                 return;
@@ -285,6 +287,7 @@
                 const timeStr = `${minutes}:${seconds.toString().padStart(2,'0')}`;
                 return `<li><strong>${escapeHtml(c.username)}</strong> [${timeStr}]: ${escapeHtml(c.text)}</li>`;
             }).join('');
+            document.getElementById('currentPage').innerText = currentPage;
         } catch(err) {
             console.error('Ошибка загрузки комментариев:', err);
         }
@@ -317,6 +320,18 @@
             alert('Ошибка при отправке комментария');
         }
     };
+
+    document.getElementById('prevPageBtn').addEventListener('click', () => {
+        if (currentPage > 1) {
+            currentPage--;
+            loadComments();
+        }
+    });
+
+    document.getElementById('nextPageBtn').addEventListener('click', () => {
+        currentPage++;
+        loadComments();
+    });
 
     let saveInterval = null;
     let lastSavedTimestamp = 0;
@@ -458,5 +473,6 @@
     loadComments();
     });
 </script>
+{{template "footer" .}}
 </body>
 </html>
