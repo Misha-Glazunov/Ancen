@@ -1,52 +1,201 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Ancen - просмотр</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} — смотреть с реакциями и комментариями | AniMemory</title>
+    <meta name="description" content="Смотри «{{.Title}}» на AniMemory — ставь реакции на любом таймкоде и читай комментарии других зрителей в реальном времени.">
+    <meta name="robots" content="index, follow">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;700&family=Manrope:wght@400;500;600&family=MuseoModerno:wght@400;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/tokens.css">
     <!-- Video.js CSS -->
     <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
     <style>
-        body { background: #1a1a2e; color: #eee; font-family: sans-serif; padding: 20px; }
-        .container { max-width: 800px; margin: 0 auto; }
-        .emotion-buttons { margin: 20px 0; }
-        .emotion-buttons button { font-size: 2rem; margin: 0 5px; cursor: pointer; background: #2a2a3e; border: none; border-radius: 10px; padding: 10px; transition: transform 0.1s; }
-        .emotion-buttons button:hover { transform: scale(1.1); background: #3a3a4e; }
-        #emotion-list { list-style: none; padding: 0; }
-        #emotion-list li { padding: 5px; border-bottom: 1px solid #333; }
+        * { box-sizing: border-box; }
+        body { margin: 0; background: var(--color-bg); color: var(--color-text); font-family: var(--font-base); }
+        .container { max-width: 900px; margin: 0 auto; padding: 20px 20px 60px; }
+
+        h2.episode-title {
+            font-family: var(--font-display);
+            font-weight: 400;
+            font-size: var(--fs-display-md);
+            margin: 20px 0;
+        }
+        h3 {
+            font-family: var(--font-base);
+            font-weight: 700;
+            font-size: var(--fs-heading);
+            border-bottom: 1px solid var(--color-gray-700);
+            padding-bottom: 10px;
+            margin-top: 40px;
+        }
+
+        #resumeDialog {
+            display: none;
+            background: var(--color-gray-950);
+            border: 1px solid var(--color-accent);
+            border-radius: var(--radius-lg);
+            padding: 16px;
+            margin: 16px 0;
+            text-align: center;
+        }
+        #resumeDialog button {
+            padding: 8px 20px;
+            border: none;
+            border-radius: var(--radius-md);
+            font-family: var(--font-base);
+            cursor: pointer;
+            margin: 8px 6px 0;
+        }
+        #resumeBtn { background: var(--color-accent-gradient); color: #fff; }
+        #restartBtn { background: var(--color-gray-700); color: #fff; }
+
+        /* ===== Видеоплеер: адаптивная обёртка 16:9 ===== */
+        .video-wrapper {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+        }
+        .video-wrapper .video-js {
+            width: 100% !important;
+            height: 100% !important;
+            position: absolute;
+            inset: 0;
+        }
+
+        /* ===== Кнопки эмоций ===== */
+        .emotion-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin: 20px 0;
+        }
+        .emotion-buttons button {
+            font-size: 1.8rem;
+            line-height: 1;
+            cursor: pointer;
+            background: var(--color-gray-950);
+            border: none;
+            border-radius: var(--radius-lg);
+            padding: 10px 16px;
+            transition: transform 0.1s, background 0.2s;
+        }
+        .emotion-buttons button:hover { transform: scale(1.1); background: var(--color-gray-900); }
+
+        /* ===== График эмоций ===== */
+        .chart-wrapper {
+            width: 100%;
+            margin: 10px 0;
+        }
+        #emotionChart {
+            width: 100%;
+            height: 150px;
+            background: var(--color-gray-950);
+            border-radius: var(--radius-lg);
+            display: block;
+        }
+
+        #emotion-list, #comments-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        #emotion-list li, #comments-list li {
+            padding: 10px 0;
+            border-bottom: 1px solid var(--color-gray-900);
+            font-size: var(--fs-small);
+            word-break: break-word;
+        }
+
+        .comment-form {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+            margin: 16px 0;
+        }
+        .comment-form input {
+            flex: 1;
+            min-width: 200px;
+            padding: 10px 14px;
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--color-gray-700);
+            background: var(--color-gray-950);
+            color: var(--color-text);
+            font-family: var(--font-base);
+        }
+        .comment-form button {
+            padding: 10px 22px;
+            border-radius: var(--radius-lg);
+            border: none;
+            background: var(--color-accent-gradient);
+            color: #fff;
+            font-family: var(--font-base);
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .comment-form .timecode {
+            font-size: var(--fs-small);
+            color: var(--color-gray-500);
+        }
+
+        #pagination {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            margin-top: 16px;
+        }
+        #pagination button {
+            padding: 8px 16px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--color-gray-700);
+            background: transparent;
+            color: var(--color-text);
+            cursor: pointer;
+        }
+        #pagination button:hover { border-color: var(--color-accent); color: var(--color-accent); }
+
+        @media (max-width: 768px) {
+            .container { padding: 16px 16px 40px; }
+            h2.episode-title { font-size: 24px; }
+            .emotion-buttons button { font-size: 1.5rem; padding: 8px 12px; }
+            .comment-form { flex-direction: column; align-items: stretch; }
+            .comment-form .timecode { text-align: center; }
+        }
+
+        @media (max-width: 480px) {
+            #emotionChart { height: 110px; }
+        }
     </style>
 </head>
 <body>
+{{template "header" .}}
 <div class="container">
-        <nav>
-        <a href="/">Главная</a>
-        <form method="GET" action="/search" style="display: inline-block;">
-            <input type="text" name="q" placeholder="Поиск...">
-            <button type="submit">🔍</button>
-        </form>
-        <a href="/profile">Профиль</a>
-        <a href="/logout">Выход</a>
-    </nav>
-    <hr>
-    <h2>Эпизод {{.EpisodeNum}}</h2>
+    <h2 class="episode-title">Эпизод {{.EpisodeNum}}: {{.Title}}</h2>
 
-    <div id="resumeDialog" style="display: none; background: #2a2a3e; border: 2px solid #ffaa44; border-radius: 12px; padding: 15px; margin: 10px 0; text-align: center;">
-    <p>У вас есть сохранённый прогресс: <span id="resumeTime">0:00</span></p>
-    <button id="resumeBtn" style="margin-right: 10px;">Продолжить</button>
-    <button id="restartBtn">Начать сначала</button>
+    <div id="resumeDialog">
+        <p>У вас есть сохранённый прогресс: <span id="resumeTime">0:00</span></p>
+        <button id="resumeBtn">Продолжить</button>
+        <button id="restartBtn">Начать сначала</button>
     </div>
 
     <!-- Видеоплеер -->
-    <video
-        id="my-video"
-        class="video-js vjs-default-skin"
-        controls
-        preload="auto"
-        width="640"
-        height="360"
-        data-setup="{}">
-        <source src="{{.VideoURL}}" type="video/mp4">
-        <p class="vjs-no-js">Для просмотра видео включите JavaScript</p>
-    </video>
+    <div class="video-wrapper">
+        <video
+            id="my-video"
+            class="video-js vjs-default-skin vjs-big-play-centered"
+            controls
+            preload="auto"
+            data-setup='{"fluid": true, "responsive": true}'>
+            <source src="{{.VideoURL}}" type="{{videoMimeType .VideoURL}}">
+            <p class="vjs-no-js">Для просмотра видео включите JavaScript</p>
+        </video>
+    </div>
 
     <!-- Кнопки эмоций -->
     <div class="emotion-buttons">
@@ -57,23 +206,25 @@
         <button class="emotion-btn" data-emotion="💢">💢</button>
     </div>
 
-    <canvas id="emotionChart" width="640" height="150" style="background: #2a2a3e; border-radius: 8px; margin: 10px 0;"></canvas>
+    <div class="chart-wrapper">
+        <canvas id="emotionChart"></canvas>
+    </div>
 
-    <h3>Эмоции зрителей:</h3>
+    <h3>Эмоции зрителей</h3>
     <ul id="emotion-list">
         <li>Загрузка...</li>
     </ul>
 
-    <h3>Комментарии к таймкодам</h3>
-    <div>
-        <input type="text" id="commentText" placeholder="Ваш комментарий" style="width: 70%;">
+    <h3>Комментарии к таймкоду</h3>
+    <div class="comment-form">
+        <input type="text" id="commentText" placeholder="Ваш комментарий">
         <button id="sendCommentBtn">Отправить</button>
-        <span>Таймкод: <span id="currentTimeDisplay">0:00</span></span>
+        <span class="timecode">Таймкод: <span id="currentTimeDisplay">0:00</span></span>
     </div>
     <ul id="comments-list">
         <li>Загрузка...</li>
     </ul>
-    <div id="pagination" style="text-align: center; margin-top: 10px;">
+    <div id="pagination">
         <button id="prevPageBtn">Предыдущая</button>
         <span id="currentPage">1</span>
         <button id="nextPageBtn">Следующая</button>
@@ -83,8 +234,8 @@
 <!-- Video.js JS -->
 <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
 <script>
-    var player = videojs('my-video');
-    
+    var player = videojs('my-video', { fluid: true, responsive: true });
+
     // Получаем ID эпизода из URL
     const urlParams = new URLSearchParams(window.location.search);
     let episodeId = parseInt(urlParams.get('episode'));
@@ -94,7 +245,8 @@
 
     // --- WebSocket ---
     function connectWebSocket() {
-        ws = new WebSocket(`ws://localhost:8080/ws?episode_id=${episodeId}`);
+        const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        ws = new WebSocket(`${proto}//${window.location.host}/ws?episode_id=${episodeId}`);
         ws.onopen = function() {
             console.log("✅ WebSocket connected for episode", episodeId);
         };
@@ -156,7 +308,7 @@
         console.log("sendEmotion called with", emotionType);
         const currentTime = player.currentTime();
         const timestamp = Math.floor(currentTime);
-        
+
         if (ws && ws.readyState === WebSocket.OPEN) {
             const message = JSON.stringify({
                 type: 'emotion',
@@ -205,14 +357,27 @@
         }
     }
 
+    // Канвас растягивается на всю ширину контейнера и адаптируется под devicePixelRatio,
+    // чтобы график оставался чётким на мобильных/retina экранах
+    function resizeCanvas(canvas) {
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        const ctx = canvas.getContext('2d');
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
     function drawChart(stats) {
     const canvas = document.getElementById('emotionChart');
     if (!canvas) return;
+    resizeCanvas(canvas);
     const ctx = canvas.getContext('2d');
-    const width = canvas.width;
-    const height = canvas.height;
+    const rect = canvas.getBoundingClientRect();
+    const width = rect.width;
+    const height = rect.height;
     ctx.clearRect(0, 0, width, height);
-    
+
     if (!stats || stats.length === 0) {
         ctx.fillStyle = '#aaa';
         ctx.font = '14px sans-serif';
@@ -220,18 +385,18 @@
         canvas.onclick = null;
         return;
     }
-    
+
     const maxCount = Math.max(...stats.map(s => s.count), 1);
     const barWidth = (width / stats.length) * 0.8;
     const barSpacing = (width / stats.length) * 0.2;
-    
+
     stats.forEach((stat, i) => {
         const barHeight = (stat.count / maxCount) * (height - 30);
         const x = i * (barWidth + barSpacing) + barSpacing/2;
         const y = height - barHeight - 10;
-        ctx.fillStyle = '#ffaa44';
+        ctx.fillStyle = '#d82d7e';
         ctx.fillRect(x, y, barWidth, barHeight);
-        
+
         const minutes = Math.floor(stat.interval_start / 60);
         const seconds = stat.interval_start % 60;
         const label = `${minutes}:${seconds.toString().padStart(2,'0')}`;
@@ -239,33 +404,37 @@
         ctx.font = '10px sans-serif';
         ctx.fillText(label, x+2, height-2);
     });
-    
+
     // Добавляем обработчик клика по канвасу
     canvas.onclick = function(e) {
         const rect = canvas.getBoundingClientRect();
-        const scaleX = canvas.width / rect.width;   // учитываем фактический размер canvas
-        let mouseX = (e.clientX - rect.left) * scaleX;
+        let mouseX = e.clientX - rect.left;
         if (mouseX < 0) mouseX = 0;
-        if (mouseX > canvas.width) mouseX = canvas.width;
-        const index = Math.floor(mouseX / (canvas.width / stats.length));
+        if (mouseX > rect.width) mouseX = rect.width;
+        const index = Math.floor(mouseX / (rect.width / stats.length));
         if (index >= 0 && index < stats.length) {
             const targetTime = stats[index].interval_start;
             player.currentTime(targetTime);
             player.play();
             // Небольшая визуальная обратная связь (подсветка столбца)
-            ctx.fillStyle = '#ffaa44';
             stats.forEach((stat, i) => {
                 const barHeight = (stat.count / maxCount) * (height - 30);
                 const x = i * (barWidth + barSpacing) + barSpacing/2;
                 const y = height - barHeight - 10;
-                if (i === index) ctx.fillStyle = '#ff8844';
-                else ctx.fillStyle = '#ffaa44';
+                ctx.fillStyle = (i === index) ? '#ff5fa8' : '#d82d7e';
                 ctx.fillRect(x, y, barWidth, barHeight);
             });
             setTimeout(() => drawChart(stats), 200); // перерисовать нормально
         }
     };
 }
+
+    // Перерисовываем график при изменении размера окна (смена ориентации/ресайз)
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => drawChart(currentStats), 150);
+    });
 
     // --- Пагинация комментариев ---
     let currentPage = 1;

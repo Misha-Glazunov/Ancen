@@ -3,31 +3,132 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{.Anime.Title}} — Ancen</title>
+    <title>{{.Anime.Title}} — смотреть онлайн с реакциями и комментариями | AniMemory</title>
+    <meta name="description" content="{{truncate .Anime.Description 155}}">
+    <meta name="keywords" content="{{.Anime.Title}}, смотреть {{.Anime.Title}} онлайн, {{.Anime.Genres}}, аниме реакции">
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://animemory.ru/anime/{{.Anime.ID}}">
+
+    <meta property="og:type" content="video.tv_show">
+    <meta property="og:title" content="{{.Anime.Title}} — AniMemory">
+    <meta property="og:description" content="{{truncate .Anime.Description 200}}">
+    <meta property="og:url" content="https://animemory.ru/anime/{{.Anime.ID}}">
+    <meta property="og:image" content="{{.Anime.Poster}}">
+    <meta property="og:locale" content="ru_RU">
+
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{.Anime.Title}} — AniMemory">
+    <meta name="twitter:description" content="{{truncate .Anime.Description 200}}">
+    <meta name="twitter:image" content="{{.Anime.Poster}}">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;700&family=Manrope:wght@400;500;600&family=MuseoModerno:wght@400;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/tokens.css">
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "TVSeries",
+        "name": {{.Anime.Title}},
+        "description": {{.Anime.Description}},
+        "genre": {{.Anime.Genres}},
+        "image": {{.Anime.Poster}},
+        "url": "https://animemory.ru/anime/{{.Anime.ID}}"
+    }
+    </script>
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; background: var(--color-bg); color: var(--color-text); font-family: var(--font-base); }
+        .anime-hero {
+            display: flex;
+            gap: 40px;
+            padding: 40px 140px;
+            flex-wrap: wrap;
+        }
+        .anime-poster {
+            width: 260px;
+            border-radius: var(--radius-lg);
+            object-fit: cover;
+            flex-shrink: 0;
+        }
+        .anime-info h1 {
+            font-family: var(--font-display);
+            font-size: var(--fs-display-md);
+            font-weight: 400;
+            margin: 0 0 16px;
+        }
+        .anime-info p.description {
+            font-size: var(--fs-body);
+            color: var(--color-gray-300);
+            max-width: 640px;
+            line-height: 1.5;
+        }
+        .anime-info .genres {
+            display: inline-block;
+            margin-top: 12px;
+            padding: 6px 16px;
+            border-radius: var(--radius-pill);
+            background: var(--color-purple);
+            font-family: var(--font-secondary);
+            font-size: var(--fs-small);
+        }
+        .episodes {
+            padding: 0 140px 60px;
+        }
+        .episodes h2 {
+            font-family: var(--font-base);
+            font-weight: 700;
+            font-size: var(--fs-heading);
+            border-bottom: 1px solid var(--color-gray-700);
+            padding-bottom: 12px;
+        }
+        .episode-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+        .episode-list li a {
+            display: block;
+            padding: 14px 20px;
+            background: var(--color-gray-950);
+            border-radius: var(--radius-md);
+            color: var(--color-text);
+            text-decoration: none;
+            font-size: var(--fs-body);
+            transition: background 0.2s;
+        }
+        .episode-list li a:hover { background: var(--color-gray-900); color: var(--color-accent); }
+
+        @media (max-width: 768px) {
+            .anime-hero, .episodes { padding-left: 20px; padding-right: 20px; padding-top: 24px; }
+            .anime-hero { flex-direction: column; align-items: center; text-align: center; }
+            .anime-poster { width: 100%; max-width: 260px; }
+            .anime-info h1 { font-size: 26px; }
+        }
+        @media (max-width: 420px) {
+            .episode-list li a { padding: 12px 14px; font-size: var(--fs-small); }
+        }
+    </style>
 </head>
 <body>
-    <nav>
-        <a href="/">Главная</a>
-        <form method="GET" action="/search" style="display: inline-block;">
-            <input type="text" name="q" placeholder="Поиск...">
-            <button type="submit">🔍</button>
-        </form>
-        <a href="/profile">Профиль</a>
-        <a href="/logout">Выход</a>
-    </nav>
-    <hr>
-    <h1>{{.Anime.Title}}</h1>
-    <img src="{{.Anime.Poster}}" width="200">
-    <p>{{.Anime.Description}}</p>
-    <p><strong>Жанры:</strong> {{.Anime.Genres}}</p>
-    <h3>Эпизоды</h3>
-    <ul>
-        {{range .Episodes}}
-        <li>
-            <a href="/watch?episode={{.ID}}">Серия {{.Num}}: {{.Title}}</a>
-        </li>
-        {{end}}
-    </ul>
+    {{template "header" .}}
+
+    <section class="anime-hero">
+        <img src="{{.Anime.Poster}}" alt="{{.Anime.Title}}" class="anime-poster">
+        <div class="anime-info">
+            <h1>{{.Anime.Title}}</h1>
+            <p class="description">{{.Anime.Description}}</p>
+            <span class="genres">{{.Anime.Genres}}</span>
+        </div>
+    </section>
+
+    <section class="episodes">
+        <h2>Эпизоды</h2>
+        <ul class="episode-list">
+            {{range .Episodes}}
+            <li>
+                <a href="/watch?episode={{.ID}}">Серия {{.Num}}: {{.Title}}</a>
+            </li>
+            {{end}}
+        </ul>
+    </section>
 
     {{template "footer" .}}
 </body>

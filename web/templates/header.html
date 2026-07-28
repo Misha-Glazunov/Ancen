@@ -1,0 +1,182 @@
+{{define "header"}}
+{{if .Username}}
+<!-- Header (Figma, "AniMemory залогиненый"): для авторизованных пользователей на всех страницах -->
+<header class="site-header site-header-user">
+    <a href="/" class="header-logo">
+        <img src="/static/img/header/logo_header.png" alt="AniMemory" class="header-logo-img">
+    </a>
+    <form method="GET" action="/search" class="header-search-glass">
+        <span class="search-icon" aria-hidden="true">🔍</span>
+        <input type="text" name="q" placeholder="Поиск аниме">
+    </form>
+    <nav class="header-nav">
+        <a href="/search">Новое</a>
+        <a href="/search">Популярное</a>
+        <a href="/profile">Избранное</a>
+    </nav>
+    <div class="header-account">
+        <a href="/profile" class="header-avatar" title="{{.Username}}">{{initial .Username}}</a>
+        <a href="/logout" class="header-logout" title="Выйти">Выход</a>
+    </div>
+</header>
+{{else}}
+<!-- Header_Unlogin (Figma): для неавторизованных пользователей на всех публичных страницах -->
+<header class="site-header site-header-guest">
+    <a href="/" class="header-logo">
+        <img src="/static/img/header/logo_header.png" alt="AniMemory" class="header-logo-img">
+    </a>
+    <form method="GET" action="/search" class="header-search-glass">
+        <span class="search-icon" aria-hidden="true">🔍</span>
+        <input type="text" name="q" placeholder="Поиск аниме и друзей">
+    </form>
+    <nav class="header-nav">
+        <a href="/search">Новое</a>
+        <a href="/search">Популярное</a>
+        <a href="/login">Избранное</a>
+    </nav>
+    <a href="/login" class="button-login-registry">Вход \ Регистрация</a>
+</header>
+{{end}}
+
+<style>
+.site-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    padding: 20px 140px;
+    background: var(--color-bg);
+    flex-wrap: wrap;
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+}
+.header-logo-img { width: 160px; height: auto; display: block; object-fit: contain; }
+.header-nav { display: flex; align-items: center; gap: 28px; }
+.header-nav a {
+    font-family: var(--font-base);
+    font-size: var(--fs-body);
+    color: var(--color-text);
+    text-decoration: none;
+    transition: opacity 0.2s, color 0.2s;
+}
+.header-nav a:hover { color: var(--color-accent); }
+
+/* ===== Header (авторизованный пользователь), из Figma ===== */
+.header-account { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
+.header-avatar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border-radius: var(--radius-lg);
+    background: var(--color-accent-gradient);
+    color: var(--color-text);
+    font-family: var(--font-display);
+    font-size: 18px;
+    text-decoration: none;
+    transition: opacity 0.2s;
+}
+.header-avatar:hover { opacity: 0.85; }
+.header-logout {
+    font-family: var(--font-base);
+    font-size: var(--fs-small);
+    color: var(--color-gray-300);
+    text-decoration: none;
+    transition: color 0.2s;
+}
+.header-logout:hover { color: var(--color-accent); }
+
+/* ===== Header_Unlogin (гость), 1:1 из Figma ===== */
+
+.header-search-glass {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 270px;
+    height: 40px;
+    padding: 0 16px;
+    box-sizing: border-box;
+    position: relative;
+    background: rgba(0, 0, 0, 0.01);
+    backdrop-filter: blur(20px);
+    border-radius: var(--radius-lg);
+    border: 1px solid transparent;
+    background-clip: padding-box;
+}
+.header-search-glass::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: var(--radius-lg);
+    padding: 1px;
+    background: var(--color-accent-gradient);
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+}
+.header-search-glass .search-icon { font-size: 14px; flex-shrink: 0; }
+.header-search-glass input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--color-text);
+    font-family: var(--font-base);
+    font-size: var(--fs-small);
+    min-width: 0;
+}
+.header-search-glass input::placeholder { color: rgba(255,255,255,0.5); }
+
+.button-login-registry {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 177px;
+    height: 40px;
+    background: rgba(0, 0, 0, 0.01);
+    backdrop-filter: blur(20px);
+    border-radius: var(--radius-lg);
+    font-family: var(--font-base);
+    font-size: var(--fs-body);
+    cursor: pointer;
+    color: var(--color-text);
+    text-decoration: none;
+    transition: background 0.2s, color 0.2s;
+    border: 1px solid transparent;
+    background-clip: padding-box;
+    position: relative;
+    flex-shrink: 0;
+}
+.button-login-registry::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: var(--radius-lg);
+    padding: 1px;
+    background: var(--color-accent-gradient);
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+}
+.button-login-registry:hover { background: rgb(255, 255, 255); color: #000; }
+
+@media (max-width: 768px) {
+    .site-header { padding: 16px 20px; justify-content: center; text-align: center; }
+    .header-logo-img { width: 130px; }
+    .header-nav { gap: 14px; flex-wrap: wrap; justify-content: center; width: 100%; order: 3; }
+    .header-search-glass { order: 2; width: 100%; }
+    .button-login-registry { order: 1; }
+    .header-account { order: 1; }
+}
+
+@media (max-width: 420px) {
+    .header-nav { gap: 10px; font-size: var(--fs-small); }
+    .header-nav a { font-size: var(--fs-small); }
+}
+</style>
+{{end}}

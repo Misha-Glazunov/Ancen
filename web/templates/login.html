@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Вход — AniMemory</title>
+    <meta name="robots" content="noindex, nofollow">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600&family=Manrope:wght@400;500;600&family=MuseoModerno:wght@400;700;800&family=Nothing+You+Could+Do&display=swap" rel="stylesheet">
@@ -113,6 +114,11 @@
             position: relative;
             z-index: 1;
         }
+        .login-card {
+            display: flex;
+            flex-direction: column;
+            width: 350px;
+        }
         .login-title {
             font-size: 36px;
             font-weight: 400;
@@ -121,6 +127,11 @@
         }
 
         /* ===== FORM ===== */
+        .above-form-row {
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 10px;
+        }
         .form {
             display: flex;
             flex-direction: column;
@@ -188,11 +199,11 @@
         .form-actions-row {
             display: flex;
             align-items: center;
-            justify-content: space-between;
-            width: 100%;
+            font-size: 16px;
+            color: #fff;
         }
         .register-button {
-            color: #ffffff;
+            color: var(--color-accent, #d82d7e);
             text-decoration: none;
             font-weight: 400;
             font-size: 16px;
@@ -219,7 +230,13 @@
             .header-logo-text .brand { font-size: 24px; }
             .button-login-registry { width: 140px; font-size: 14px; }
             .login-title { font-size: 28px; }
-            .form { width: 100%; max-width: 350px; }
+            .login-card, .form { width: 100%; max-width: 350px; }
+            .main { right: 0; padding: 40px 20px; }
+        }
+        @media (max-width: 400px) {
+            .header-logo-img { width: 180px; height: auto; }
+            .button-login-registry { position: static; width: 100%; margin-top: 12px; }
+            .header { flex-direction: column; align-items: flex-start; }
         }
     </style>
 </head>
@@ -239,29 +256,34 @@
 
         <!-- ===== MAIN ===== -->
         <main class="main">
-            <h1 class="login-title">Вход в аккаунт</h1>
+            <div class="login-card">
+                <h1 class="login-title">Вход в аккаунт</h1>
 
-            {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
-            {{if .Success}}<div class="alert alert-success">{{.Success}}</div>{{end}}
-
-            <form class="form" method="POST" action="/login">
-                <div class="form-field">
-                    <label for="username"></label>
-                    <input type="text" id="username" name="username" placeholder="Логин" required>
-                </div>
-
-                <div class="form-field">
-                    <label for="password"></label>
-                    <input type="password" id="password" name="password" placeholder="Пароль" required>
-                </div>
-
-                <button type="submit" class="button-form">Войти</button>
-
-                <div class="form-actions-row">
-                    <a href="/register" class="register-button">Зарегистрироваться</a>
+                <div class="above-form-row">
                     <a href="/forgot-password" class="button-forgot-password">Забыли пароль?</a>
                 </div>
-            </form>
+
+                {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
+                {{if .Success}}<div class="alert alert-success">{{.Success}}</div>{{end}}
+
+                <form class="form" method="POST" action="/login">
+                    <div class="form-field">
+                        <label for="username"></label>
+                        <input type="text" id="username" name="username" placeholder="Логин" required>
+                    </div>
+
+                    <div class="form-field">
+                        <label for="password"></label>
+                        <input type="password" id="password" name="password" placeholder="Пароль" required>
+                    </div>
+
+                    <button type="submit" class="button-form">Войти</button>
+
+                    <div class="form-actions-row">
+                        Нет аккаунта?&nbsp;<a href="/register" class="register-button">Зарегистрироваться</a>
+                    </div>
+                </form>
+            </div>
         </main>
     </div>
 

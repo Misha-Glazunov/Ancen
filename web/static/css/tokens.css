@@ -1,0 +1,44 @@
+/* Design tokens extracted from Figma (Anime WebSite page) */
+:root {
+    /* Colors */
+    --color-bg: #000000;
+    --color-text: #ffffff;
+    --color-accent: #d82d7e;
+    --color-accent-gradient: linear-gradient(135deg, #5E0135, #331C76);
+    --color-purple: #933799;
+
+    --color-gray-100: #eaebeb;
+    --color-gray-300: #d9d9d9;
+    --color-gray-500: #8b8b8b;
+    --color-gray-700: #4e4e4e;
+    --color-gray-900: #1a1a1a;
+    --color-gray-950: #161616;
+
+    /* Warm / achievement accents (profile, levels) */
+    --color-warm-red: #9a2a2a;
+    --color-warm-orange: #ff4400;
+    --color-warm-amber: #ffa600;
+    --color-warm-yellow: #ffcc00;
+
+    /* Fonts */
+    --font-display: 'MuseoModerno', sans-serif; /* logo, big headings */
+    --font-base: 'Jost', sans-serif;             /* main UI text */
+    --font-secondary: 'Manrope', sans-serif;     /* buttons, secondary text */
+    --font-accent: 'Nothing You Could Do', cursive; /* handwritten accent */
+    --font-mono: 'Roboto Mono', monospace;       /* timecodes */
+
+    /* Font sizes */
+    --fs-display-lg: 48px;
+    --fs-display-md: 32px;
+    --fs-heading: 20px;
+    --fs-body: 16px;
+    --fs-small: 14px;
+    --fs-caption: 10px;
+
+    /* Radii */
+    --radius-sm: 5px;
+    --radius-md: 9px;
+    --radius-lg: 10px;
+    --radius-xl: 15px;
+    --radius-pill: 30px;
+}

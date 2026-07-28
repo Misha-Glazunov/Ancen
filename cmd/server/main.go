@@ -7,10 +7,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io"
 	"log"
 	"net/http"
 	"net/smtp"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,16 +31,115 @@ var db *sql.DB
 var templates *template.Template
 var store *sessions.CookieStore
 
+// ---------- Защита от подбора пароля (brute-force) ----------
+
+const (
+	maxLoginAttempts  = 5
+	loginLockDuration = 15 * time.Minute
+)
+
+type loginAttemptInfo struct {
+	failedCount int
+	lockedUntil time.Time
+}
+
+var (
+	loginAttemptsMu sync.Mutex
+	loginAttempts   = make(map[string]*loginAttemptInfo)
+)
+
+// clientIP извлекает IP клиента из запроса (без учёта X-Forwarded-For, чтобы его нельзя было подделать)
+func clientIP(r *http.Request) string {
+	host := r.RemoteAddr
+	if idx := strings.LastIndex(host, ":"); idx != -1 {
+		host = host[:idx]
+	}
+	return host
+}
+
+// loginRateLimitKey — ключ лимитера: логин + IP, чтобы блокировка была привязана и к конкретному
+// аккаунту (защита жертвы), и к источнику (защита от перебора по многим логинам с одного IP)
+func loginRateLimitKey(username, ip string) string {
+	return strings.ToLower(username) + "|" + ip
+}
+
+// isLoginLocked проверяет, заблокирован ли вход для данной пары логин+IP
+func isLoginLocked(username, ip string) (bool, time.Duration) {
+	loginAttemptsMu.Lock()
+	defer loginAttemptsMu.Unlock()
+	info, ok := loginAttempts[loginRateLimitKey(username, ip)]
+	if !ok {
+		return false, 0
+	}
+	if time.Now().Before(info.lockedUntil) {
+		return true, time.Until(info.lockedUntil)
+	}
+	return false, 0
+}
+
+// registerFailedLogin увеличивает счётчик неудачных попыток и блокирует при превышении лимита
+func registerFailedLogin(username, ip string) {
+	loginAttemptsMu.Lock()
+	defer loginAttemptsMu.Unlock()
+	key := loginRateLimitKey(username, ip)
+	info, ok := loginAttempts[key]
+	if !ok {
+		info = &loginAttemptInfo{}
+		loginAttempts[key] = info
+	}
+	info.failedCount++
+	if info.failedCount >= maxLoginAttempts {
+		info.lockedUntil = time.Now().Add(loginLockDuration)
+		info.failedCount = 0
+	}
+}
+
+// resetLoginAttempts сбрасывает счётчик после успешного входа
+func resetLoginAttempts(username, ip string) {
+	loginAttemptsMu.Lock()
+	defer loginAttemptsMu.Unlock()
+	delete(loginAttempts, loginRateLimitKey(username, ip))
+}
+
 // PageData используется для передачи данных в шаблоны
 type PageData struct {
-	Title   string
-	Error   string
-	Success string
+	Title    string
+	Error    string
+	Success  string
+	Username string
 }
 
 // Инициализация: загружаем все шаблоны из папки web/templates
 func init() {
-	templates = template.Must(template.ParseGlob("web/templates/*.html"))
+	funcMap := template.FuncMap{
+		// truncate обрезает текст до N рун и добавляет многоточие — используется
+		// для формирования meta description (оптимальная длина ~150-160 символов).
+		"truncate": func(s string, n int) string {
+			r := []rune(s)
+			if len(r) <= n {
+				return s
+			}
+			return string(r[:n]) + "…"
+		},
+		// initial возвращает первую букву имени в верхнем регистре — используется
+		// для аватара-заглушки в шапке авторизованного пользователя.
+		"initial": func(s string) string {
+			r := []rune(strings.ToUpper(s))
+			if len(r) == 0 {
+				return "?"
+			}
+			return string(r[:1])
+		},
+		// videoMimeType выбирает mime для <source> — HLS-плейлисты из MinIO
+		// заливаются как .m3u8, старые демо-эпизоды остаются обычным .mp4.
+		"videoMimeType": func(url string) string {
+			if strings.HasSuffix(url, ".m3u8") {
+				return "application/x-mpegURL"
+			}
+			return "video/mp4"
+		},
+	}
+	templates = template.Must(template.New("").Funcs(funcMap).ParseGlob("web/templates/*.html"))
 	fs := http.FileServer(http.Dir("web/static"))
 	http.Handle("/static/", http.StripPrefix("/static/", fs))
 }
@@ -63,6 +165,18 @@ func getUserIDFromSession(r *http.Request) (int, error) {
 		return 0, fmt.Errorf("не авторизован")
 	}
 	return userID, nil
+}
+
+// currentUsername возвращает имя пользователя из сессии, либо "" для гостя.
+// Используется шаблоном header.html, чтобы показать гостевую (Header_Unlogin)
+// или авторизованную шапку.
+func currentUsername(r *http.Request) string {
+	session, err := store.Get(r, "ancen-session")
+	if err != nil {
+		return ""
+	}
+	username, _ := session.Values["username"].(string)
+	return username
 }
 
 // ---------- СИСТЕМА АЧИВОК И УРОВНЕЙ ----------
@@ -319,37 +433,38 @@ func createTables() {
 	if _, err := db.Exec("ALTER TABLE users ADD COLUMN email_confirmed TINYINT(1) DEFAULT 0 AFTER email"); err != nil {
 		log.Printf("ALTER TABLE users (email_confirmed) может уже существовать: %v", err)
 	}
+	// Таймкоды автоскипа опенинга/эндинга (NULL = не задано, кнопка на плеере не показывается)
+	for _, col := range []string{"intro_start_sec", "intro_end_sec", "outro_start_sec", "outro_end_sec"} {
+		if _, err := db.Exec("ALTER TABLE episodes ADD COLUMN " + col + " INT DEFAULT NULL"); err != nil {
+			log.Printf("ALTER TABLE episodes (%s) может уже существовать: %v", col, err)
+		}
+	}
 }
 
 // ---------- Обработчики ----------
 
-// preloaderHandler отдаёт страницу-прелоадер
-func preloaderHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	err := templates.ExecuteTemplate(w, "preloader.html", nil)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
-}
-
 func homeHandler(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/" {
-		// Прелоадер только для корневого пути
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		err := templates.ExecuteTemplate(w, "preloader.html", nil)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		}
-		return
-	}
-	// Все остальные пути — home.html
-	render(w, "home.html", PageData{Title: "Ancen - Главная"})
+	// Отдаём реальный контент главной страницы сразу по "/" (важно для SEO —
+	// поисковый робот должен видеть контент без JS-редиректа). Прелоадер
+	// показывается как визуальный оверлей внутри home.html и просто гаснет,
+	// без навигации на отдельный URL.
+	render(w, "home.html", PageData{
+		Title:    "AniMemory — смотри аниме и делись эмоциями в реальном времени",
+		Username: currentUsername(r),
+	})
 }
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		username := r.FormValue("username")
 		password := r.FormValue("password")
+		ip := clientIP(r)
+
+		if locked, remaining := isLoginLocked(username, ip); locked {
+			log.Printf("Login blocked (rate limit) for %s from %s, retry in %s", username, ip, remaining.Round(time.Second))
+			render(w, "login.html", PageData{Title: "Вход", Error: fmt.Sprintf("Слишком много неудачных попыток. Попробуйте снова через %d мин.", int(remaining.Minutes())+1)})
+			return
+		}
 
 		var userID int
 		var dbPassword string
@@ -357,6 +472,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			if err == sql.ErrNoRows {
 				log.Println("Login failed: user not found", username)
+				registerFailedLogin(username, ip)
 				render(w, "login.html", PageData{Title: "Вход", Error: "Неверный логин или пароль"})
 			} else {
 				log.Println("DB error:", err)
@@ -368,9 +484,12 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		err = bcrypt.CompareHashAndPassword([]byte(dbPassword), []byte(password))
 		if err != nil {
 			log.Println("Login failed: wrong password for", username)
+			registerFailedLogin(username, ip)
 			render(w, "login.html", PageData{Title: "Вход", Error: "Неверный логин или пароль"})
 			return
 		}
+
+		resetLoginAttempts(username, ip)
 
 		session, _ := store.Get(r, "ancen-session")
 		session.Values["user_id"] = userID
@@ -378,6 +497,8 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		session.Options = &sessions.Options{
 			Path:     "/",
 			HttpOnly: true,
+			Secure:   r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https",
+			SameSite: http.SameSiteLaxMode,
 			MaxAge:   86400 * 7,
 		}
 		err = session.Save(r, w)
@@ -401,6 +522,11 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 
 		if username == "" || password == "" {
 			render(w, "register.html", PageData{Title: "Регистрация", Error: "Заполните все поля"})
+			return
+		}
+
+		if len(password) < 6 {
+			render(w, "register.html", PageData{Title: "Регистрация", Error: "Пароль должен быть не менее 6 символов"})
 			return
 		}
 
@@ -525,7 +651,8 @@ func animeHandler(w http.ResponseWriter, r *http.Request) {
 	data := struct {
 		Anime    interface{}
 		Episodes []Episode
-	}{Anime: anime, Episodes: episodes}
+		Username string
+	}{Anime: anime, Episodes: episodes, Username: currentUsername(r)}
 
 	err = templates.ExecuteTemplate(w, "anime.html", data)
 	if err != nil {
@@ -552,9 +679,16 @@ func watchHandler(w http.ResponseWriter, r *http.Request) {
 		EpisodeNum int
 		Title      string
 		VideoURL   string
+		IntroStart sql.NullInt64
+		IntroEnd   sql.NullInt64
+		OutroStart sql.NullInt64
+		OutroEnd   sql.NullInt64
 	}
-	err = db.QueryRow("SELECT id, anime_id, episode_num, title, video_url FROM episodes WHERE id = ?", episodeID).Scan(
-		&episode.ID, &episode.AnimeID, &episode.EpisodeNum, &episode.Title, &episode.VideoURL)
+	err = db.QueryRow(`SELECT id, anime_id, episode_num, title, video_url,
+		intro_start_sec, intro_end_sec, outro_start_sec, outro_end_sec
+		FROM episodes WHERE id = ?`, episodeID).Scan(
+		&episode.ID, &episode.AnimeID, &episode.EpisodeNum, &episode.Title, &episode.VideoURL,
+		&episode.IntroStart, &episode.IntroEnd, &episode.OutroStart, &episode.OutroEnd)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			http.NotFound(w, r)
@@ -580,11 +714,24 @@ func watchHandler(w http.ResponseWriter, r *http.Request) {
 		VideoURL   string
 		Title      string
 		UserLevel  UserLevelInfo
+		Username   string
+		// IntroStart/IntroEnd/OutroStart/OutroEnd: 0 здесь означает "не задано" (NULL в БД),
+		// а не "начинается с 0-й секунды" — фронтенду нужно отдельно проверять,
+		// заданы ли таймкоды (например, через ненулевой IntroEnd), прежде чем показывать кнопку "Пропустить".
+		IntroStart int64
+		IntroEnd   int64
+		OutroStart int64
+		OutroEnd   int64
 	}{
 		EpisodeNum: episode.EpisodeNum,
 		VideoURL:   episode.VideoURL,
 		Title:      episode.Title,
 		UserLevel:  levelInfo,
+		Username:   currentUsername(r),
+		IntroStart: episode.IntroStart.Int64,
+		IntroEnd:   episode.IntroEnd.Int64,
+		OutroStart: episode.OutroStart.Int64,
+		OutroEnd:   episode.OutroEnd.Int64,
 	}
 
 	err = templates.ExecuteTemplate(w, "watch.html", data)
@@ -699,14 +846,24 @@ func apiEmotionsGet(w http.ResponseWriter, r *http.Request) {
 	}
 	episodeID, _ := strconv.Atoi(episodeIDStr)
 
+	page := 1
+	if p, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && p > 0 {
+		page = p
+	}
+	pageSize := 50
+	if ps, err := strconv.Atoi(r.URL.Query().Get("pageSize")); err == nil && ps > 0 && ps <= 200 {
+		pageSize = ps
+	}
+	offset := (page - 1) * pageSize
+
 	rows, err := db.Query(`
-		SELECT e.emotion_type, e.timestamp_sec, u.username 
+		SELECT e.emotion_type, e.timestamp_sec, u.username
 		FROM emotions e
 		JOIN users u ON e.user_id = u.id
 		WHERE e.episode_id = ?
 		ORDER BY e.created_at DESC
-		LIMIT 50
-	`, episodeID)
+		LIMIT ? OFFSET ?
+	`, episodeID, pageSize, offset)
 	if err != nil {
 		http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
 		return
@@ -730,9 +887,75 @@ func apiEmotionsGet(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(emotions)
 }
 
+func apiChangePasswordHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Error(w, `{"error":"Не авторизован"}`, http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		OldPassword string `json:"old_password"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"Invalid request"}`, http.StatusBadRequest)
+		return
+	}
+	if len(req.NewPassword) < 8 {
+		http.Error(w, `{"error":"Новый пароль должен быть не короче 8 символов"}`, http.StatusBadRequest)
+		return
+	}
+	if req.NewPassword == req.OldPassword {
+		http.Error(w, `{"error":"Новый пароль должен отличаться от старого"}`, http.StatusBadRequest)
+		return
+	}
+
+	var currentHash string
+	if err := db.QueryRow("SELECT password_hash FROM users WHERE id = ?", userID).Scan(&currentHash); err != nil {
+		http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
+		return
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(currentHash), []byte(req.OldPassword)); err != nil {
+		http.Error(w, `{"error":"Неверный текущий пароль"}`, http.StatusUnauthorized)
+		return
+	}
+
+	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
+		return
+	}
+	if _, err := db.Exec("UPDATE users SET password_hash = ? WHERE id = ?", string(newHash), userID); err != nil {
+		http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
+		return
+	}
+	fmt.Fprint(w, `{"status":"ok"}`)
+}
+
 // WebSocket upgrader
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
+	// Разрешаем апгрейд только с того же хоста, что и сам сервер (защита от
+	// Cross-Site WebSocket Hijacking: без этой проверки чужой сайт мог бы
+	// открыть WS-соединение от имени залогиненного пользователя, используя
+	// его cookie, которую браузер прикрепляет автоматически).
+	CheckOrigin: func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			// Запрос не от браузера (нет Origin) — например, curl/wscat при разработке
+			return true
+		}
+		u, err := url.Parse(origin)
+		if err != nil {
+			return false
+		}
+		return u.Host == r.Host
+	},
 }
 
 // Сообщение от клиента
@@ -1108,15 +1331,170 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := struct {
-		Query   string
-		Results []Anime
-	}{Query: query, Results: results}
+		Query    string
+		Results  []Anime
+		Username string
+	}{Query: query, Results: results, Username: currentUsername(r)}
 	templates.ExecuteTemplate(w, "search.html", data)
+}
+
+// robotsHandler отдаёт robots.txt — закрывает от индексации приватные/служебные
+// разделы и указывает на sitemap.xml
+func robotsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	fmt.Fprint(w, `User-agent: *
+Disallow: /login
+Disallow: /register
+Disallow: /profile
+Disallow: /forgot-password
+Disallow: /new-password
+Disallow: /search
+Disallow: /api/
+Disallow: /ws
+
+Sitemap: https://animemory.ru/sitemap.xml
+`)
+}
+
+// sitemapHandler динамически формирует sitemap.xml по всем аниме и эпизодам в БД
+func sitemapHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+
+	var sb strings.Builder
+	sb.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
+	sb.WriteString(`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">` + "\n")
+	sb.WriteString("  <url><loc>https://animemory.ru/</loc><changefreq>daily</changefreq><priority>1.0</priority></url>\n")
+
+	rows, err := db.Query("SELECT id FROM anime")
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var id int
+			if err := rows.Scan(&id); err != nil {
+				continue
+			}
+			fmt.Fprintf(&sb, "  <url><loc>https://animemory.ru/anime/%d</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>\n", id)
+		}
+	}
+
+	epRows, err := db.Query("SELECT id FROM episodes")
+	if err == nil {
+		defer epRows.Close()
+		for epRows.Next() {
+			var id int
+			if err := epRows.Scan(&id); err != nil {
+				continue
+			}
+			fmt.Fprintf(&sb, "  <url><loc>https://animemory.ru/watch?episode=%d</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>\n", id)
+		}
+	}
+
+	sb.WriteString("</urlset>\n")
+	fmt.Fprint(w, sb.String())
+}
+
+// adminUploadVideoHandler принимает сырой видеофайл, транскодирует его в adaptive
+// HLS (ffmpeg) и заливает в MinIO. Защищено статическим токеном из ADMIN_UPLOAD_TOKEN —
+// временно, до появления настоящей админки с ролями (см. 13_Дальнейшие_улучшения).
+func adminUploadVideoHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	if r.FormValue("token") != os.Getenv("ADMIN_UPLOAD_TOKEN") || os.Getenv("ADMIN_UPLOAD_TOKEN") == "" {
+		http.Error(w, `{"error":"Forbidden"}`, http.StatusForbidden)
+		return
+	}
+
+	animeID, err1 := strconv.Atoi(r.FormValue("anime_id"))
+	episodeNum, err2 := strconv.Atoi(r.FormValue("episode_num"))
+	title := r.FormValue("title")
+	if err1 != nil || err2 != nil || title == "" {
+		http.Error(w, `{"error":"anime_id, episode_num и title обязательны"}`, http.StatusBadRequest)
+		return
+	}
+
+	file, header, err := r.FormFile("video")
+	if err != nil {
+		http.Error(w, `{"error":"Файл видео (поле video) обязателен"}`, http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	tmpDir, err := os.MkdirTemp("", "ancen-upload-*")
+	if err != nil {
+		http.Error(w, `{"error":"Ошибка временной директории"}`, http.StatusInternalServerError)
+		return
+	}
+	defer os.RemoveAll(tmpDir)
+
+	inputPath := filepath.Join(tmpDir, "input"+filepath.Ext(header.Filename))
+	dst, err := os.Create(inputPath)
+	if err != nil {
+		http.Error(w, `{"error":"Ошибка сохранения файла"}`, http.StatusInternalServerError)
+		return
+	}
+	if _, err := io.Copy(dst, file); err != nil {
+		dst.Close()
+		http.Error(w, `{"error":"Ошибка записи файла"}`, http.StatusInternalServerError)
+		return
+	}
+	dst.Close()
+
+	outDir := filepath.Join(tmpDir, "hls")
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		http.Error(w, `{"error":"Ошибка HLS-директории"}`, http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Транскодирую видео anime_id=%d episode_num=%d...", animeID, episodeNum)
+	if err := transcodeToHLS(inputPath, outDir); err != nil {
+		log.Println("ffmpeg error:", err)
+		http.Error(w, `{"error":"Ошибка транскодирования"}`, http.StatusInternalServerError)
+		return
+	}
+
+	objectPrefix := fmt.Sprintf("anime/%d/episode/%d", animeID, episodeNum)
+	masterURL, err := uploadDir(r.Context(), outDir, objectPrefix)
+	if err != nil {
+		log.Println("MinIO upload error:", err)
+		http.Error(w, `{"error":"Ошибка загрузки в MinIO"}`, http.StatusInternalServerError)
+		return
+	}
+
+	var episodeID int
+	err = db.QueryRow("SELECT id FROM episodes WHERE anime_id = ? AND episode_num = ?", animeID, episodeNum).Scan(&episodeID)
+	if err == sql.ErrNoRows {
+		res, err := db.Exec("INSERT INTO episodes (anime_id, episode_num, title, video_url) VALUES (?, ?, ?, ?)", animeID, episodeNum, title, masterURL)
+		if err != nil {
+			http.Error(w, `{"error":"Ошибка записи в БД"}`, http.StatusInternalServerError)
+			return
+		}
+		id, _ := res.LastInsertId()
+		episodeID = int(id)
+	} else if err != nil {
+		http.Error(w, `{"error":"Ошибка запроса к БД"}`, http.StatusInternalServerError)
+		return
+	} else {
+		if _, err := db.Exec("UPDATE episodes SET video_url = ?, title = ? WHERE id = ?", masterURL, title, episodeID); err != nil {
+			http.Error(w, `{"error":"Ошибка обновления БД"}`, http.StatusInternalServerError)
+			return
+		}
+	}
+
+	fmt.Fprintf(w, `{"episode_id":%d,"video_url":%q}`, episodeID, masterURL)
 }
 
 func logoutHandler(w http.ResponseWriter, r *http.Request) {
 	session, _ := store.Get(r, "ancen-session")
-	session.Options.MaxAge = -1
+	session.Options = &sessions.Options{
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https",
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+	}
 	session.Save(r, w)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
@@ -1474,6 +1852,8 @@ func main() {
 	// Создаём таблицы для системы ачивок
 	createTables()
 
+	initMinioClient()
+
 	go hub.run()
 
 	// Регистрация маршрутов
@@ -1493,6 +1873,8 @@ func main() {
 	http.HandleFunc("/forgot-password", forgotPasswordHandler)
 	http.HandleFunc("/new-password", newPasswordHandler)
 	http.HandleFunc("/logout", logoutHandler)
+	http.HandleFunc("/robots.txt", robotsHandler)
+	http.HandleFunc("/sitemap.xml", sitemapHandler)
 	http.HandleFunc("/api/progress", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPost:
@@ -1509,6 +1891,8 @@ func main() {
 	http.HandleFunc("/api/achievements", apiAchievementsGet)
 	http.HandleFunc("/api/level", apiLevelGet)
 	http.HandleFunc("/api/achievements/all", apiAllAchievementsGet)
+	http.HandleFunc("/api/admin/upload-video", adminUploadVideoHandler)
+	http.HandleFunc("/api/change-password", apiChangePasswordHandler)
 
 	log.Println("Сервер Ancen запущен на http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))

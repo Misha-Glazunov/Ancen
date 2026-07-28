@@ -1,26 +1,93 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Поиск — Ancen</title>
-    <link rel="stylesheet" href="/static/css/style.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Поиск аниме — AniMemory</title>
+    <meta name="description" content="Найди аниме по названию, жанру или описанию на AniMemory.">
+    <meta name="robots" content="noindex, follow">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;700&family=Manrope:wght@400;500;600&family=MuseoModerno:wght@400;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/tokens.css">
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; background: var(--color-bg); color: var(--color-text); font-family: var(--font-base); }
+        .container { max-width: 1100px; margin: 0 auto; padding: 40px 20px; }
+        h1 {
+            font-family: var(--font-display);
+            font-weight: 400;
+            font-size: var(--fs-display-md);
+            margin-bottom: 24px;
+        }
+        .search-form {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 30px;
+        }
+        .search-form input {
+            flex: 1;
+            padding: 12px 16px;
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--color-gray-700);
+            background: var(--color-gray-950);
+            color: var(--color-text);
+            font-family: var(--font-base);
+            font-size: var(--fs-body);
+        }
+        .search-form button {
+            padding: 12px 28px;
+            border-radius: var(--radius-lg);
+            border: none;
+            background: var(--color-accent-gradient);
+            color: var(--color-text);
+            font-family: var(--font-base);
+            font-size: var(--fs-body);
+            cursor: pointer;
+        }
+        .anime-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 20px;
+        }
+        .anime-card a {
+            display: block;
+            text-decoration: none;
+            color: var(--color-text);
+        }
+        .anime-poster {
+            width: 100%;
+            aspect-ratio: 2/3;
+            object-fit: cover;
+            border-radius: var(--radius-md);
+        }
+        .anime-card h3 {
+            font-size: var(--fs-body);
+            font-weight: 500;
+            margin: 10px 0 4px;
+        }
+        .anime-card p {
+            font-size: var(--fs-small);
+            color: var(--color-gray-500);
+            margin: 0;
+        }
+        .anime-card:hover h3 { color: var(--color-accent); }
+
+        @media (max-width: 600px) {
+            .container { padding: 24px 16px; }
+            h1 { font-size: 26px; }
+            .search-form { flex-direction: column; }
+            .search-form button { width: 100%; }
+            .anime-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 14px; }
+        }
+    </style>
 </head>
 <body>
+{{template "header" .}}
 <div class="container">
-    <nav>
-        <a href="/">Главная</a>
-        <form method="GET" action="/search" style="display: inline-block;">
-            <input type="text" name="q" placeholder="Поиск..." value="{{.Query}}">
-            <button type="submit">🔍</button>
-        </form>
-        <a href="/profile">Профиль</a>
-        <a href="/logout">Выход</a>
-    </nav>
-    <hr>
     <h1>Поиск аниме</h1>
-    <!-- остальное без изменений, но можно оставить и дополнительную форму -->
-    <form method="GET" action="/search">
-        <input type="text" name="q" placeholder="Название, жанр, описание..." value="{{.Query}}" style="width: 70%;">
+    <form method="GET" action="/search" class="search-form">
+        <input type="text" name="q" placeholder="Название, жанр, описание..." value="{{.Query}}">
         <button type="submit">Найти</button>
     </form>
     {{if .Query}}
@@ -72,15 +139,17 @@
     }
 
     function setupPagination() {
-        document.getElementById('prevPageBtn').addEventListener('click', () => {
+        const prevBtn = document.getElementById('prevPageBtn');
+        const nextBtn = document.getElementById('nextPageBtn');
+        if (!prevBtn || !nextBtn) return;
+        prevBtn.addEventListener('click', () => {
             if (currentPage > 1) {
                 currentPage--;
                 updateSearchResults();
                 document.getElementById('currentPage').innerText = currentPage;
             }
         });
-
-        document.getElementById('nextPageBtn').addEventListener('click', () => {
+        nextBtn.addEventListener('click', () => {
             currentPage++;
             updateSearchResults();
             document.getElementById('currentPage').innerText = currentPage;

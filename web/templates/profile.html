@@ -1,42 +1,89 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Профиль — Ancen</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Профиль — AniMemory</title>
+    <meta name="robots" content="noindex, nofollow">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;700&family=Manrope:wght@400;500;600&family=MuseoModerno:wght@400;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/tokens.css">
     <style>
-        body { background: #1a1a2e; color: #eee; font-family: sans-serif; padding: 20px; }
-        .container { max-width: 800px; margin: 0 auto; }
-        nav a { color: #ffaa44; margin-right: 15px; text-decoration: none; }
-        nav a:hover { text-decoration: underline; }
-        .level-box { background: #2a2a3e; border-radius: 12px; padding: 20px; margin: 20px 0; text-align: center; }
-        .level-box .level { font-size: 3rem; font-weight: bold; color: #ffaa44; }
-        .level-box .xp-bar { background: #3a3a4e; border-radius: 10px; height: 20px; margin: 10px 0; overflow: hidden; }
-        .level-box .xp-fill { background: linear-gradient(90deg, #ffaa44, #ff8844); height: 100%; border-radius: 10px; transition: width 0.3s; }
-        .stats { display: flex; justify-content: space-around; margin: 20px 0; }
-        .stat-item { text-align: center; background: #2a2a3e; padding: 15px; border-radius: 10px; min-width: 100px; }
-        .stat-item .num { font-size: 1.5rem; font-weight: bold; color: #ffaa44; }
-        .achievements { margin: 20px 0; }
-        .achievement { display: inline-block; background: #2a2a3e; border-radius: 10px; padding: 10px 15px; margin: 5px; text-align: center; }
+        * { box-sizing: border-box; }
+        body { margin: 0; background: var(--color-bg); color: var(--color-text); font-family: var(--font-base); }
+        .container { max-width: 900px; margin: 0 auto; padding: 40px 20px; }
+        h2.username {
+            font-family: var(--font-display);
+            font-weight: 400;
+            font-size: var(--fs-display-md);
+            margin-bottom: 24px;
+        }
+        .level-box {
+            background: var(--color-gray-950);
+            border-radius: var(--radius-xl);
+            padding: 24px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        .level-box .level {
+            font-family: var(--font-display);
+            font-size: var(--fs-display-md);
+            color: var(--color-accent);
+        }
+        .level-box .xp-bar { background: var(--color-gray-700); border-radius: var(--radius-pill); height: 16px; margin: 12px 0; overflow: hidden; }
+        .level-box .xp-fill { background: var(--color-accent-gradient); height: 100%; transition: width 0.3s; }
+
+        .stats { display: flex; justify-content: space-around; margin: 24px 0; gap: 16px; flex-wrap: wrap; }
+        .stat-item {
+            text-align: center;
+            background: var(--color-gray-950);
+            padding: 18px;
+            border-radius: var(--radius-lg);
+            min-width: 120px;
+            flex: 1;
+        }
+        .stat-item .num { font-family: var(--font-display); font-size: 28px; color: var(--color-accent); }
+
+        h3 { font-family: var(--font-base); font-weight: 700; font-size: var(--fs-heading); border-bottom: 1px solid var(--color-gray-700); padding-bottom: 10px; }
+
+        .achievements { display: flex; flex-wrap: wrap; gap: 10px; margin: 20px 0; }
+        .achievement {
+            background: var(--color-gray-950);
+            border-radius: var(--radius-lg);
+            padding: 14px 18px;
+            text-align: center;
+            min-width: 110px;
+        }
         .achievement .icon { font-size: 2rem; }
-        .achievement .name { font-size: 0.9rem; color: #ccc; }
-        .achievement .date { font-size: 0.7rem; color: #888; }
-        .no-achievements { color: #888; text-align: center; padding: 20px; }
-        hr { border-color: #333; }
+        .achievement .name { font-size: var(--fs-small); color: var(--color-gray-300); }
+        .achievement .date { font-size: 12px; color: var(--color-gray-500); }
+        .no-achievements { color: var(--color-gray-500); text-align: center; padding: 20px; }
+
+        .back-link {
+            display: inline-block;
+            margin-top: 20px;
+            color: var(--color-text);
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+        .back-link:hover { color: var(--color-accent); }
+
+        @media (max-width: 600px) {
+            .container { padding: 24px 16px; }
+            h2.username { font-size: 26px; }
+            .level-box .level { font-size: 26px; }
+            .stats { gap: 10px; }
+            .stat-item { min-width: 0; padding: 14px 10px; }
+            .stat-item .num { font-size: 22px; }
+            .achievement { min-width: 90px; padding: 12px 14px; }
+        }
     </style>
 </head>
 <body>
+{{template "header" .}}
 <div class="container">
-    <nav>
-        <a href="/">Главная</a>
-        <form method="GET" action="/search" style="display: inline-block;">
-            <input type="text" name="q" placeholder="Поиск...">
-            <button type="submit">🔍</button>
-        </form>
-        <a href="/profile">Профиль</a>
-        <a href="/logout">Выход</a>
-    </nav>
-    <hr>
-    <h2>Профиль пользователя: {{.Username}}</h2>
+    <h2 class="username">{{.Username}}</h2>
 
     {{if .Level}}
     <div class="level-box">
@@ -81,7 +128,7 @@
         {{end}}
     </div>
 
-    <a href="/">На главную</a>
+    <a href="/" class="back-link">На главную</a>
 </div>
 {{template "footer" .}}
 </body>
