@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -9,6 +10,7 @@ import (
 	"html/template"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"net/smtp"
 	"net/url"
@@ -24,7 +26,12 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/joho/godotenv"
 	"golang.org/x/crypto/bcrypt"
+
+	"Ancen/internal/auth"
 )
+
+// bcryptCost — ТЗ требует cost=12 (сильнее дефолтного cost=10 из golang.org/x/crypto).
+const bcryptCost = 12
 
 // Глобальные переменные
 var db *sql.DB
@@ -101,6 +108,72 @@ func resetLoginAttempts(username, ip string) {
 	delete(loginAttempts, loginRateLimitKey(username, ip))
 }
 
+// ---------- Мидлвары безопасности ----------
+
+// securityHeaders выставляет заголовки, снижающие ущерб от XSS/clickjacking/
+// MIME-sniffing. CSP разрешает 'unsafe-inline' для script-src/style-src —
+// ponytail: шаблоны используют инлайн-скрипты и стили (watch.html и др.),
+// переход на nonce-based CSP потребует переписать фронтенд, это отдельная
+// задача. connect-src/media-src подключают MinIO по MINIO_PUBLIC_BASE_URL,
+// чтобы видео/HLS-сегменты вообще грузились под CSP.
+func securityHeaders(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		mediaSrc := "'self'"
+		if base := os.Getenv("MINIO_PUBLIC_BASE_URL"); base != "" {
+			if u, err := url.Parse(base); err == nil && u.Host != "" {
+				mediaSrc += " " + u.Scheme + "://" + u.Host
+			}
+		}
+		csp := strings.Join([]string{
+			"default-src 'self'",
+			"script-src 'self' 'unsafe-inline' https://vjs.zencdn.net",
+			"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://vjs.zencdn.net",
+			"font-src 'self' https://fonts.gstatic.com data:",
+			"img-src 'self' data: https:",
+			"media-src " + mediaSrc + " https://vjs.zencdn.net",
+			"connect-src 'self' ws: wss: " + mediaSrc,
+			"frame-ancestors 'none'",
+			"base-uri 'self'",
+			"form-action 'self'",
+		}, "; ")
+		w.Header().Set("Content-Security-Policy", csp)
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		next(w, r)
+	}
+}
+
+// csrfProtect проверяет Origin (с фолбэком на Referer, если Origin отсутствует)
+// для мутирующих методов — вторая линия защиты от CSRF поверх SameSite=Strict
+// на сессионной cookie. Запросы вообще без Origin и Referer (curl, серверные
+// клиенты) пропускаются — как и в sameOrigin для WS.
+func csrfProtect(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+			checkURL := r.Header.Get("Origin")
+			if checkURL == "" {
+				checkURL = r.Header.Get("Referer")
+			}
+			if checkURL != "" {
+				u, err := url.Parse(checkURL)
+				if err != nil || u.Host != r.Host {
+					http.Error(w, `{"error":"CSRF check failed"}`, http.StatusForbidden)
+					return
+				}
+			}
+		}
+		next(w, r)
+	}
+}
+
+// secureHandle регистрирует хендлер с обеими мидлварами безопасности — все
+// маршруты в main() должны идти через неё вместо голого http.HandleFunc.
+func secureHandle(pattern string, h http.HandlerFunc) {
+	http.HandleFunc(pattern, securityHeaders(csrfProtect(h)))
+}
+
 // PageData используется для передачи данных в шаблоны
 type PageData struct {
 	Title    string
@@ -155,7 +228,14 @@ func render(w http.ResponseWriter, tmpl string, data PageData) {
 
 // ---------- Вспомогательные функции ----------
 
+// getUserIDFromSession — единая точка проверки авторизации для всех хендлеров.
+// Режим переключается через AUTH_MODE: "cookie" (по умолчанию) читает
+// gorilla/sessions cookie, "jwt" — access-токен из заголовка Authorization
+// или cookie access_token (см. auth.CurrentMode).
 func getUserIDFromSession(r *http.Request) (int, error) {
+	if auth.CurrentMode() == auth.ModeJWT {
+		return userIDFromAccessToken(r)
+	}
 	session, err := store.Get(r, "ancen-session")
 	if err != nil {
 		return 0, err
@@ -167,10 +247,118 @@ func getUserIDFromSession(r *http.Request) (int, error) {
 	return userID, nil
 }
 
-// currentUsername возвращает имя пользователя из сессии, либо "" для гостя.
-// Используется шаблоном header.html, чтобы показать гостевую (Header_Unlogin)
-// или авторизованную шапку.
+func userIDFromAccessToken(r *http.Request) (int, error) {
+	token, ok := auth.BearerToken(r)
+	if !ok {
+		if c, err := r.Cookie("access_token"); err == nil {
+			token = c.Value
+			ok = true
+		}
+	}
+	if !ok || token == "" {
+		return 0, fmt.Errorf("не авторизован")
+	}
+	claims, err := auth.ParseAccessToken(token)
+	if err != nil {
+		return 0, err
+	}
+	return claims.UserID, nil
+}
+
+// startAuthSession логинит пользователя после проверки пароля: в режиме
+// cookie сохраняет gorilla/sessions cookie как раньше, в режиме jwt — выдаёт
+// access/refresh токены и кладёт их в HttpOnly-cookie (access_token,
+// refresh_token), чтобы обычная серверная навигация продолжала работать без
+// изменений на фронтенде; API-клиенты вместо этого могут слать access-токен
+// через заголовок Authorization: Bearer.
+func startAuthSession(w http.ResponseWriter, r *http.Request, userID int, username string) error {
+	secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+
+	if auth.CurrentMode() == auth.ModeJWT {
+		accessToken, err := auth.IssueAccessToken(userID, isUserAdmin(userID))
+		if err != nil {
+			return err
+		}
+		refreshToken, err := auth.IssueRefreshToken(db, userID)
+		if err != nil {
+			return err
+		}
+		setAuthCookies(w, secure, accessToken, refreshToken)
+		return nil
+	}
+
+	session, _ := store.Get(r, "ancen-session")
+	session.Values["user_id"] = userID
+	session.Values["username"] = username
+	session.Options = &sessions.Options{
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   86400 * 7,
+	}
+	return session.Save(r, w)
+}
+
+func setAuthCookies(w http.ResponseWriter, secure bool, accessToken, refreshToken string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     "access_token",
+		Value:    accessToken,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   int(auth.AccessTokenTTL.Seconds()),
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     "refresh_token",
+		Value:    refreshToken,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   int(auth.RefreshTokenTTL.Seconds()),
+	})
+}
+
+func clearAuthCookies(w http.ResponseWriter, secure bool) {
+	for _, name := range []string{"access_token", "refresh_token"} {
+		http.SetCookie(w, &http.Cookie{
+			Name:     name,
+			Value:    "",
+			Path:     "/",
+			HttpOnly: true,
+			Secure:   secure,
+			SameSite: http.SameSiteStrictMode,
+			MaxAge:   -1,
+		})
+	}
+}
+
+// isUserAdmin проверяет роль is_admin в БД — используется для защиты
+// чувствительных операций (например, /api/admin/upload-video) независимо
+// от режима аутентификации.
+func isUserAdmin(userID int) bool {
+	var isAdmin bool
+	if err := db.QueryRow("SELECT is_admin FROM users WHERE id = ?", userID).Scan(&isAdmin); err != nil {
+		return false
+	}
+	return isAdmin
+}
+
+// currentUsername возвращает имя пользователя для гостевого/авторизованного
+// хедера, либо "" для гостя. В режиме cookie берётся из сессии без похода в
+// БД; в режиме jwt — из access-токена по userID.
 func currentUsername(r *http.Request) string {
+	if auth.CurrentMode() == auth.ModeJWT {
+		userID, err := userIDFromAccessToken(r)
+		if err != nil {
+			return ""
+		}
+		var username string
+		db.QueryRow("SELECT username FROM users WHERE id = ?", userID).Scan(&username)
+		return username
+	}
 	session, err := store.Get(r, "ancen-session")
 	if err != nil {
 		return ""
@@ -502,6 +690,15 @@ func createTables() {
 			FOREIGN KEY (user_id) REFERENCES users(id),
 			FOREIGN KEY (episode_id) REFERENCES episodes(id)
 		)`,
+		`CREATE TABLE IF NOT EXISTS refresh_tokens (
+			id INT AUTO_INCREMENT PRIMARY KEY,
+			user_id INT NOT NULL,
+			token_hash VARCHAR(64) NOT NULL UNIQUE,
+			expires_at DATETIME NOT NULL,
+			revoked_at DATETIME DEFAULT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(id)
+		)`,
 	}
 	for _, q := range tables {
 		if _, err := db.Exec(q); err != nil {
@@ -517,6 +714,11 @@ func createTables() {
 	// Добавляем поле email_confirmed в users, если его нет
 	if _, err := db.Exec("ALTER TABLE users ADD COLUMN email_confirmed TINYINT(1) DEFAULT 0 AFTER email"); err != nil {
 		log.Printf("ALTER TABLE users (email_confirmed) может уже существовать: %v", err)
+	}
+	// Роль администратора — заменяет статический ADMIN_UPLOAD_TOKEN, назначается
+	// вручную через SQL (UPDATE users SET is_admin = 1 WHERE id = ...), пока нет админ-панели
+	if _, err := db.Exec("ALTER TABLE users ADD COLUMN is_admin TINYINT(1) DEFAULT 0 AFTER password_hash"); err != nil {
+		log.Printf("ALTER TABLE users (is_admin) может уже существовать: %v", err)
 	}
 	// Таймкоды автоскипа опенинга/эндинга (NULL = не задано, кнопка на плеере не показывается)
 	for _, col := range []string{"intro_start_sec", "intro_end_sec", "outro_start_sec", "outro_end_sec"} {
@@ -576,18 +778,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 
 		resetLoginAttempts(username, ip)
 
-		session, _ := store.Get(r, "ancen-session")
-		session.Values["user_id"] = userID
-		session.Values["username"] = username
-		session.Options = &sessions.Options{
-			Path:     "/",
-			HttpOnly: true,
-			Secure:   r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https",
-			SameSite: http.SameSiteLaxMode,
-			MaxAge:   86400 * 7,
-		}
-		err = session.Save(r, w)
-		if err != nil {
+		if err := startAuthSession(w, r, userID, username); err != nil {
 			log.Println("Session save error:", err)
 			render(w, "login.html", PageData{Title: "Вход", Error: "Ошибка сохранения сессии"})
 			return
@@ -610,12 +801,17 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		if r.FormValue("consent") == "" {
+			render(w, "register.html", PageData{Title: "Регистрация", Error: "Нужно согласие на обработку персональных данных"})
+			return
+		}
+
 		if len(password) < 6 {
 			render(w, "register.html", PageData{Title: "Регистрация", Error: "Пароль должен быть не менее 6 символов"})
 			return
 		}
 
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
 		if err != nil {
 			render(w, "register.html", PageData{Title: "Регистрация", Error: "Ошибка хеширования пароля"})
 			return
@@ -623,7 +819,13 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 
 		var result sql.Result
 		if email != "" {
-			result, err = db.Exec("INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)", username, email, string(hashedPassword))
+			encryptedEmail, encErr := encryptEmail(email)
+			if encErr != nil {
+				log.Println("Email encryption error:", encErr)
+				render(w, "register.html", PageData{Title: "Регистрация", Error: "Ошибка обработки email"})
+				return
+			}
+			result, err = db.Exec("INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)", username, encryptedEmail, string(hashedPassword))
 		} else {
 			result, err = db.Exec("INSERT INTO users (username, password_hash) VALUES (?, ?)", username, string(hashedPassword))
 		}
@@ -1011,7 +1213,7 @@ func apiChangePasswordHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcryptCost)
 	if err != nil {
 		http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
 		return
@@ -1023,24 +1225,103 @@ func apiChangePasswordHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, `{"status":"ok"}`)
 }
 
+// apiUserDeleteHandler — POST /api/user/delete: право на удаление персональных
+// данных (GDPR/152-ФЗ). Требует подтверждения текущим паролем — необратимая
+// операция, одной валидной сессии для неё недостаточно. Удаляет пользователя
+// и все данные, ссылающиеся на него по user_id, одной транзакцией.
+func apiUserDeleteHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Error(w, `{"error":"Не авторизован"}`, http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"Invalid request"}`, http.StatusBadRequest)
+		return
+	}
+
+	var currentHash string
+	if err := db.QueryRow("SELECT password_hash FROM users WHERE id = ?", userID).Scan(&currentHash); err != nil {
+		http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
+		return
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(currentHash), []byte(req.Password)); err != nil {
+		http.Error(w, `{"error":"Неверный пароль"}`, http.StatusUnauthorized)
+		return
+	}
+
+	if err := deleteUserData(userID); err != nil {
+		log.Println("apiUserDeleteHandler:", err)
+		http.Error(w, `{"error":"Ошибка удаления данных"}`, http.StatusInternalServerError)
+		return
+	}
+
+	secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	clearAuthCookies(w, secure)
+	session, _ := store.Get(r, "ancen-session")
+	session.Options = &sessions.Options{Path: "/", MaxAge: -1}
+	session.Save(r, w)
+
+	fmt.Fprint(w, `{"status":"ok"}`)
+}
+
+// deleteUserData удаляет пользователя и все зависящие от него по user_id
+// записи одной транзакцией — таблицы без ON DELETE CASCADE иначе оставили бы
+// висячие ссылки.
+func deleteUserData(userID int) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	tables := []string{
+		"emotions", "comments", "user_xp", "user_xp_daily",
+		"user_achievements", "user_progress", "password_resets", "refresh_tokens",
+	}
+	for _, table := range tables {
+		if _, err := tx.Exec("DELETE FROM "+table+" WHERE user_id = ?", userID); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec("DELETE FROM users WHERE id = ?", userID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // WebSocket upgrader
 var upgrader = websocket.Upgrader{
 	// Разрешаем апгрейд только с того же хоста, что и сам сервер (защита от
 	// Cross-Site WebSocket Hijacking: без этой проверки чужой сайт мог бы
 	// открыть WS-соединение от имени залогиненного пользователя, используя
 	// его cookie, которую браузер прикрепляет автоматически).
-	CheckOrigin: func(r *http.Request) bool {
-		origin := r.Header.Get("Origin")
-		if origin == "" {
-			// Запрос не от браузера (нет Origin) — например, curl/wscat при разработке
-			return true
-		}
-		u, err := url.Parse(origin)
-		if err != nil {
-			return false
-		}
-		return u.Host == r.Host
-	},
+	CheckOrigin: sameOrigin,
+}
+
+// sameOrigin сверяет заголовок Origin запроса с хостом сервера — общая проверка
+// для WS-апгрейда (защита от CSWSH) и для CSRF-мидлвары мутирующих HTTP-запросов.
+func sameOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		// Запрос не от браузера (нет Origin) — например, curl/wscat при разработке,
+		// или старый браузер, не проставляющий Origin на same-site POST
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	return u.Host == r.Host
 }
 
 // Сообщение от клиента
@@ -1118,15 +1399,9 @@ func (h *Hub) run() {
 // WebSocket endpoint
 func wsHandler(w http.ResponseWriter, r *http.Request) {
 	log.Println("🔥 wsHandler вызван")
-	session, err := store.Get(r, "ancen-session")
+	userID, err := getUserIDFromSession(r)
 	if err != nil {
-		log.Println("Session get error:", err)
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-	userID, ok := session.Values["user_id"].(int)
-	if !ok || userID == 0 {
-		log.Println("user_id not found")
+		log.Println("Unauthorized ws connection:", err)
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -1171,7 +1446,7 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 				log.Println("ReadJSON error:", err)
 				break
 			}
-			log.Printf("📨 Received WS message: %+v", msg)
+			log.Printf("📨 Received WS message: type=%s episode_id=%d emotion_type=%s", msg.Type, msg.EpisodeID, msg.EmotionType)
 			if msg.Type == "emotion" && msg.EpisodeID == episodeID {
 				_, err = db.Exec("INSERT INTO emotions (user_id, episode_id, timestamp_sec, emotion_type) VALUES (?, ?, ?, ?)",
 					userID, msg.EpisodeID, msg.TimestampSec, msg.EmotionType)
@@ -1478,19 +1753,58 @@ func sitemapHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, sb.String())
 }
 
+// maxUploadBytes — верхняя граница размера одной серии при ручной загрузке.
+// ponytail: захардкожено, вынести в конфиг/env, если понадобится другой лимит.
+const maxUploadBytes = 2 << 30 // 2 GiB
+
+// sniffVideoContainer проверяет первые байты файла на сигнатуру известного
+// видео-контейнера — расширение имени файла легко подделать, а вот magic bytes
+// подделать так, чтобы ffmpeg всё равно смог декодировать файл, уже не тривиально.
+func sniffVideoContainer(f multipart.File) error {
+	head := make([]byte, 12)
+	n, err := io.ReadFull(f, head)
+	if err != nil && err != io.ErrUnexpectedEOF {
+		return err
+	}
+	head = head[:n]
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+
+	switch {
+	case len(head) >= 8 && string(head[4:8]) == "ftyp": // MP4 / MOV / M4V
+		return nil
+	case len(head) >= 4 && bytes.Equal(head[:4], []byte{0x1A, 0x45, 0xDF, 0xA3}): // WebM / MKV (EBML)
+		return nil
+	case len(head) >= 12 && string(head[:4]) == "RIFF" && string(head[8:12]) == "AVI ":
+		return nil
+	}
+	return fmt.Errorf("unrecognized video container signature")
+}
+
 // adminUploadVideoHandler принимает сырой видеофайл, транскодирует его в adaptive
-// HLS (ffmpeg) и заливает в MinIO. Защищено статическим токеном из ADMIN_UPLOAD_TOKEN —
-// временно, до появления настоящей админки с ролями (см. 13_Дальнейшие_улучшения).
+// HLS (ffmpeg) и заливает в MinIO. Требует авторизованного пользователя с
+// is_admin=1 (роль назначается вручную через SQL, пока нет админ-панели —
+// см. 13_Дальнейшие_улучшения).
 func adminUploadVideoHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if r.Method != http.MethodPost {
 		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
 		return
 	}
-	if r.FormValue("token") != os.Getenv("ADMIN_UPLOAD_TOKEN") || os.Getenv("ADMIN_UPLOAD_TOKEN") == "" {
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	if !isUserAdmin(userID) {
 		http.Error(w, `{"error":"Forbidden"}`, http.StatusForbidden)
 		return
 	}
+
+	// Ограничиваем размер тела запроса до парсинга формы — иначе неограниченная
+	// загрузка большого файла может исчерпать диск/память ещё до валидации полей.
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
 
 	animeID, err1 := strconv.Atoi(r.FormValue("anime_id"))
 	episodeNum, err2 := strconv.Atoi(r.FormValue("episode_num"))
@@ -1502,10 +1816,19 @@ func adminUploadVideoHandler(w http.ResponseWriter, r *http.Request) {
 
 	file, header, err := r.FormFile("video")
 	if err != nil {
+		if err.Error() == "http: request body too large" {
+			http.Error(w, `{"error":"Файл превышает допустимый размер"}`, http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, `{"error":"Файл видео (поле video) обязателен"}`, http.StatusBadRequest)
 		return
 	}
 	defer file.Close()
+
+	if err := sniffVideoContainer(file); err != nil {
+		http.Error(w, `{"error":"Файл не распознан как видео-контейнер (mp4/mov/webm/mkv/avi)"}`, http.StatusBadRequest)
+		return
+	}
 
 	tmpDir, err := os.MkdirTemp("", "ancen-upload-*")
 	if err != nil {
@@ -1572,16 +1895,74 @@ func adminUploadVideoHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func logoutHandler(w http.ResponseWriter, r *http.Request) {
+	secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+
+	if c, err := r.Cookie("refresh_token"); err == nil && c.Value != "" {
+		auth.RevokeRefreshToken(db, c.Value)
+	}
+	clearAuthCookies(w, secure)
+
 	session, _ := store.Get(r, "ancen-session")
 	session.Options = &sessions.Options{
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https",
-		SameSite: http.SameSiteLaxMode,
+		Secure:   secure,
+		SameSite: http.SameSiteStrictMode,
 		MaxAge:   -1,
 	}
 	session.Save(r, w)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// apiAuthRefreshHandler — POST /api/auth/refresh: ротирует refresh-токен из
+// cookie refresh_token и выдаёт новую пару access/refresh. Работает только в
+// режиме AUTH_MODE=jwt.
+func apiAuthRefreshHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	if auth.CurrentMode() != auth.ModeJWT {
+		http.Error(w, `{"error":"AUTH_MODE=jwt required"}`, http.StatusNotImplemented)
+		return
+	}
+	c, err := r.Cookie("refresh_token")
+	if err != nil || c.Value == "" {
+		http.Error(w, `{"error":"Missing refresh_token"}`, http.StatusUnauthorized)
+		return
+	}
+
+	newRefreshToken, userID, err := auth.RotateRefreshToken(db, c.Value)
+	if err != nil {
+		http.Error(w, `{"error":"Invalid refresh token"}`, http.StatusUnauthorized)
+		return
+	}
+	accessToken, err := auth.IssueAccessToken(userID, isUserAdmin(userID))
+	if err != nil {
+		http.Error(w, `{"error":"Ошибка выдачи токена"}`, http.StatusInternalServerError)
+		return
+	}
+
+	secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	setAuthCookies(w, secure, accessToken, newRefreshToken)
+	fmt.Fprintf(w, `{"access_token":%q}`, accessToken)
+}
+
+// apiAuthLogoutHandler — POST /api/auth/logout: отзывает refresh-токен и
+// чистит JWT-cookie. Работает только в режиме AUTH_MODE=jwt.
+func apiAuthLogoutHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	if c, err := r.Cookie("refresh_token"); err == nil && c.Value != "" {
+		auth.RevokeRefreshToken(db, c.Value)
+	}
+	secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	clearAuthCookies(w, secure)
+	fmt.Fprint(w, `{"status":"ok"}`)
 }
 
 func apiProgressPost(w http.ResponseWriter, r *http.Request) {
@@ -1874,7 +2255,7 @@ func newPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Хешируем новый пароль
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
 		if err != nil {
 			render(w, "new-password.html", PageData{Title: "Смена пароля", Error: "Ошибка хеширования пароля"})
 			return
@@ -1937,30 +2318,37 @@ func main() {
 	// Создаём таблицы для системы ачивок
 	createTables()
 
+	if err := auth.LoadKeys(); err != nil {
+		log.Fatal("Ошибка загрузки JWT-ключей:", err)
+	}
+	if err := loadEmailEncryptionKey(); err != nil {
+		log.Fatal("Ошибка загрузки ключа шифрования email:", err)
+	}
+
 	initMinioClient()
 
 	go hub.run()
 
 	// Регистрация маршрутов
-	http.HandleFunc("/", homeHandler)
-	http.HandleFunc("/login", loginHandler)
-	http.HandleFunc("/register", registerHandler)
-	http.HandleFunc("/anime/", animeHandler)
-	http.HandleFunc("/watch", watchHandler)
-	http.HandleFunc("/profile", profileHandler)
-	http.HandleFunc("/api/emotion", apiEmotionPost)
-	http.HandleFunc("/api/emotions", apiEmotionsGet)
-	http.HandleFunc("/ws", wsHandler)
-	http.HandleFunc("/api/emotions/stats", apiEmotionsStats)
-	http.HandleFunc("/api/comment", apiCommentPost)
-	http.HandleFunc("/api/comments", apiCommentsGet)
-	http.HandleFunc("/search", searchHandler)
-	http.HandleFunc("/forgot-password", forgotPasswordHandler)
-	http.HandleFunc("/new-password", newPasswordHandler)
-	http.HandleFunc("/logout", logoutHandler)
-	http.HandleFunc("/robots.txt", robotsHandler)
-	http.HandleFunc("/sitemap.xml", sitemapHandler)
-	http.HandleFunc("/api/progress", func(w http.ResponseWriter, r *http.Request) {
+	secureHandle("/", homeHandler)
+	secureHandle("/login", loginHandler)
+	secureHandle("/register", registerHandler)
+	secureHandle("/anime/", animeHandler)
+	secureHandle("/watch", watchHandler)
+	secureHandle("/profile", profileHandler)
+	secureHandle("/api/emotion", apiEmotionPost)
+	secureHandle("/api/emotions", apiEmotionsGet)
+	secureHandle("/ws", wsHandler)
+	secureHandle("/api/emotions/stats", apiEmotionsStats)
+	secureHandle("/api/comment", apiCommentPost)
+	secureHandle("/api/comments", apiCommentsGet)
+	secureHandle("/search", searchHandler)
+	secureHandle("/forgot-password", forgotPasswordHandler)
+	secureHandle("/new-password", newPasswordHandler)
+	secureHandle("/logout", logoutHandler)
+	secureHandle("/robots.txt", robotsHandler)
+	secureHandle("/sitemap.xml", sitemapHandler)
+	secureHandle("/api/progress", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPost:
 			apiProgressPost(w, r)
@@ -1973,11 +2361,14 @@ func main() {
 		}
 	})
 	// API для ачивок
-	http.HandleFunc("/api/achievements", apiAchievementsGet)
-	http.HandleFunc("/api/level", apiLevelGet)
-	http.HandleFunc("/api/achievements/all", apiAllAchievementsGet)
-	http.HandleFunc("/api/admin/upload-video", adminUploadVideoHandler)
-	http.HandleFunc("/api/change-password", apiChangePasswordHandler)
+	secureHandle("/api/achievements", apiAchievementsGet)
+	secureHandle("/api/level", apiLevelGet)
+	secureHandle("/api/achievements/all", apiAllAchievementsGet)
+	secureHandle("/api/admin/upload-video", adminUploadVideoHandler)
+	secureHandle("/api/change-password", apiChangePasswordHandler)
+	secureHandle("/api/auth/refresh", apiAuthRefreshHandler)
+	secureHandle("/api/auth/logout", apiAuthLogoutHandler)
+	secureHandle("/api/user/delete", apiUserDeleteHandler)
 
 	log.Println("Сервер Ancen запущен на http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
