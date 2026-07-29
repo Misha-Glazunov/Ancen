@@ -230,19 +230,21 @@ var achievements = []Achievement{
 	{ID: "timekeeper", Name: "Хранитель таймкодов", Description: "Оставить 20 эмоций с погрешностью <1 сек", Category: "special", Icon: "⏰"},
 }
 
-// Уровни: сколько XP нужно для каждого уровня
-var levelXPRequirements = []int{
-	0,     // level 0 (не используется)
-	100,   // level 1
-	250,   // level 2
-	500,   // level 3
-	1000,  // level 4
-	2000,  // level 5
-	3500,  // level 6
-	5000,  // level 7
-	7500,  // level 8
-	10000, // level 9
-	15000, // level 10
+// Уровни: сколько всего XP нужно набрать для каждого уровня.
+// Кривая квадратичная — первые уровни быстрые (дофамин новичку), дальше резко
+// сложнее. При dailyXPCap=150 (см. addXP) набрать максимальный уровень (12)
+// быстрее чем за ~75 дней (11284/150) физически невозможно, даже если
+// проспамить реакциями — это и есть защита от "прошёл всё за неделю".
+// Обычный активный пользователь (без выжимания дневного лимита) наберёт
+// макс. уровень за ~2-3 месяца.
+var levelXPRequirements = buildLevelXPRequirements(12)
+
+func buildLevelXPRequirements(maxLevel int) []int {
+	req := make([]int, maxLevel+1) // index 0 не используется (уровень 0)
+	for i := 1; i <= maxLevel; i++ {
+		req[i] = req[i-1] + 14*i*i + 28*i
+	}
+	return req
 }
 
 // getLevelInfo возвращает уровень по количеству XP
@@ -276,14 +278,81 @@ func getLevelInfo(xp int) UserLevelInfo {
 	}
 }
 
-// addXP добавляет XP пользователю
+// Анти-фарм: без этих ограничений пользователь может проспамить реакциями/
+// комментариями на таймкодах и пройти все уровни за один вечер, что убивает
+// смысл долгой прогрессии (см. maxLevel в buildLevelXPRequirements).
+const (
+	emotionXP               = 5
+	commentXP               = 10
+	maxXPEmotionsPerEpisode = 20  // реакции сверх лимита сохраняются и видны в ленте, но не дают XP
+	maxXPCommentsPerEpisode = 5   // то же для комментариев
+	dailyXPCap              = 150 // суммарный потолок начисления XP в сутки
+)
+
+// addXP начисляет XP пользователю с учётом суточного лимита (dailyXPCap).
+// ponytail: чтение grantedToday и запись — не одна транзакция, при
+// параллельных вызовах для одного user_id возможна гонка (оба пройдут
+// проверку лимита до записи), но цена ошибки низкая (немного лишнего XP за
+// день); добавить транзакцию/FOR UPDATE, если станет реальной проблемой.
 func addXP(userID int, amount int) {
-	_, err := db.Exec(`
+	var grantedToday int
+	err := db.QueryRow(`
+		SELECT xp FROM user_xp_daily WHERE user_id = ? AND day = CURDATE()
+	`, userID).Scan(&grantedToday)
+	if err != nil && err != sql.ErrNoRows {
+		log.Printf("addXP: чтение дневного лимита: %v", err)
+		return
+	}
+	remaining := dailyXPCap - grantedToday
+	if remaining <= 0 {
+		return
+	}
+	if amount > remaining {
+		amount = remaining
+	}
+
+	if _, err := db.Exec(`
 		INSERT INTO user_xp (user_id, xp) VALUES (?, ?)
 		ON DUPLICATE KEY UPDATE xp = xp + VALUES(xp)
-	`, userID, amount)
-	if err != nil {
+	`, userID, amount); err != nil {
 		log.Printf("addXP error: %v", err)
+		return
+	}
+	if _, err := db.Exec(`
+		INSERT INTO user_xp_daily (user_id, day, xp) VALUES (?, CURDATE(), ?)
+		ON DUPLICATE KEY UPDATE xp = xp + VALUES(xp)
+	`, userID, amount); err != nil {
+		log.Printf("addXP: запись дневного лимита: %v", err)
+	}
+}
+
+// awardEmotionXP начисляет XP за реакцию, если пользователь ещё не превысил
+// лимит XP-реакций на этот эпизод (сама реакция при этом уже сохранена в БД,
+// поэтому count включает и её саму).
+// ponytail: COUNT после INSERT — при параллельных запросах того же
+// пользователя возможна гонка (оба увидят count<=cap и оба получат XP), но
+// цена ошибки — пара лишних XP, не критично; добавить транзакцию с FOR
+// UPDATE, если фарм через несколько вкладок станет реальной проблемой.
+func awardEmotionXP(userID, episodeID int) {
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM emotions WHERE user_id = ? AND episode_id = ?", userID, episodeID).Scan(&count); err != nil {
+		log.Printf("awardEmotionXP: %v", err)
+		return
+	}
+	if count <= maxXPEmotionsPerEpisode {
+		addXP(userID, emotionXP)
+	}
+}
+
+// awardCommentXP — то же самое для комментариев.
+func awardCommentXP(userID, episodeID int) {
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM comments WHERE user_id = ? AND episode_id = ?", userID, episodeID).Scan(&count); err != nil {
+		log.Printf("awardCommentXP: %v", err)
+		return
+	}
+	if count <= maxXPCommentsPerEpisode {
+		addXP(userID, commentXP)
 	}
 }
 
@@ -401,6 +470,13 @@ func createTables() {
 			xp INT NOT NULL DEFAULT 0,
 			FOREIGN KEY (user_id) REFERENCES users(id)
 		)`,
+		`CREATE TABLE IF NOT EXISTS user_xp_daily (
+			user_id INT NOT NULL,
+			day DATE NOT NULL,
+			xp INT NOT NULL DEFAULT 0,
+			PRIMARY KEY (user_id, day),
+			FOREIGN KEY (user_id) REFERENCES users(id)
+		)`,
 		`CREATE TABLE IF NOT EXISTS user_achievements (
 			user_id INT NOT NULL,
 			achievement_id VARCHAR(50) NOT NULL,
@@ -416,6 +492,15 @@ func createTables() {
 			used TINYINT(1) DEFAULT 0,
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY (user_id) REFERENCES users(id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS user_progress (
+			user_id INT NOT NULL,
+			episode_id INT NOT NULL,
+			last_timestamp_sec INT NOT NULL DEFAULT 0,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+			PRIMARY KEY (user_id, episode_id),
+			FOREIGN KEY (user_id) REFERENCES users(id),
+			FOREIGN KEY (episode_id) REFERENCES episodes(id)
 		)`,
 	}
 	for _, q := range tables {
@@ -828,8 +913,8 @@ func apiEmotionPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Начисляем XP за эмоцию
-	addXP(userID, 5)
+	// Начисляем XP за эмоцию (с учётом анти-фарм лимита на эпизод)
+	awardEmotionXP(userID, req.EpisodeID)
 	checkAndUnlockAchievements(userID)
 
 	w.WriteHeader(http.StatusCreated)
@@ -1097,8 +1182,8 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 				msg.Username = username
 				hub.broadcast <- msg
 
-				// Начисляем XP за эмоцию через WebSocket
-				addXP(userID, 5)
+				// Начисляем XP за эмоцию через WebSocket (с учётом анти-фарм лимита на эпизод)
+				awardEmotionXP(userID, msg.EpisodeID)
 				checkAndUnlockAchievements(userID)
 			}
 		}
@@ -1206,8 +1291,8 @@ func apiCommentPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Начисляем XP за комментарий
-	addXP(userID, 10)
+	// Начисляем XP за комментарий (с учётом анти-фарм лимита на эпизод)
+	awardCommentXP(userID, req.EpisodeID)
 	checkAndUnlockAchievements(userID)
 
 	w.WriteHeader(http.StatusCreated)
