@@ -395,6 +395,7 @@
             .about-section { flex-direction: column; align-items: stretch; aspect-ratio: auto; padding: 24px; gap: 24px; }
             .about-left, .about-right { width: auto; max-width: none; align-items: flex-start; }
             .about-right .cta { width: 100%; }
+            .top-card ul { flex-wrap: wrap; gap: 20px; }
         }
 
         /* ===== Форма обратной связи ===== */
@@ -409,7 +410,7 @@
         .feedback > p { color: var(--color-gray-300); margin-bottom: 24px; text-align: center; }
         .feedback-form { display: flex; flex-direction: column; align-items: center; gap: 31px; max-width: 633px; margin: 0 auto; }
         .feedback-form-row { display: flex; gap: 27px; flex-wrap: wrap; width: 100%; }
-        .feedback-form-row input { flex: 1 1 260px; }
+        .feedback-form-row input { flex: 1 1 260px; min-width: 0; }
         .feedback-form input {
             height: 30px;
             padding: 0 16px;
@@ -443,12 +444,12 @@
             .feedback { padding-left: 20px; padding-right: 20px; }
             .catalog { padding: 30px 20px 24px; }
             .about-section { padding: 30px 20px; }
+            .feedback-form button { width: 100%; white-space: normal; }
         }
         @media (max-width: 420px) {
             .hero-featured-content h1 { font-size: 32px; }
             .catalog-header h2 { font-size: 26px; }
             .feedback h2 { font-size: 26px; }
-            .feedback-form button { width: 100%; }
         }
 
         /* ===== Анимация появления при скролле ===== */
