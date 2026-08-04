@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1932,6 +1933,7 @@ func apiCommentsGet(w http.ResponseWriter, r *http.Request) {
 func searchHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	genre := strings.TrimSpace(r.URL.Query().Get("genre"))
 
 	pageStr := r.URL.Query().Get("page")
 	pageSizeStr := r.URL.Query().Get("pageSize")
@@ -1944,7 +1946,7 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	pageSize := 25
+	pageSize := 24
 	if pageSizeStr != "" {
 		ps, err := strconv.Atoi(pageSizeStr)
 		if err == nil && ps > 0 && ps <= 100 {
@@ -1961,36 +1963,78 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 		Poster      string
 		Genres      string
 	}
-	var results []Anime
 
+	// Без q/genre — это каталог "все аниме", а не пустая страница поиска
+	conditions := []string{"title != ''"}
+	args := []interface{}{}
 	if query != "" {
-		rows, err := db.Query(`
-			SELECT id, title, description, poster_url, genres
-			FROM anime
-			WHERE title LIKE ? OR description LIKE ? OR genres LIKE ?
-			ORDER BY title
-			LIMIT ? OFFSET ?
-		`, "%"+query+"%", "%"+query+"%", "%"+query+"%", pageSize, offset)
-		if err != nil {
-			http.Error(w, "Database error", http.StatusInternalServerError)
-			return
-		}
-		defer rows.Close()
-
-		for rows.Next() {
-			var a Anime
-			if err := rows.Scan(&a.ID, &a.Title, &a.Description, &a.Poster, &a.Genres); err != nil {
-				continue
-			}
-			results = append(results, a)
-		}
+		conditions = append(conditions, "(title LIKE ? OR description LIKE ? OR genres LIKE ?)")
+		args = append(args, "%"+query+"%", "%"+query+"%", "%"+query+"%")
+	}
+	if genre != "" {
+		conditions = append(conditions, "genres LIKE ?")
+		args = append(args, "%"+genre+"%")
 	}
 
+	sqlQuery := "SELECT id, title, description, poster_url, genres FROM anime WHERE " +
+		strings.Join(conditions, " AND ") + " ORDER BY title LIMIT ? OFFSET ?"
+	rows, err := db.Query(sqlQuery, append(args, pageSize, offset)...)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var results []Anime
+	for rows.Next() {
+		var a Anime
+		if err := rows.Scan(&a.ID, &a.Title, &a.Description, &a.Poster, &a.Genres); err != nil {
+			continue
+		}
+		results = append(results, a)
+	}
+
+	// Список жанров для фильтра — реальные, разобранные из БД (не хардкод),
+	// т.к. жанры хранятся свободной строкой через запятую
+	genreSet := make(map[string]bool)
+	genreRows, err := db.Query("SELECT DISTINCT genres FROM anime WHERE genres != ''")
+	if err == nil {
+		defer genreRows.Close()
+		for genreRows.Next() {
+			var g string
+			if genreRows.Scan(&g) == nil {
+				for _, part := range strings.Split(g, ",") {
+					part = strings.TrimSpace(part)
+					if part != "" {
+						genreSet[part] = true
+					}
+				}
+			}
+		}
+	}
+	availableGenres := make([]string, 0, len(genreSet))
+	for g := range genreSet {
+		availableGenres = append(availableGenres, g)
+	}
+	sort.Strings(availableGenres)
+
 	data := struct {
-		Query    string
-		Results  []Anime
-		Username string
-	}{Query: query, Results: results, Username: currentUsername(r)}
+		Query           string
+		Genre           string
+		Results         []Anime
+		AvailableGenres []string
+		HasMore         bool
+		NextPage        int
+		Username        string
+	}{
+		Query:           query,
+		Genre:           genre,
+		Results:         results,
+		AvailableGenres: availableGenres,
+		HasMore:         len(results) == pageSize,
+		NextPage:        page + 1,
+		Username:        currentUsername(r),
+	}
 	templates.ExecuteTemplate(w, "search.html", data)
 }
 
