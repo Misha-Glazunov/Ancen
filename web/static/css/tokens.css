@@ -42,3 +42,114 @@
     --radius-xl: 15px;
     --radius-pill: 30px;
 }
+
+/* ===== Единый стиль кнопок для всего сайта =====
+   Взято 1:1 с главной страницы (home.html, класс .cta) — sweep-fill hover +
+   градиентная обводка. .btn — базовый (обводка + прозрачный фон), .btn-solid —
+   заливка градиентом сразу, .btn-sm — уменьшенный кегль под второстепенные кнопки
+   (на главной .cta используется только для одной крупной call-to-action). */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    box-sizing: border-box;
+    padding: 10px 20px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-lg);
+    background-color: rgba(0, 0, 0, 0.01);
+    background-image: linear-gradient(#fff, #fff);
+    background-repeat: no-repeat;
+    background-size: 0% 100%;
+    background-clip: padding-box;
+    backdrop-filter: blur(20px);
+    position: relative;
+    font-family: var(--font-base);
+    font-weight: 300;
+    font-size: var(--fs-body);
+    color: var(--color-text);
+    text-decoration: none;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-size 0.35s ease, color 0.3s ease 0.05s, transform 0.2s ease, box-shadow 0.3s ease;
+}
+.btn::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: var(--radius-lg);
+    padding: 1px;
+    background: var(--color-accent-gradient);
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+}
+.btn:hover {
+    background-size: 100% 100%;
+    color: #000;
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(216, 45, 126, 0.35);
+}
+.btn:disabled, .btn.is-disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+.btn-solid {
+    background-color: transparent;
+    background-image: var(--color-accent-gradient);
+    background-size: 100% 100%;
+}
+.btn-solid:hover { color: #fff; }
+.btn-sm { padding: 6px 14px; font-size: var(--fs-small); }
+
+/* ===== Анимация появления блоков при скролле (общая для всех страниц) =====
+   Разметка: добавить [data-animate] на блок, подключить /static/js/scroll-reveal.js */
+[data-animate] {
+    opacity: 0;
+    transform: translateY(24px);
+    transition: opacity 0.6s ease, transform 0.6s ease;
+}
+[data-animate].in-view { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) {
+    [data-animate] { opacity: 1; transform: none; transition: none; }
+}
+
+/* ===== Тосты в правом нижнем углу (общие для всех страниц) =====
+   Разметка/API: подключить /static/js/toast.js, вызывать window.showToast(html) */
+#toast-container {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    z-index: 2000;
+    pointer-events: none;
+}
+.toast {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    max-width: 320px;
+    padding: 14px 18px;
+    border-radius: var(--radius-lg);
+    background: var(--color-gray-950);
+    border: 1px solid transparent;
+    background-image: linear-gradient(var(--color-gray-950), var(--color-gray-950)), var(--color-accent-gradient);
+    background-origin: border-box;
+    background-clip: padding-box, border-box;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    color: var(--color-text);
+    font-family: var(--font-base);
+    font-size: var(--fs-small);
+    transform: translateX(120%);
+    opacity: 0;
+    transition: transform 0.35s ease, opacity 0.35s ease;
+    pointer-events: auto;
+}
+.toast.in-view { transform: translateX(0); opacity: 1; }
+.toast .toast-icon { font-size: 28px; line-height: 1; flex-shrink: 0; }
+.toast .toast-title { font-weight: 700; margin-bottom: 2px; }
+.toast .toast-body { color: var(--color-gray-300); }

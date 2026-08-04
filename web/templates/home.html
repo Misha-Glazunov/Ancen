@@ -45,6 +45,7 @@
     <style>
         * { box-sizing: border-box; }
         body { margin: 0; background: var(--color-bg); color: var(--color-text); font-family: var(--font-base); }
+        #new-anime, #popular-anime { scroll-margin-top: 110px; }
 
         a.cta, button.cta {
             display: inline-flex;
@@ -275,6 +276,31 @@
             font-size: var(--fs-display-md);
             margin: 0;
         }
+
+        .catalog-filters {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 12px;
+            margin-bottom: 40px;
+        }
+        .catalog-filters button {
+            padding: 8px 20px;
+            border-radius: var(--radius-lg);
+            border: 2px solid var(--color-purple);
+            background: transparent;
+            color: var(--color-text);
+            font-family: var(--font-base);
+            font-size: var(--fs-small);
+            cursor: pointer;
+            transition: box-shadow 0.2s, border-color 0.2s, transform 0.2s;
+        }
+        .catalog-filters button:hover { transform: translateY(-2px); }
+        .catalog-filters button.active {
+            border-color: var(--color-accent);
+            box-shadow: 0 0 14px rgba(216, 45, 126, 0.6);
+        }
+        .catalog-card.filtered-out { display: none; }
 
         .catalog-grid {
             display: grid;
@@ -515,7 +541,7 @@
 
         <!-- ===== Hero: featured anime (текст поверх картинки) + рейка "смотрите также" ===== -->
         <section class="hero-featured">
-            <div class="hero-featured-col" data-animate>
+            <div class="hero-featured-col" data-animate id="new-anime">
                 <span class="hero-caption">🪄 Новое</span>
                 <div class="hero-featured-visual">
                                         <div class="hero-slide active" style="background-image: url('/static/img/home/hero_banner.png')">
@@ -585,7 +611,7 @@
                 </div>
             </div>
 
-            <div class="hero-rail-col" data-animate>
+            <div class="hero-rail-col" data-animate id="popular-anime">
                 <span class="hero-caption">🔥 Обсуждаемые сегодня</span>
                 <ul class="hero-rail">
                                         <li>
@@ -637,66 +663,75 @@
                 <h2>Приятного просмотра</h2>
             </div>
 
+            <div class="catalog-filters" data-animate>
+                <button type="button" class="active" data-genre="all">Все</button>
+                <button type="button" data-genre="Приключение">Приключение</button>
+                <button type="button" data-genre="Драма">Драма</button>
+                <button type="button" data-genre="Экшен">Экшен</button>
+                <button type="button" data-genre="Комедия">Комедия</button>
+                <button type="button" data-genre="Фэнтези">Фэнтези</button>
+            </div>
+
             <div class="catalog-grid">
-                <div class="catalog-card" data-animate>
+                <div class="catalog-card" data-animate data-genre="Приключение,Драма">
                     <img src="/static/img/home/catalog_1_1.png" alt="Ван-пис">
                     <div class="title">Ван-пис</div>
-                    <span class="genre-tag">Приключение /драма</span>
+                    <span class="genre-tag">Приключение / драма</span>
                 </div>
-                <div class="catalog-card" data-animate>
+                <div class="catalog-card" data-animate data-genre="Драма,Экшен">
                     <img src="/static/img/home/catalog_1_2.png" alt="Легенда о героях галактики">
                     <div class="title">Легенда о героях галактики</div>
-                    <span class="genre-tag">Приключение /драма</span>
+                    <span class="genre-tag">Драма / экшен</span>
                 </div>
-                <div class="catalog-card" data-animate>
+                <div class="catalog-card" data-animate data-genre="Приключение,Фэнтези">
                     <img src="/static/img/home/catalog_1_3.png" alt="Охотник и Охотник">
                     <div class="title">Охотник и Охотник</div>
-                    <span class="genre-tag">Приключение /драма</span>
+                    <span class="genre-tag">Приключение / фэнтези</span>
                 </div>
-                <div class="catalog-card" data-animate>
+                <div class="catalog-card" data-animate data-genre="Экшен,Фэнтези">
                     <img src="/static/img/home/catalog_1_4.png" alt="Берсерк">
                     <div class="title">Берсерк</div>
-                    <span class="genre-tag">Приключение /драма</span>
+                    <span class="genre-tag">Экшен / фэнтези</span>
                 </div>
-                <div class="catalog-card" data-animate>
+                <div class="catalog-card" data-animate data-genre="Комедия,Приключение">
                     <img src="/static/img/home/catalog_2_1.png" alt="Ван-пис">
                     <div class="title">Ван-пис</div>
-                    <span class="genre-tag">Приключение /драма</span>
+                    <span class="genre-tag">Комедия / приключение</span>
                 </div>
-                <div class="catalog-card" data-animate>
+                <div class="catalog-card" data-animate data-genre="Драма">
                     <img src="/static/img/home/catalog_2_2.png" alt="Легенда о героях галактики">
                     <div class="title">Легенда о героях галактики</div>
-                    <span class="genre-tag">Приключение /драма</span>
+                    <span class="genre-tag">Драма</span>
                 </div>
-                <div class="catalog-card" data-animate>
+                <div class="catalog-card" data-animate data-genre="Приключение,Экшен">
                     <img src="/static/img/home/catalog_2_3.png" alt="Охотник и Охотник">
                     <div class="title">Охотник и Охотник</div>
-                    <span class="genre-tag">Приключение /драма</span>
+                    <span class="genre-tag">Приключение / экшен</span>
                 </div>
-                <div class="catalog-card" data-animate>
+                <div class="catalog-card" data-animate data-genre="Экшен,Драма">
                     <img src="/static/img/home/catalog_2_4.png" alt="Берсерк">
                     <div class="title">Берсерк</div>
-                    <span class="genre-tag">Приключение /драма</span>
+                    <span class="genre-tag">Экшен / драма</span>
                 </div>
-                <div class="catalog-card" data-animate>
+                <div class="catalog-card" data-animate data-genre="Приключение,Комедия">
                     <img src="/static/img/home/catalog_3_1.png" alt="Ван-пис">
                     <div class="title">Ван-пис</div>
-                    <span class="genre-tag">Приключение /драма</span>
+                    <span class="genre-tag">Приключение / комедия</span>
                 </div>
-                <div class="catalog-card" data-animate>
+                <div class="catalog-card" data-animate data-genre="Драма,Фэнтези">
                     <img src="/static/img/home/catalog_3_2.png" alt="Легенда о героях галактики">
                     <div class="title">Легенда о героях галактики</div>
-                    <span class="genre-tag">Приключение /драма</span>
+                    <span class="genre-tag">Драма / фэнтези</span>
                 </div>
-                <div class="catalog-card" data-animate>
+                <div class="catalog-card" data-animate data-genre="Приключение,Фэнтези">
                     <img src="/static/img/home/catalog_3_3.png" alt="Охотник и Охотник">
                     <div class="title">Охотник и Охотник</div>
-                    <span class="genre-tag">Приключение /драма</span>
+                    <span class="genre-tag">Приключение / фэнтези</span>
                 </div>
-                <div class="catalog-card" data-animate>
+                <div class="catalog-card" data-animate data-genre="Экшен,Фэнтези">
                     <img src="/static/img/home/catalog_3_4.png" alt="Берсерк">
                     <div class="title">Берсерк</div>
-                    <span class="genre-tag">Приключение /драма</span>
+                    <span class="genre-tag">Экшен / фэнтези</span>
                 </div>
             </div>
 
@@ -764,6 +799,24 @@
             });
 
             restartAutoplay();
+        })();
+
+        // Фильтр каталога по жанру
+        (function () {
+            var buttons = document.querySelectorAll('.catalog-filters button');
+            var cards = document.querySelectorAll('.catalog-grid .catalog-card');
+            buttons.forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    buttons.forEach(function (b) { b.classList.remove('active'); });
+                    btn.classList.add('active');
+                    var genre = btn.dataset.genre;
+                    cards.forEach(function (card) {
+                        var genres = (card.dataset.genre || '').split(',');
+                        var match = genre === 'all' || genres.indexOf(genre) !== -1;
+                        card.classList.toggle('filtered-out', !match);
+                    });
+                });
+            });
         })();
 
         // Анимация появления блоков при скролле

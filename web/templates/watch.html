@@ -41,16 +41,7 @@
             margin: 16px 0;
             text-align: center;
         }
-        #resumeDialog button {
-            padding: 8px 20px;
-            border: none;
-            border-radius: var(--radius-md);
-            font-family: var(--font-base);
-            cursor: pointer;
-            margin: 8px 6px 0;
-        }
-        #resumeBtn { background: var(--color-accent-gradient); color: #fff; }
-        #restartBtn { background: var(--color-gray-700); color: #fff; }
+        #resumeDialog .btn { margin: 8px 6px 0; }
 
         /* ===== Видеоплеер: адаптивная обёртка 16:9 ===== */
         .video-wrapper {
@@ -71,6 +62,7 @@
         .emotion-buttons {
             display: flex;
             flex-wrap: wrap;
+            justify-content: center;
             gap: 10px;
             margin: 20px 0;
         }
@@ -94,8 +86,7 @@
         #emotionChart {
             width: 100%;
             height: 150px;
-            background: var(--color-gray-950);
-            border-radius: var(--radius-lg);
+            background: transparent;
             display: block;
         }
 
@@ -109,7 +100,10 @@
             border-bottom: 1px solid var(--color-gray-900);
             font-size: var(--fs-small);
             word-break: break-word;
+            cursor: pointer;
+            transition: color 0.15s;
         }
+        #emotion-list li:hover, #comments-list li:hover { color: var(--color-accent); }
 
         .comment-form {
             display: flex;
@@ -128,37 +122,63 @@
             color: var(--color-text);
             font-family: var(--font-base);
         }
-        .comment-form button {
-            padding: 10px 22px;
-            border-radius: var(--radius-lg);
-            border: none;
-            background: var(--color-accent-gradient);
-            color: #fff;
-            font-family: var(--font-base);
-            cursor: pointer;
-            white-space: nowrap;
-        }
+        .comment-form .btn { white-space: nowrap; }
         .comment-form .timecode {
             font-size: var(--fs-small);
             color: var(--color-gray-500);
         }
 
-        #pagination {
-            display: flex;
-            align-items: center;
-            justify-content: center;
+        /* ===== Реакции / комментарии: две колонки ===== */
+        .reactions-comments-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+            margin-top: 20px;
+            align-items: start;
+        }
+        .col-reactions, .col-comments { min-width: 0; }
+
+        .spoiler-note {
+            font-size: var(--fs-small);
+            color: var(--color-gray-500);
+            margin: 10px 0;
+        }
+        .load-more-btn { display: flex; margin: 16px auto 0; }
+
+        /* ===== Следующие серии сезона ===== */
+        .next-episodes { margin-top: 40px; }
+        .next-episodes-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
             gap: 16px;
+        }
+        .next-episode-card {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            gap: 8px;
+            height: 140px;
+            padding: 9px 16px;
+            border-radius: var(--radius-lg);
+            background: var(--color-gray-900);
+            color: var(--color-text);
+            text-decoration: none;
+            transition: transform 0.2s ease;
+        }
+        .next-episode-card:hover { transform: translateY(-4px); }
+        .next-episode-card .play-icon { font-size: 18px; line-height: 1; }
+        .next-episode-card .ep-title { font-size: var(--fs-small); font-weight: 700; line-height: 1.4; }
+
+        /* ===== Навигация между сериями ===== */
+        .episode-nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
             margin-top: 16px;
         }
-        #pagination button {
-            padding: 8px 16px;
-            border-radius: var(--radius-md);
-            border: 1px solid var(--color-gray-700);
-            background: transparent;
-            color: var(--color-text);
-            cursor: pointer;
-        }
-        #pagination button:hover { border-color: var(--color-accent); color: var(--color-accent); }
 
         @media (max-width: 768px) {
             .container { padding: 16px 16px 40px; }
@@ -166,6 +186,7 @@
             .emotion-buttons button { font-size: 1.5rem; padding: 8px 12px; }
             .comment-form { flex-direction: column; align-items: stretch; }
             .comment-form .timecode { text-align: center; }
+            .reactions-comments-grid { grid-template-columns: 1fr; gap: 30px; }
         }
 
         @media (max-width: 480px) {
@@ -180,8 +201,8 @@
 
     <div id="resumeDialog">
         <p>У вас есть сохранённый прогресс: <span id="resumeTime">0:00</span></p>
-        <button id="resumeBtn">Продолжить</button>
-        <button id="restartBtn">Начать сначала</button>
+        <button id="resumeBtn" class="btn btn-solid">Продолжить</button>
+        <button id="restartBtn" class="btn">Начать сначала</button>
     </div>
 
     <!-- Видеоплеер -->
@@ -197,12 +218,28 @@
         </video>
     </div>
 
+    <!-- Навигация между сериями -->
+    <div class="episode-nav">
+        {{if .PrevEpisodeID}}
+        <a href="/watch?episode={{.PrevEpisodeID}}" class="btn btn-sm">← Предыдущая серия</a>
+        {{else}}
+        <span></span>
+        {{end}}
+        <a href="/anime/{{.AnimeID}}" class="btn btn-sm">Ко всем сериям</a>
+        {{if .NextEpisodeID}}
+        <a href="/watch?episode={{.NextEpisodeID}}" class="btn btn-sm">Следующая серия →</a>
+        {{end}}
+    </div>
+
     <!-- Кнопки эмоций -->
     <div class="emotion-buttons">
+        <button class="emotion-btn" data-emotion="❤️">❤️</button>
         <button class="emotion-btn" data-emotion="😭">😭</button>
         <button class="emotion-btn" data-emotion="🔥">🔥</button>
         <button class="emotion-btn" data-emotion="🤯">🤯</button>
         <button class="emotion-btn" data-emotion="🥰">🥰</button>
+        <button class="emotion-btn" data-emotion="😂">😂</button>
+        <button class="emotion-btn" data-emotion="👍">👍</button>
         <button class="emotion-btn" data-emotion="💢">💢</button>
     </div>
 
@@ -210,25 +247,52 @@
         <canvas id="emotionChart"></canvas>
     </div>
 
-    <h3>Эмоции зрителей</h3>
-    <ul id="emotion-list">
-        <li>Загрузка...</li>
-    </ul>
+    <div class="reactions-comments-grid" data-animate>
+        <div class="col-reactions">
+            <h3>Эмоции зрителей</h3>
+            {{if .IsPremium}}
+            <p class="spoiler-note">Premium: видны все реакции, включая те, что впереди вашего прогресса.</p>
+            {{else}}
+            <p class="spoiler-note">Реакции открываются по мере просмотра. Все реакции сразу — по подписке Premium.</p>
+            {{end}}
+            <ul id="emotion-list">
+                <li>Загрузка...</li>
+            </ul>
+            <button type="button" id="loadMoreEmotionsBtn" class="btn btn-sm load-more-btn" hidden>Загрузить ещё</button>
+        </div>
 
-    <h3>Комментарии к таймкоду</h3>
-    <div class="comment-form">
-        <input type="text" id="commentText" placeholder="Ваш комментарий">
-        <button id="sendCommentBtn">Отправить</button>
-        <span class="timecode">Таймкод: <span id="currentTimeDisplay">0:00</span></span>
+        <div class="col-comments">
+            <h3>Комментарии к таймкоду</h3>
+            <div class="comment-form">
+                <input type="text" id="commentText" placeholder="Ваш комментарий">
+                <button id="sendCommentBtn" class="btn btn-solid">Отправить</button>
+                <span class="timecode">Таймкод: <span id="currentTimeDisplay">0:00</span></span>
+            </div>
+            {{if .IsPremium}}
+            <p class="spoiler-note">Premium: видны все комментарии, включая те, что впереди вашего прогресса.</p>
+            {{else}}
+            <p class="spoiler-note">Комментарии открываются по мере просмотра. Все сразу — по подписке Premium.</p>
+            {{end}}
+            <ul id="comments-list">
+                <li>Загрузка...</li>
+            </ul>
+            <button type="button" id="loadMoreCommentsBtn" class="btn btn-sm load-more-btn" hidden>Загрузить ещё</button>
+        </div>
     </div>
-    <ul id="comments-list">
-        <li>Загрузка...</li>
-    </ul>
-    <div id="pagination">
-        <button id="prevPageBtn">Предыдущая</button>
-        <span id="currentPage">1</span>
-        <button id="nextPageBtn">Следующая</button>
+
+    {{if .NextEpisodes}}
+    <div class="next-episodes" data-animate>
+        <h3>Следующие серии сезона</h3>
+        <div class="next-episodes-grid">
+            {{range .NextEpisodes}}
+            <a href="/watch?episode={{.ID}}" class="next-episode-card">
+                <span class="play-icon">▶</span>
+                <span class="ep-title">Серия {{.Num}}. {{.Title}}</span>
+            </a>
+            {{end}}
+        </div>
     </div>
+    {{end}}
 </div>
 
 <!-- Video.js JS -->
@@ -240,6 +304,7 @@
     const urlParams = new URLSearchParams(window.location.search);
     let episodeId = parseInt(urlParams.get('episode'));
     if (isNaN(episodeId)) episodeId = 1;
+    const isPremium = {{.IsPremium}};
 
     let ws;
 
@@ -255,6 +320,8 @@
             if (msg.type === 'emotion') {
                 addEmotionToList(msg.username, msg.emotion_type, msg.timestamp_sec);
                 loadStats();   // обновить график
+            } else if (msg.type === 'achievement_unlocked') {
+                showAchievementToasts(msg.achievements);
             }
         };
         ws.onclose = function() {
@@ -266,42 +333,77 @@
         };
     }
 
-    // --- Лента эмоций ---
-    function addEmotionToList(username, emotionType, timestampSec) {
-        const list = document.getElementById('emotion-list');
-        // Убираем заглушку "Пока нет эмоций", если она есть
-        if (list.children.length === 1 && list.children[0].innerText.includes('Пока нет эмоций')) {
-            list.innerHTML = '';
-        }
-        const minutes = Math.floor(timestampSec / 60);
-        const seconds = timestampSec % 60;
-        const timeStr = `${minutes}:${seconds.toString().padStart(2,'0')}`;
-        const newItem = document.createElement('li');
-        newItem.innerHTML = `<strong>${escapeHtml(username)}</strong> ${emotionType} на ${timeStr}`;
-        list.prepend(newItem);
-        if (list.children.length > 50) list.removeChild(list.lastChild);
+    // --- Переход по таймкоду ---
+    function seekTo(timestampSec) {
+        player.currentTime(timestampSec);
+        player.play();
+        document.querySelector('.video-wrapper').scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
-    async function loadEmotions() {
+    // --- Тост "Достижение получено" ---
+    function showAchievementToasts(achievements) {
+        if (!achievements || !achievements.length) return;
+        achievements.forEach(function (a) {
+            showToast({ icon: a.icon, title: 'Достижение получено', body: a.name });
+        });
+    }
+
+    // Анти-спойлер применяется на сервере (см. isPremiumUser/watchedUpToSec в main.go):
+    // без Premium API отдаёт только реакции/комментарии до сохранённого прогресса просмотра,
+    // фронтенд просто рендерит то, что пришло
+    function formatTime(sec) {
+        const minutes = Math.floor(sec / 60);
+        const seconds = sec % 60;
+        return `${minutes}:${seconds.toString().padStart(2,'0')}`;
+    }
+
+    // --- Лента эмоций: накопительная пагинация ---
+    let allEmotions = [];
+    let emotionsPage = 1;
+    const emotionsPageSize = 5;
+    let emotionsExhausted = false;
+
+    function renderEmotionsList() {
+        const list = document.getElementById('emotion-list');
+        if (allEmotions.length === 0) {
+            list.innerHTML = '<li>Пока нет эмоций. Будьте первым!</li>';
+        } else {
+            list.innerHTML = allEmotions.map(e =>
+                `<li data-timestamp="${e.timestamp_sec}"><strong>${escapeHtml(e.username)}</strong> ${e.emotion_type} на ${formatTime(e.timestamp_sec)}</li>`
+            ).join('');
+            list.querySelectorAll('li[data-timestamp]').forEach(li => {
+                li.addEventListener('click', () => seekTo(parseInt(li.dataset.timestamp, 10)));
+            });
+        }
+        document.getElementById('loadMoreEmotionsBtn').hidden = emotionsExhausted;
+    }
+
+    // Новая реакция (по WS) добавляется в общий массив и переиспользует ту же отрисовку.
+    // Без Premium не показываем реакции впереди своего прогресса даже из live-пуша —
+    // сервер их всё равно не отдаст при следующей перезагрузке страницы/страницы списка
+    function addEmotionToList(username, emotionType, timestampSec) {
+        if (!isPremium && timestampSec > Math.floor(player.currentTime() || 0)) return;
+        allEmotions.push({ username, emotion_type: emotionType, timestamp_sec: timestampSec });
+        allEmotions.sort((a, b) => a.timestamp_sec - b.timestamp_sec);
+        renderEmotionsList();
+    }
+
+    async function loadEmotions(append) {
         try {
-            const response = await fetch(`/api/emotions?episode_id=${episodeId}`);
+            const response = await fetch(`/api/emotions?episode_id=${episodeId}&page=${emotionsPage}&pageSize=${emotionsPageSize}`);
             const emotions = await response.json();
-            const list = document.getElementById('emotion-list');
-            list.innerHTML = ''; // очищаем
-            if (emotions.length === 0) {
-                list.innerHTML = '<li>Пока нет эмоций. Будьте первым!</li>';
-                return;
-            }
-            list.innerHTML = emotions.map(e => {
-                const minutes = Math.floor(e.timestamp_sec / 60);
-                const seconds = e.timestamp_sec % 60;
-                const timeStr = `${minutes}:${seconds.toString().padStart(2,'0')}`;
-                return `<li><strong>${escapeHtml(e.username)}</strong> ${e.emotion_type} на ${timeStr}</li>`;
-            }).join('');
+            allEmotions = append ? allEmotions.concat(emotions) : emotions;
+            emotionsExhausted = emotions.length < emotionsPageSize;
+            renderEmotionsList();
         } catch(err) {
             console.error('Ошибка загрузки эмоций:', err);
         }
     }
+
+    document.getElementById('loadMoreEmotionsBtn').addEventListener('click', () => {
+        emotionsPage++;
+        loadEmotions(true);
+    });
 
     // --- Отправка эмоции ---
     async function sendEmotion(emotionType) {
@@ -318,6 +420,9 @@
             });
             console.log("Sending via WS:", message);
             ws.send(message);
+            // Бродкаст с сервера дойдёт и до самого отправителя (ws.onmessage вызовет loadStats),
+            // но график обновляем сразу же, не дожидаясь round-trip
+            loadStats();
         } else {
             console.log("WebSocket not open, fallback to HTTP");
             try {
@@ -330,7 +435,12 @@
                         emotion_type: emotionType
                     })
                 });
-                if (response.ok) loadEmotions();
+                if (response.ok) {
+                    emotionsPage = 1; loadEmotions(false); loadStats();
+                    const data = await response.json();
+                    showAchievementToasts(data.unlocked_achievements);
+                }
+                else if (response.status === 429) alert('Слишком много реакций подряд, подождите немного');
                 else alert('Ошибка: не авторизованы');
             } catch(err) {
                 console.error(err);
@@ -342,16 +452,16 @@
         setTimeout(() => { if(btn) btn.style.transform = ''; }, 200);
     }
 
-    // --- График эмоций ---
+    // --- График эмоций: одна точка на каждую реакцию, по её реальному таймкоду ---
     let currentStats = [];
 
     async function loadStats() {
         try {
-            const response = await fetch(`/api/emotions/stats?episode_id=${episodeId}`);
-            if (!response.ok) throw new Error('Stats API error');
-            const stats = await response.json();
-            currentStats = stats;
-            drawChart(stats);
+            const response = await fetch(`/api/emotions?episode_id=${episodeId}`);
+            if (!response.ok) throw new Error('Emotions API error');
+            const emotions = await response.json();
+            currentStats = emotions.slice().sort((a, b) => a.timestamp_sec - b.timestamp_sec);
+            drawChart(currentStats);
         } catch(err) {
             console.error('Ошибка загрузки статистики:', err);
         }
@@ -368,7 +478,26 @@
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
 
-    function drawChart(stats) {
+    // Локальная плотность реакций вокруг каждой точки (окно ±5с) — задаёт высоту,
+    // не искажая факт «одна точка = одна реакция»
+    const DENSITY_WINDOW = 5;
+
+    // "Красивый" шаг делений оси Y под конкретный максимум (1/2/5 * 10^n), чтобы
+    // подписи не были дробными и подстраивались под масштаб данных сами
+    function niceStep(maxValue, targetTicks) {
+        if (maxValue <= 0) return 1;
+        const rawStep = maxValue / targetTicks;
+        const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
+        const residual = rawStep / magnitude;
+        let niceResidual;
+        if (residual > 5) niceResidual = 10;
+        else if (residual > 2) niceResidual = 5;
+        else if (residual > 1) niceResidual = 2;
+        else niceResidual = 1;
+        return Math.max(1, Math.round(niceResidual * magnitude));
+    }
+
+    function drawChart(reactions) {
     const canvas = document.getElementById('emotionChart');
     if (!canvas) return;
     resizeCanvas(canvas);
@@ -376,56 +505,113 @@
     const rect = canvas.getBoundingClientRect();
     const width = rect.width;
     const height = rect.height;
+    const padTop = 10;
+    const padLeft = 28;          // место под подписи оси Y
+    const axisY = height - 24;   // ось X
+    const labelY = height - 6;   // подписи времени ниже оси
     ctx.clearRect(0, 0, width, height);
 
-    if (!stats || stats.length === 0) {
-        ctx.fillStyle = '#aaa';
-        ctx.font = '14px sans-serif';
-        ctx.fillText('Нет эмоций', width/2-40, height/2);
-        canvas.onclick = null;
-        return;
-    }
+    reactions = reactions || [];
+    const duration = player.duration();
+    // Ось X всегда занимает всю длительность серии, а не только диапазон до последней
+    // реакции — иначе график "растёт" вправо по мере появления новых реакций
+    const maxTime = (duration && duration > 0) ? duration : Math.max(...reactions.map(r => r.timestamp_sec), 1, 1);
+    const plotWidth = width - padLeft;
 
-    const maxCount = Math.max(...stats.map(s => s.count), 1);
-    const barWidth = (width / stats.length) * 0.8;
-    const barSpacing = (width / stats.length) * 0.2;
+    const densities = reactions.map(r =>
+        reactions.filter(o => Math.abs(o.timestamp_sec - r.timestamp_sec) <= DENSITY_WINDOW).length
+    );
+    const rawMaxDensity = Math.max(...densities, 1);
+    const yStep = niceStep(rawMaxDensity, 4);
+    const maxDensity = Math.ceil(rawMaxDensity / yStep) * yStep;
 
-    stats.forEach((stat, i) => {
-        const barHeight = (stat.count / maxCount) * (height - 30);
-        const x = i * (barWidth + barSpacing) + barSpacing/2;
-        const y = height - barHeight - 10;
-        ctx.fillStyle = '#d82d7e';
-        ctx.fillRect(x, y, barWidth, barHeight);
+    const points = reactions.map((r, i) => ({
+        x: padLeft + (r.timestamp_sec / maxTime) * plotWidth,
+        y: axisY - (densities[i] / maxDensity) * (axisY - padTop),
+        timestamp: r.timestamp_sec
+    }));
 
-        const minutes = Math.floor(stat.interval_start / 60);
-        const seconds = stat.interval_start % 60;
-        const label = `${minutes}:${seconds.toString().padStart(2,'0')}`;
+    function paint(hoverIndex) {
+        ctx.clearRect(0, 0, width, height);
+
+        // Ось Y слева + горизонтальные деления с автоматическим шагом
+        ctx.strokeStyle = 'rgba(255,255,255,0.2)';
         ctx.fillStyle = '#ccc';
         ctx.font = '10px sans-serif';
-        ctx.fillText(label, x+2, height-2);
-    });
+        ctx.textAlign = 'right';
+        for (let v = 0; v <= maxDensity; v += yStep) {
+            const y = axisY - (v / maxDensity) * (axisY - padTop);
+            ctx.beginPath();
+            ctx.moveTo(padLeft, y);
+            ctx.lineTo(width, y);
+            ctx.strokeStyle = v === 0 ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.08)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            ctx.fillText(String(v), padLeft - 6, y + 3);
+        }
+        ctx.textAlign = 'left';
 
-    // Добавляем обработчик клика по канвасу
+        // Линия
+        ctx.beginPath();
+        points.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+        ctx.strokeStyle = '#d82d7e';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Точки (по одной на реакцию) + подписи таймкодов под осью
+        points.forEach((p, i) => {
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, i === hoverIndex ? 5 : 3, 0, Math.PI * 2);
+            ctx.fillStyle = i === hoverIndex ? '#ff5fa8' : '#d82d7e';
+            ctx.fill();
+        });
+
+        if (reactions.length === 0) {
+            ctx.fillStyle = '#aaa';
+            ctx.font = '14px sans-serif';
+            ctx.fillText('Пока нет реакций', padLeft + 10, axisY / 2 + padTop);
+        }
+
+        // Подписи времени по всей длительности серии — через равный шаг, независимо от числа реакций
+        const labelCount = 6;
+        for (let i = 0; i < labelCount; i++) {
+            const t = (maxTime * i) / (labelCount - 1 || 1);
+            const minutes = Math.floor(t / 60);
+            const seconds = Math.floor(t % 60);
+            const label = `${minutes}:${seconds.toString().padStart(2,'0')}`;
+            const x = padLeft + (t / maxTime) * plotWidth;
+            ctx.fillStyle = '#ccc';
+            ctx.font = '10px sans-serif';
+            const textX = Math.min(Math.max(x - 12, padLeft), width - 30);
+            ctx.fillText(label, textX, labelY);
+        }
+    }
+
+    paint(-1);
+
+    // Клик по графику — переход на ближайшую по времени реакцию
     canvas.onclick = function(e) {
+        if (points.length === 0) {
+            // Реакций нет — клик по пустой оси просто перематывает на этот момент времени
+            const rect = canvas.getBoundingClientRect();
+            let mouseX = e.clientX - rect.left;
+            mouseX = Math.min(Math.max(mouseX, padLeft), rect.width);
+            seekTo(Math.round(((mouseX - padLeft) / plotWidth) * maxTime));
+            return;
+        }
         const rect = canvas.getBoundingClientRect();
         let mouseX = e.clientX - rect.left;
-        if (mouseX < 0) mouseX = 0;
+        if (mouseX < padLeft) mouseX = padLeft;
         if (mouseX > rect.width) mouseX = rect.width;
-        const index = Math.floor(mouseX / (rect.width / stats.length));
-        if (index >= 0 && index < stats.length) {
-            const targetTime = stats[index].interval_start;
-            player.currentTime(targetTime);
-            player.play();
-            // Небольшая визуальная обратная связь (подсветка столбца)
-            stats.forEach((stat, i) => {
-                const barHeight = (stat.count / maxCount) * (height - 30);
-                const x = i * (barWidth + barSpacing) + barSpacing/2;
-                const y = height - barHeight - 10;
-                ctx.fillStyle = (i === index) ? '#ff5fa8' : '#d82d7e';
-                ctx.fillRect(x, y, barWidth, barHeight);
-            });
-            setTimeout(() => drawChart(stats), 200); // перерисовать нормально
-        }
+        let nearest = 0;
+        let nearestDist = Infinity;
+        points.forEach((p, i) => {
+            const d = Math.abs(p.x - mouseX);
+            if (d < nearestDist) { nearestDist = d; nearest = i; }
+        });
+        seekTo(points[nearest].timestamp);
+        paint(nearest);
+        setTimeout(() => paint(-1), 250);
     };
 }
 
@@ -436,31 +622,48 @@
         resizeTimer = setTimeout(() => drawChart(currentStats), 150);
     });
 
-    // --- Пагинация комментариев ---
-    let currentPage = 1;
-    const pageSize = 10;
+    // Ось X должна сразу занимать всю длительность серии — при первом вызове loadStats()
+    // player.duration() ещё не известен (метаданные видео не загружены), поэтому
+    // перерисовываем график, как только длительность становится доступна
+    player.on('durationchange', () => drawChart(currentStats));
 
-    async function loadComments() {
+    // --- Комментарии: накопительная пагинация + анти-спойлер фильтр ---
+    let allComments = [];
+    let commentsPage = 1;
+    const commentsPageSize = 5;
+    let commentsExhausted = false;
+
+    function renderCommentsList() {
+        const list = document.getElementById('comments-list');
+        if (allComments.length === 0) {
+            list.innerHTML = '<li>Пока нет комментариев. Будьте первым!</li>';
+        } else {
+            list.innerHTML = allComments.map(c =>
+                `<li data-timestamp="${c.timestamp_sec}"><strong>${escapeHtml(c.username)}</strong> [${formatTime(c.timestamp_sec)}]: ${escapeHtml(c.text)}</li>`
+            ).join('');
+            list.querySelectorAll('li[data-timestamp]').forEach(li => {
+                li.addEventListener('click', () => seekTo(parseInt(li.dataset.timestamp, 10)));
+            });
+        }
+        document.getElementById('loadMoreCommentsBtn').hidden = commentsExhausted;
+    }
+
+    async function loadComments(append) {
         try {
-            const response = await fetch(`/api/comments?episode_id=${episodeId}&page=${currentPage}&pageSize=${pageSize}`);
+            const response = await fetch(`/api/comments?episode_id=${episodeId}&page=${commentsPage}&pageSize=${commentsPageSize}`);
             const comments = await response.json();
-            const list = document.getElementById('comments-list');
-            list.innerHTML = '';
-            if (comments.length === 0) {
-                list.innerHTML = '<li>Пока нет комментариев. Будьте первым!</li>';
-                return;
-            }
-            list.innerHTML = comments.map(c => {
-                const minutes = Math.floor(c.timestamp_sec / 60);
-                const seconds = c.timestamp_sec % 60;
-                const timeStr = `${minutes}:${seconds.toString().padStart(2,'0')}`;
-                return `<li><strong>${escapeHtml(c.username)}</strong> [${timeStr}]: ${escapeHtml(c.text)}</li>`;
-            }).join('');
-            document.getElementById('currentPage').innerText = currentPage;
+            allComments = append ? allComments.concat(comments) : comments;
+            commentsExhausted = comments.length < commentsPageSize;
+            renderCommentsList();
         } catch(err) {
             console.error('Ошибка загрузки комментариев:', err);
         }
     }
+
+    document.getElementById('loadMoreCommentsBtn').addEventListener('click', () => {
+        commentsPage++;
+        loadComments(true);
+    });
 
     // Отправка комментария
     document.getElementById('sendCommentBtn').onclick = async () => {
@@ -479,7 +682,12 @@
             });
             if (response.ok) {
                 document.getElementById('commentText').value = '';
-                loadComments();
+                commentsPage = 1;
+                loadComments(false);
+                const data = await response.json();
+                showAchievementToasts(data.unlocked_achievements);
+            } else if (response.status === 429) {
+                alert('Слишком много комментариев подряд, подождите немного');
             } else {
                 const errData = await response.json();
                 alert('Ошибка: ' + (errData.error || 'неизвестная ошибка'));
@@ -489,18 +697,6 @@
             alert('Ошибка при отправке комментария');
         }
     };
-
-    document.getElementById('prevPageBtn').addEventListener('click', () => {
-        if (currentPage > 1) {
-            currentPage--;
-            loadComments();
-        }
-    });
-
-    document.getElementById('nextPageBtn').addEventListener('click', () => {
-        currentPage++;
-        loadComments();
-    });
 
     let saveInterval = null;
     let lastSavedTimestamp = 0;
@@ -520,6 +716,14 @@
             })
         });
         console.log("Progress saved response:", response.status);
+        // Прогресс на сервере обновился — для не-Premium это могло разблокировать
+        // новые реакции/комментарии впереди прежнего таймкода, подтягиваем первую страницу
+        if (!isPremium) {
+            emotionsPage = 1;
+            commentsPage = 1;
+            loadEmotions(false);
+            loadComments(false);
+        }
     } catch(err) {
         console.error("Failed to save progress:", err);
     }
@@ -636,12 +840,14 @@
     // --- Инициализация ---
     player.ready(() => {
     loadProgress();
-    loadEmotions();
+    loadEmotions(false);
     connectWebSocket();
     loadStats();
-    loadComments();
+    loadComments(false);
     });
 </script>
+<script src="/static/js/scroll-reveal.js"></script>
+<script src="/static/js/toast.js"></script>
 {{template "footer" .}}
 </body>
 </html>

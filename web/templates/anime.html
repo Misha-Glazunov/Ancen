@@ -40,70 +40,168 @@
     <style>
         * { box-sizing: border-box; }
         body { margin: 0; background: var(--color-bg); color: var(--color-text); font-family: var(--font-base); }
+
         .anime-hero {
             display: flex;
             gap: 40px;
             padding: 40px 140px;
+            align-items: flex-start;
             flex-wrap: wrap;
         }
         .anime-poster {
-            width: 260px;
+            width: 295px;
+            height: 360px;
             border-radius: var(--radius-lg);
             object-fit: cover;
             flex-shrink: 0;
         }
-        .anime-info h1 {
-            font-family: var(--font-display);
-            font-size: var(--fs-display-md);
-            font-weight: 400;
-            margin: 0 0 16px;
-        }
-        .anime-info p.description {
-            font-size: var(--fs-body);
-            color: var(--color-gray-300);
+        .anime-info {
+            position: relative;
+            height: 360px;
             max-width: 640px;
-            line-height: 1.5;
+            flex: 1;
+            min-width: 280px;
         }
-        .anime-info .genres {
-            display: inline-block;
-            margin-top: 12px;
-            padding: 6px 16px;
-            border-radius: var(--radius-pill);
-            background: var(--color-purple);
-            font-family: var(--font-secondary);
-            font-size: var(--fs-small);
+        .anime-info-top { display: flex; flex-direction: column; gap: 20px; }
+        .anime-info h1 {
+            font-family: var(--font-base);
+            font-size: var(--fs-display-lg);
+            font-weight: 400;
+            margin: 0;
+            line-height: 1.15;
         }
-        .episodes {
-            padding: 0 140px 60px;
+        .anime-tags { display: flex; align-items: center; gap: 10px; }
+        .anime-genres {
+            padding: 4px 10px;
+            border-radius: var(--radius-sm);
+            background: rgba(147, 55, 153, 0.7);
+            font-family: var(--font-base);
+            font-size: var(--fs-body);
         }
-        .episodes h2 {
+        .anime-year { font-size: var(--fs-body); color: var(--color-gray-300); }
+        .anime-info .description {
+            font-size: var(--fs-body);
+            line-height: 1.45;
+            margin: 0;
+            max-width: 475px;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            min-height: calc(var(--fs-body) * 1.45 * 3);
+        }
+        .anime-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .anime-meta .meta-row { display: flex; gap: 20px; font-size: var(--fs-body); }
+        .anime-meta .meta-row b { font-weight: 700; min-width: 130px; }
+        .anime-meta .meta-row span { color: var(--color-gray-300); }
+
+        .anime-favorite {
+            position: absolute;
+            right: 0;
+            bottom: 0;
+            display: inline-flex;
+            align-items: center;
+            gap: 20px;
+            width: fit-content;
+            padding: 4px 10px;
+            border-radius: var(--radius-lg);
+            background-color: rgba(0, 0, 0, 0.01);
+            background-image: linear-gradient(#fff, #fff);
+            background-repeat: no-repeat;
+            background-size: 0% 100%;
+            backdrop-filter: blur(20px);
+            border: 1px solid transparent;
+            background-clip: padding-box;
+            font-family: var(--font-base);
+            font-size: var(--fs-body);
+            color: var(--color-text);
+            cursor: pointer;
+            transition: background-size 0.35s ease, color 0.3s ease 0.05s, transform 0.2s ease, box-shadow 0.3s ease;
+        }
+        .anime-favorite::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: var(--radius-lg);
+            padding: 1px;
+            background: var(--color-accent-gradient);
+            -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+            -webkit-mask-composite: xor;
+            mask-composite: exclude;
+            pointer-events: none;
+        }
+        .anime-favorite:hover { background-size: 100% 100%; color: #000; transform: translateY(-2px); box-shadow: 0 8px 20px rgba(216, 45, 126, 0.35); }
+        .anime-favorite .heart { font-size: 18px; }
+        .anime-favorite.active .heart { color: var(--color-accent); }
+
+        .seasons { padding: 0 140px 40px; display: flex; flex-direction: column; gap: 40px; }
+        .season-block h2 {
             font-family: var(--font-base);
             font-weight: 700;
             font-size: var(--fs-heading);
-            border-bottom: 1px solid var(--color-gray-700);
-            padding-bottom: 12px;
+            margin: 0 0 20px;
         }
-        .episode-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
-        .episode-list li a {
-            display: block;
-            padding: 14px 20px;
-            background: var(--color-gray-950);
-            border-radius: var(--radius-md);
+        .episode-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+            gap: 20px;
+        }
+        .episode-card {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            gap: 10px;
+            height: 180px;
+            padding: 9px 20px;
+            border-radius: var(--radius-lg);
+            background: linear-gradient(0deg, rgba(0,0,0,0.4), rgba(0,0,0,0.4)), var(--color-gray-900) center/cover no-repeat;
             color: var(--color-text);
             text-decoration: none;
-            font-size: var(--fs-body);
-            transition: background 0.2s;
+            transition: transform 0.2s ease;
         }
-        .episode-list li a:hover { background: var(--color-gray-900); color: var(--color-accent); }
+        .episode-card:hover { transform: translateY(-4px); }
+        .episode-card .play-icon { font-size: 20px; line-height: 1; }
+        .episode-card .ep-title {
+            font-size: var(--fs-body);
+            font-weight: 700;
+            line-height: 1.45;
+        }
+        .episode-favorite {
+            position: absolute;
+            top: 12px;
+            right: 14px;
+            background: none;
+            border: none;
+            padding: 0;
+            font-size: 20px;
+            line-height: 1;
+            color: var(--color-text);
+            cursor: pointer;
+            transition: transform 0.15s ease;
+        }
+        .episode-favorite:hover { transform: scale(1.2); }
+        .episode-favorite.active { color: var(--color-accent); }
+
+        .empty-state { color: var(--color-gray-500); padding: 0 140px 40px; }
 
         @media (max-width: 768px) {
-            .anime-hero, .episodes { padding-left: 20px; padding-right: 20px; padding-top: 24px; }
+            .anime-hero, .seasons, .empty-state { padding-left: 20px; padding-right: 20px; padding-top: 24px; }
             .anime-hero { flex-direction: column; align-items: center; text-align: center; }
-            .anime-poster { width: 100%; max-width: 260px; }
-            .anime-info h1 { font-size: 26px; }
+            .anime-info { height: auto; }
+            .anime-info-top { align-items: center; }
+            .anime-favorite { position: static; margin: 20px auto 0; }
+            .anime-tags { justify-content: center; }
+            .anime-meta .meta-row { justify-content: center; }
+            .anime-poster { width: 100%; max-width: 295px; height: auto; }
+            .anime-info h1 { font-size: 28px; }
         }
         @media (max-width: 420px) {
-            .episode-list li a { padding: 12px 14px; font-size: var(--fs-small); }
+            .episode-grid { grid-template-columns: 1fr; }
         }
     </style>
 </head>
@@ -113,23 +211,74 @@
     <section class="anime-hero">
         <img src="{{.Anime.Poster}}" alt="{{.Anime.Title}}" class="anime-poster">
         <div class="anime-info">
-            <h1>{{.Anime.Title}}</h1>
-            <p class="description">{{.Anime.Description}}</p>
-            <span class="genres">{{.Anime.Genres}}</span>
+            <div class="anime-info-top">
+                <h1>{{.Anime.Title}}</h1>
+                <div class="anime-tags">
+                    <span class="anime-genres">{{.Anime.Genres}}</span>
+                    {{if .Anime.Year}}<span class="anime-year">{{.Anime.Year}}</span>{{end}}
+                </div>
+                <p class="description">{{.Anime.Description}}</p>
+                {{if or .Anime.Country .Anime.SourceType .Anime.Studio .Anime.Author .Anime.Director}}
+                <div class="anime-meta">
+                    {{if .Anime.Country}}<div class="meta-row"><b>Страна</b><span>{{.Anime.Country}}</span></div>{{end}}
+                    {{if .Anime.SourceType}}<div class="meta-row"><b>Первоисточник</b><span>{{.Anime.SourceType}}</span></div>{{end}}
+                    {{if .Anime.Studio}}<div class="meta-row"><b>Студия</b><span>{{.Anime.Studio}}</span></div>{{end}}
+                    {{if .Anime.Author}}<div class="meta-row"><b>Автор</b><span>{{.Anime.Author}}</span></div>{{end}}
+                    {{if .Anime.Director}}<div class="meta-row"><b>Режиссёр</b><span>{{.Anime.Director}}</span></div>{{end}}
+                </div>
+                {{end}}
+            </div>
+            <button type="button" class="anime-favorite" data-favorite>
+                <span class="heart">♡</span>
+                <span class="favorite-label">Добавить в избранное</span>
+            </button>
         </div>
     </section>
 
-    <section class="episodes">
-        <h2>Эпизоды</h2>
-        <ul class="episode-list">
-            {{range .Episodes}}
-            <li>
-                <a href="/watch?episode={{.ID}}">Серия {{.Num}}: {{.Title}}</a>
-            </li>
-            {{end}}
-        </ul>
-    </section>
+    {{if .Seasons}}
+    <div class="seasons">
+        {{range .Seasons}}
+        <div class="season-block" data-animate>
+            <h2>Сезон {{.Season}}</h2>
+            <div class="episode-grid">
+                {{range .Episodes}}
+                <a href="/watch?episode={{.ID}}" class="episode-card">
+                    <button type="button" class="episode-favorite" data-episode-favorite aria-label="Добавить в избранное">☆</button>
+                    <span class="play-icon">▶</span>
+                    <span class="ep-title">Серия {{.Num}}. {{.Title}}</span>
+                </a>
+                {{end}}
+            </div>
+        </div>
+        {{end}}
+    </div>
+    {{else}}
+    <p class="empty-state">Эпизоды пока не добавлены.</p>
+    {{end}}
 
     {{template "footer" .}}
+    <script>
+        document.querySelectorAll('[data-episode-favorite]').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                var active = btn.classList.toggle('active');
+                btn.textContent = active ? '★' : '☆';
+            });
+        });
+
+        var favBtn = document.querySelector('[data-favorite]');
+        if (favBtn) {
+            favBtn.addEventListener('click', function () {
+                this.classList.toggle('active');
+                var heart = this.querySelector('.heart');
+                var label = this.querySelector('.favorite-label');
+                var active = this.classList.contains('active');
+                heart.textContent = active ? '♥' : '♡';
+                label.textContent = active ? 'В избранном' : 'Добавить в избранное';
+            });
+        }
+    </script>
+    <script src="/static/js/scroll-reveal.js"></script>
 </body>
 </html>

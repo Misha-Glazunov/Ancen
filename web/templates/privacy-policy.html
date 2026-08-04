@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Политика конфиденциальности — AniMemory</title>
+    <meta name="robots" content="index, follow">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;700&family=Manrope:wght@400;500;600&family=MuseoModerno:wght@400;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/tokens.css">
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; background: var(--color-bg); color: var(--color-text); font-family: var(--font-base); }
+        .container { max-width: 800px; margin: 0 auto; padding: 50px 20px 80px; line-height: 1.6; }
+        h1 { font-family: var(--font-base); font-weight: 400; font-size: var(--fs-display-md); margin-bottom: 10px; }
+        h2 { font-size: var(--fs-heading); border-bottom: 1px solid var(--color-gray-700); padding-bottom: 8px; margin-top: 40px; }
+        p, li { color: var(--color-gray-300); }
+        .updated { color: var(--color-gray-500); font-size: var(--fs-small); margin-bottom: 30px; }
+        .draft-notice {
+            background: rgba(216, 45, 126, 0.1);
+            border: 1px solid var(--color-accent);
+            border-radius: var(--radius-lg);
+            padding: 20px;
+            margin-bottom: 40px;
+            color: var(--color-text);
+        }
+        .draft-notice strong { color: var(--color-accent); }
+    </style>
+</head>
+<body>
+{{template "header" .}}
+<div class="container">
+    <h1>Политика конфиденциальности</h1>
+    <p class="updated">Последнее обновление: черновик, требует юридической проверки перед коммерческим запуском</p>
+
+    <div class="draft-notice">
+        <strong>Это черновик для внутреннего использования, не юридический документ.</strong>
+        Он честно описывает, что сайт технически делает с данными сейчас. Прежде чем принимать
+        реальные платежи или официально запускать сервис, нужно: (1) проверить документ у юриста
+        на соответствие 152-ФЗ «О персональных данных» (в т.ч. регистрация как оператор ПДн
+        в Роскомнадзоре, если требуется), (2) для приёма онлайн-оплат — соответствие 54-ФЗ
+        (онлайн-касса/чеки) и требованиям выбранного платёжного провайдера (обычно провайдер сам
+        обрабатывает данные карты — сайт их не хранит), (3) добавить отдельный документ
+        «Пользовательское соглашение / оферта». Это не может определить и оформить сам код.
+    </div>
+
+    <h2>Какие данные мы собираем</h2>
+    <ul>
+        <li>Логин, email (при указании), хеш пароля (bcrypt — сам пароль не хранится нигде)</li>
+        <li>История реакций и комментариев к эпизодам, прогресс просмотра</li>
+        <li>Технические данные для защиты от злоупотреблений: IP-адрес при попытках входа (для блокировки перебора паролей)</li>
+        <li>По желанию — загруженный аватар (доступно по подписке Premium)</li>
+    </ul>
+
+    <h2>Зачем</h2>
+    <ul>
+        <li>Работа основной функциональности: вход, синхронные реакции, комментарии, сохранение прогресса, XP/уровни/достижения</li>
+        <li>Защита аккаунтов: лимит попыток входа, лимит на количество реакций/комментариев в единицу времени</li>
+        <li>Email — подтверждение регистрации и восстановление пароля</li>
+    </ul>
+
+    <h2>Как храним</h2>
+    <ul>
+        <li>Пароли — только в виде bcrypt-хеша, не в открытом виде</li>
+        <li>Email — зашифрован (AES-256-GCM) в базе данных</li>
+        <li>Данные передаются по HTTPS в проде; сессии — через cookie с флагами Secure/SameSite=Strict</li>
+        <li>Файлы (видео, аватары) — в объектном хранилище MinIO, доступ к загрузке только у авторизованных/premium-пользователей соответственно</li>
+    </ul>
+
+    <h2>Кто ещё видит данные</h2>
+    <ul>
+        <li>Хостинг-провайдер сервера и MinIO-хранилища (инфраструктура)</li>
+        <li>SMTP-провайдер — для отправки писем подтверждения/сброса пароля</li>
+        <li>Реакции и комментарии видны другим зрителям этого же эпизода (это часть функциональности сайта, не приватные данные)</li>
+        <li>Данные никому не продаются и не передаются в рекламных целях</li>
+    </ul>
+
+    <h2>Ваши права</h2>
+    <ul>
+        <li>Удалить аккаунт и все связанные данные — раздел настроек аккаунта (реализовано технически, см. функцию удаления)</li>
+        <li>Запросить, какие данные о вас хранятся — напишите на контактный email ниже</li>
+    </ul>
+
+    <h2>Контакты</h2>
+    <p>По вопросам, связанным с данными: <a href="mailto:mishgun.gl@gmail.com" style="color: var(--color-accent);">mishgun.gl@gmail.com</a></p>
+</div>
+{{template "footer" .}}
+</body>
+</html>

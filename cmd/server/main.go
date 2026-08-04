@@ -108,6 +108,71 @@ func resetLoginAttempts(username, ip string) {
 	delete(loginAttempts, loginRateLimitKey(username, ip))
 }
 
+// ---------- Анти-спам: реакции и комментарии ----------
+
+const (
+	emotionRateLimit  = 10
+	emotionRateWindow = 10 * time.Second
+	commentRateLimit  = 5
+	commentRateWindow = 30 * time.Second
+)
+
+var validEmotions = map[string]bool{
+	"❤️": true, "😭": true, "🔥": true, "🤯": true, "🥰": true, "😂": true, "👍": true, "💢": true,
+}
+
+type actionRateLimiter struct {
+	mu     sync.Mutex
+	events map[string][]time.Time
+}
+
+var actionLimiter = &actionRateLimiter{events: make(map[string][]time.Time)}
+
+// allow возвращает true, если действие (реакция/комментарий) укладывается в лимит
+// по скользящему окну для данного ключа (userID+вид действия)
+func (l *actionRateLimiter) allow(key string, limit int, window time.Duration) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := time.Now()
+	cutoff := now.Add(-window)
+	kept := l.events[key][:0]
+	for _, t := range l.events[key] {
+		if t.After(cutoff) {
+			kept = append(kept, t)
+		}
+	}
+	if len(kept) >= limit {
+		l.events[key] = kept
+		return false
+	}
+	l.events[key] = append(kept, now)
+	return true
+}
+
+// ---------- Анти-спойлер: реакции/комментарии видны только premium-пользователям целиком ----------
+
+func isPremiumUser(userID int) bool {
+	if userID <= 0 {
+		return false
+	}
+	var isPremium bool
+	db.QueryRow("SELECT is_premium FROM users WHERE id = ?", userID).Scan(&isPremium)
+	return isPremium
+}
+
+// watchedUpToSec — источник истины для "докуда пользователь досмотрел серию": берём
+// сохранённый прогресс просмотра (user_progress, пишется /api/progress раз в 5с плеером),
+// а не значение из query-параметра запроса — иначе клиент мог бы просто прислать
+// произвольный таймкод и увидеть все реакции/комментарии без подписки
+func watchedUpToSec(userID, episodeID int) int {
+	if userID <= 0 {
+		return 0
+	}
+	var sec int
+	db.QueryRow("SELECT last_timestamp_sec FROM user_progress WHERE user_id = ? AND episode_id = ?", userID, episodeID).Scan(&sec)
+	return sec
+}
+
 // ---------- Мидлвары безопасности ----------
 
 // securityHeaders выставляет заголовки, снижающие ущерб от XSS/clickjacking/
@@ -545,7 +610,11 @@ func awardCommentXP(userID, episodeID int) {
 }
 
 // checkAndUnlockAchievements проверяет и разблокирует ачивки для пользователя
-func checkAndUnlockAchievements(userID int) {
+// checkAndUnlockAchievements проверяет условия ачивок и разблокирует выполненные.
+// Возвращает только те, что были разблокированы именно этим вызовом — нужно
+// для тоста "Достижение получено" на фронтенде (чтобы не показывать его повторно
+// на каждое действие после того, как ачивка уже разблокирована раньше).
+func checkAndUnlockAchievements(userID int) []Achievement {
 	var emotionCount, commentCount int
 	var usedEmotions string
 	var episodeCount int
@@ -593,22 +662,33 @@ func checkAndUnlockAchievements(userID int) {
 		{"expert_50", func() bool { return episodeCount >= 50 }},
 	}
 
+	var newlyUnlocked []Achievement
 	for _, c := range checks {
-		if c.check() {
-			unlockAchievement(userID, c.id)
+		if c.check() && unlockAchievement(userID, c.id) {
+			for _, a := range achievements {
+				if a.ID == c.id {
+					newlyUnlocked = append(newlyUnlocked, a)
+					break
+				}
+			}
 		}
 	}
+	return newlyUnlocked
 }
 
-// unlockAchievement разблокирует ачивку, если ещё не разблокирована
-func unlockAchievement(userID int, achievementID string) {
-	_, err := db.Exec(`
+// unlockAchievement разблокирует ачивку, если ещё не разблокирована.
+// Возвращает true, если ачивка была разблокирована именно этим вызовом (а не раньше).
+func unlockAchievement(userID int, achievementID string) bool {
+	res, err := db.Exec(`
 		INSERT IGNORE INTO user_achievements (user_id, achievement_id)
 		VALUES (?, ?)
 	`, userID, achievementID)
 	if err != nil {
 		log.Printf("unlockAchievement error: %v", err)
+		return false
 	}
+	affected, _ := res.RowsAffected()
+	return affected > 0
 }
 
 // getUserAchievements возвращает все ачивки пользователя
@@ -725,6 +805,32 @@ func createTables() {
 		if _, err := db.Exec("ALTER TABLE episodes ADD COLUMN " + col + " INT DEFAULT NULL"); err != nil {
 			log.Printf("ALTER TABLE episodes (%s) может уже существовать: %v", col, err)
 		}
+	}
+	// Группировка эпизодов по сезонам на странице аниме
+	if _, err := db.Exec("ALTER TABLE episodes ADD COLUMN season INT NOT NULL DEFAULT 1"); err != nil {
+		log.Printf("ALTER TABLE episodes (season) может уже существовать: %v", err)
+	}
+	// Метаданные для карточки аниме (страна/первоисточник/студия/автор/режиссёр) — из Figma
+	for _, col := range []string{"country", "source_type", "studio", "author", "director"} {
+		if _, err := db.Exec("ALTER TABLE anime ADD COLUMN " + col + " VARCHAR(255) DEFAULT ''"); err != nil {
+			log.Printf("ALTER TABLE anime (%s) может уже существовать: %v", col, err)
+		}
+	}
+	if _, err := db.Exec("ALTER TABLE anime ADD COLUMN year VARCHAR(16) DEFAULT ''"); err != nil {
+		log.Printf("ALTER TABLE anime (year) может уже существовать: %v", err)
+	}
+	// Premium-подписка: без неё реакции/комментарии видны только до текущего прогресса
+	// просмотра (анти-спойлер), см. isPremiumUser/watchedUpToSec
+	if _, err := db.Exec("ALTER TABLE users ADD COLUMN is_premium TINYINT(1) NOT NULL DEFAULT 0"); err != nil {
+		log.Printf("ALTER TABLE users (is_premium) может уже существовать: %v", err)
+	}
+	// Кастомизация профиля: свой аватар (только Premium — хранение в MinIO стоит денег,
+	// см. 18_Монетизация_и_уровни.md) и рамка аватара (пресет, разблокируется уровнем)
+	if _, err := db.Exec("ALTER TABLE users ADD COLUMN avatar_url VARCHAR(500) DEFAULT ''"); err != nil {
+		log.Printf("ALTER TABLE users (avatar_url) может уже существовать: %v", err)
+	}
+	if _, err := db.Exec("ALTER TABLE users ADD COLUMN avatar_frame VARCHAR(32) DEFAULT ''"); err != nil {
+		log.Printf("ALTER TABLE users (avatar_frame) может уже существовать: %v", err)
 	}
 }
 
@@ -902,9 +1008,16 @@ func animeHandler(w http.ResponseWriter, r *http.Request) {
 		Description string
 		Poster      string
 		Genres      string
+		Year        string
+		Country     string
+		SourceType  string
+		Studio      string
+		Author      string
+		Director    string
 	}
-	err = db.QueryRow("SELECT id, title, description, poster_url, genres FROM anime WHERE id = ?", id).Scan(
-		&anime.ID, &anime.Title, &anime.Description, &anime.Poster, &anime.Genres)
+	err = db.QueryRow("SELECT id, title, description, poster_url, genres, year, country, source_type, studio, author, director FROM anime WHERE id = ?", id).Scan(
+		&anime.ID, &anime.Title, &anime.Description, &anime.Poster, &anime.Genres, &anime.Year,
+		&anime.Country, &anime.SourceType, &anime.Studio, &anime.Author, &anime.Director)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			http.NotFound(w, r)
@@ -914,7 +1027,7 @@ func animeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := db.Query("SELECT id, episode_num, title FROM episodes WHERE anime_id = ? ORDER BY episode_num", id)
+	rows, err := db.Query("SELECT id, episode_num, season, title FROM episodes WHERE anime_id = ? ORDER BY season, episode_num", id)
 	if err != nil {
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
@@ -922,24 +1035,32 @@ func animeHandler(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type Episode struct {
-		ID    int
-		Num   int
-		Title string
+		ID     int
+		Num    int
+		Season int
+		Title  string
 	}
-	episodes := []Episode{}
+	type SeasonGroup struct {
+		Season   int
+		Episodes []Episode
+	}
+	var seasons []SeasonGroup
 	for rows.Next() {
 		var ep Episode
-		if err := rows.Scan(&ep.ID, &ep.Num, &ep.Title); err != nil {
+		if err := rows.Scan(&ep.ID, &ep.Num, &ep.Season, &ep.Title); err != nil {
 			continue
 		}
-		episodes = append(episodes, ep)
+		if len(seasons) == 0 || seasons[len(seasons)-1].Season != ep.Season {
+			seasons = append(seasons, SeasonGroup{Season: ep.Season})
+		}
+		seasons[len(seasons)-1].Episodes = append(seasons[len(seasons)-1].Episodes, ep)
 	}
 
 	data := struct {
 		Anime    interface{}
-		Episodes []Episode
+		Seasons  []SeasonGroup
 		Username string
-	}{Anime: anime, Episodes: episodes, Username: currentUsername(r)}
+	}{Anime: anime, Seasons: seasons, Username: currentUsername(r)}
 
 	err = templates.ExecuteTemplate(w, "anime.html", data)
 	if err != nil {
@@ -964,6 +1085,7 @@ func watchHandler(w http.ResponseWriter, r *http.Request) {
 		ID         int
 		AnimeID    int
 		EpisodeNum int
+		Season     int
 		Title      string
 		VideoURL   string
 		IntroStart sql.NullInt64
@@ -971,10 +1093,10 @@ func watchHandler(w http.ResponseWriter, r *http.Request) {
 		OutroStart sql.NullInt64
 		OutroEnd   sql.NullInt64
 	}
-	err = db.QueryRow(`SELECT id, anime_id, episode_num, title, video_url,
+	err = db.QueryRow(`SELECT id, anime_id, episode_num, season, title, video_url,
 		intro_start_sec, intro_end_sec, outro_start_sec, outro_end_sec
 		FROM episodes WHERE id = ?`, episodeID).Scan(
-		&episode.ID, &episode.AnimeID, &episode.EpisodeNum, &episode.Title, &episode.VideoURL,
+		&episode.ID, &episode.AnimeID, &episode.EpisodeNum, &episode.Season, &episode.Title, &episode.VideoURL,
 		&episode.IntroStart, &episode.IntroEnd, &episode.OutroStart, &episode.OutroEnd)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -996,12 +1118,44 @@ func watchHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Следующие серии этого же сезона — показываем под блоком реакций/комментариев
+	type NextEpisode struct {
+		ID    int
+		Num   int
+		Title string
+	}
+	nextEpisodes := []NextEpisode{}
+	epRows, err := db.Query(`SELECT id, episode_num, title FROM episodes
+		WHERE anime_id = ? AND season = ? AND episode_num > ?
+		ORDER BY episode_num LIMIT 8`, episode.AnimeID, episode.Season, episode.EpisodeNum)
+	if err == nil {
+		defer epRows.Close()
+		for epRows.Next() {
+			var ne NextEpisode
+			if epRows.Scan(&ne.ID, &ne.Num, &ne.Title) == nil {
+				nextEpisodes = append(nextEpisodes, ne)
+			}
+		}
+	}
+
+	// Соседние серии (в том же сезоне) для кнопок "Предыдущая"/"Следующая" в плеере
+	var prevEpisodeID, nextEpisodeID int
+	db.QueryRow(`SELECT id FROM episodes WHERE anime_id = ? AND season = ? AND episode_num < ?
+		ORDER BY episode_num DESC LIMIT 1`, episode.AnimeID, episode.Season, episode.EpisodeNum).Scan(&prevEpisodeID)
+	db.QueryRow(`SELECT id FROM episodes WHERE anime_id = ? AND season = ? AND episode_num > ?
+		ORDER BY episode_num ASC LIMIT 1`, episode.AnimeID, episode.Season, episode.EpisodeNum).Scan(&nextEpisodeID)
+
 	data := struct {
-		EpisodeNum int
-		VideoURL   string
-		Title      string
-		UserLevel  UserLevelInfo
-		Username   string
+		EpisodeNum    int
+		VideoURL      string
+		Title         string
+		UserLevel     UserLevelInfo
+		Username      string
+		IsPremium     bool
+		AnimeID       int
+		PrevEpisodeID int
+		NextEpisodeID int
+		NextEpisodes  []NextEpisode
 		// IntroStart/IntroEnd/OutroStart/OutroEnd: 0 здесь означает "не задано" (NULL в БД),
 		// а не "начинается с 0-й секунды" — фронтенду нужно отдельно проверять,
 		// заданы ли таймкоды (например, через ненулевой IntroEnd), прежде чем показывать кнопку "Пропустить".
@@ -1010,15 +1164,20 @@ func watchHandler(w http.ResponseWriter, r *http.Request) {
 		OutroStart int64
 		OutroEnd   int64
 	}{
-		EpisodeNum: episode.EpisodeNum,
-		VideoURL:   episode.VideoURL,
-		Title:      episode.Title,
-		UserLevel:  levelInfo,
-		Username:   currentUsername(r),
-		IntroStart: episode.IntroStart.Int64,
-		IntroEnd:   episode.IntroEnd.Int64,
-		OutroStart: episode.OutroStart.Int64,
-		OutroEnd:   episode.OutroEnd.Int64,
+		EpisodeNum:    episode.EpisodeNum,
+		VideoURL:      episode.VideoURL,
+		Title:         episode.Title,
+		UserLevel:     levelInfo,
+		Username:      currentUsername(r),
+		IsPremium:     isPremiumUser(userID),
+		AnimeID:       episode.AnimeID,
+		PrevEpisodeID: prevEpisodeID,
+		NextEpisodeID: nextEpisodeID,
+		NextEpisodes:  nextEpisodes,
+		IntroStart:    episode.IntroStart.Int64,
+		IntroEnd:      episode.IntroEnd.Int64,
+		OutroStart:    episode.OutroStart.Int64,
+		OutroEnd:      episode.OutroEnd.Int64,
 	}
 
 	err = templates.ExecuteTemplate(w, "watch.html", data)
@@ -1035,8 +1194,10 @@ func profileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var username string
-	err = db.QueryRow("SELECT username FROM users WHERE id = ?", userID).Scan(&username)
+	var username, avatarURL, avatarFrame string
+	var isPremium bool
+	err = db.QueryRow("SELECT username, avatar_url, avatar_frame, is_premium FROM users WHERE id = ?", userID).
+		Scan(&username, &avatarURL, &avatarFrame, &isPremium)
 	if err != nil {
 		username = "Гость"
 	}
@@ -1046,8 +1207,38 @@ func profileHandler(w http.ResponseWriter, r *http.Request) {
 	db.QueryRow("SELECT xp FROM user_xp WHERE user_id = ?", userID).Scan(&xp)
 	levelInfo := getLevelInfo(xp)
 
+	avatarFrameColor := "#ffffff"
+	if f, ok := avatarFrameByID(avatarFrame); ok && f.ID != "" {
+		avatarFrameColor = f.Color
+	}
+
+	// Рамки аватара с отметкой "разблокирована текущим уровнем" — для селектора на странице
+	type FrameOption struct {
+		avatarFramePreset
+		Unlocked bool
+	}
+	frameOptions := make([]FrameOption, len(avatarFramePresets))
+	for i, f := range avatarFramePresets {
+		frameOptions[i] = FrameOption{avatarFramePreset: f, Unlocked: levelInfo.Level >= f.MinLevel}
+	}
+
 	// Получаем ачивки
 	userAchievements := getUserAchievements(userID)
+
+	// Полный каталог ачивок с отметкой "разблокирована" — для грида на странице
+	// профиля (заблокированные показываем затемнёнными, а не просто скрываем)
+	unlockedIDs := make(map[string]bool, len(userAchievements))
+	for _, ua := range userAchievements {
+		unlockedIDs[ua.AchievementID] = true
+	}
+	type AchievementSlot struct {
+		Achievement
+		Unlocked bool
+	}
+	achievementSlots := make([]AchievementSlot, len(achievements))
+	for i, a := range achievements {
+		achievementSlots[i] = AchievementSlot{Achievement: a, Unlocked: unlockedIDs[a.ID]}
+	}
 
 	// Получаем статистику
 	var emotionCount, commentCount, episodeCount int
@@ -1055,24 +1246,87 @@ func profileHandler(w http.ResponseWriter, r *http.Request) {
 	db.QueryRow("SELECT COUNT(*) FROM comments WHERE user_id = ?", userID).Scan(&commentCount)
 	db.QueryRow("SELECT COUNT(DISTINCT episode_id) FROM emotions WHERE user_id = ?", userID).Scan(&episodeCount)
 
+	// "Буду смотреть серию" — реальный прогресс просмотра (user_progress), последние 5
+	type ContinueEpisode struct {
+		EpisodeID    int
+		EpisodeNum   int
+		EpisodeTitle string
+		AnimeTitle   string
+		Poster       string
+	}
+	continueWatching := []ContinueEpisode{}
+	cwRows, err := db.Query(`
+		SELECT e.id, e.episode_num, e.title, a.title, a.poster_url
+		FROM user_progress up
+		JOIN episodes e ON up.episode_id = e.id
+		JOIN anime a ON e.anime_id = a.id
+		WHERE up.user_id = ?
+		ORDER BY up.updated_at DESC
+		LIMIT 5
+	`, userID)
+	if err == nil {
+		defer cwRows.Close()
+		for cwRows.Next() {
+			var ce ContinueEpisode
+			if cwRows.Scan(&ce.EpisodeID, &ce.EpisodeNum, &ce.EpisodeTitle, &ce.AnimeTitle, &ce.Poster) == nil {
+				continueWatching = append(continueWatching, ce)
+			}
+		}
+	}
+
 	data := struct {
-		Username     string
-		Level        UserLevelInfo
-		Achievements []UserAchievement
-		EmotionCount int
-		CommentCount int
-		EpisodeCount int
+		Username         string
+		Level            UserLevelInfo
+		AchievementSlots []AchievementSlot
+		EmotionCount     int
+		CommentCount     int
+		EpisodeCount     int
+		ContinueWatching []ContinueEpisode
+		AvatarURL        string
+		AvatarFrame      string
+		AvatarFrameColor string
+		IsPremium        bool
+		FrameOptions     []FrameOption
 	}{
-		Username:     username,
-		Level:        levelInfo,
-		Achievements: userAchievements,
-		EmotionCount: emotionCount,
-		CommentCount: commentCount,
-		EpisodeCount: episodeCount,
+		Username:         username,
+		Level:            levelInfo,
+		AchievementSlots: achievementSlots,
+		EmotionCount:     emotionCount,
+		CommentCount:     commentCount,
+		EpisodeCount:     episodeCount,
+		ContinueWatching: continueWatching,
+		AvatarURL:        avatarURL,
+		AvatarFrame:      avatarFrame,
+		AvatarFrameColor: avatarFrameColor,
+		IsPremium:        isPremium,
+		FrameOptions:     frameOptions,
 	}
 
 	err = templates.ExecuteTemplate(w, "profile.html", data)
 	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func premiumHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	userID, _ := getUserIDFromSession(r)
+	data := struct {
+		Username  string
+		IsPremium bool
+	}{
+		Username:  currentUsername(r),
+		IsPremium: isPremiumUser(userID),
+	}
+	if err := templates.ExecuteTemplate(w, "premium.html", data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func privacyPolicyHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	data := struct{ Username string }{Username: currentUsername(r)}
+	if err := templates.ExecuteTemplate(w, "privacy-policy.html", data); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
@@ -1101,11 +1355,12 @@ func apiEmotionPost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"Missing fields"}`, http.StatusBadRequest)
 		return
 	}
-	validEmotions := map[string]bool{
-		"😭": true, "🔥": true, "🤯": true, "🥰": true, "💢": true,
-	}
 	if !validEmotions[req.EmotionType] {
 		http.Error(w, `{"error":"Invalid emotion type"}`, http.StatusBadRequest)
+		return
+	}
+	if !actionLimiter.allow(fmt.Sprintf("emotion:%d", userID), emotionRateLimit, emotionRateWindow) {
+		http.Error(w, `{"error":"Слишком много реакций подряд, подождите немного"}`, http.StatusTooManyRequests)
 		return
 	}
 	_, err = db.Exec("INSERT INTO emotions (user_id, episode_id, timestamp_sec, emotion_type) VALUES (?, ?, ?, ?)",
@@ -1117,10 +1372,13 @@ func apiEmotionPost(w http.ResponseWriter, r *http.Request) {
 
 	// Начисляем XP за эмоцию (с учётом анти-фарм лимита на эпизод)
 	awardEmotionXP(userID, req.EpisodeID)
-	checkAndUnlockAchievements(userID)
+	newAchievements := checkAndUnlockAchievements(userID)
 
 	w.WriteHeader(http.StatusCreated)
-	fmt.Fprint(w, `{"status":"ok"}`)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":               "ok",
+		"unlocked_achievements": newAchievements,
+	})
 }
 
 func apiEmotionsGet(w http.ResponseWriter, r *http.Request) {
@@ -1143,14 +1401,21 @@ func apiEmotionsGet(w http.ResponseWriter, r *http.Request) {
 	}
 	offset := (page - 1) * pageSize
 
-	rows, err := db.Query(`
+	userID, _ := getUserIDFromSession(r)
+	query := `
 		SELECT e.emotion_type, e.timestamp_sec, u.username
 		FROM emotions e
 		JOIN users u ON e.user_id = u.id
-		WHERE e.episode_id = ?
-		ORDER BY e.created_at DESC
-		LIMIT ? OFFSET ?
-	`, episodeID, pageSize, offset)
+		WHERE e.episode_id = ?`
+	args := []interface{}{episodeID}
+	if !isPremiumUser(userID) {
+		query += " AND e.timestamp_sec <= ?"
+		args = append(args, watchedUpToSec(userID, episodeID))
+	}
+	query += " ORDER BY e.timestamp_sec ASC LIMIT ? OFFSET ?"
+	args = append(args, pageSize, offset)
+
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
 		return
@@ -1448,6 +1713,12 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			log.Printf("📨 Received WS message: type=%s episode_id=%d emotion_type=%s", msg.Type, msg.EpisodeID, msg.EmotionType)
 			if msg.Type == "emotion" && msg.EpisodeID == episodeID {
+				if !validEmotions[msg.EmotionType] || msg.TimestampSec < 0 {
+					continue
+				}
+				if !actionLimiter.allow(fmt.Sprintf("emotion:%d", userID), emotionRateLimit, emotionRateWindow) {
+					continue
+				}
 				_, err = db.Exec("INSERT INTO emotions (user_id, episode_id, timestamp_sec, emotion_type) VALUES (?, ?, ?, ?)",
 					userID, msg.EpisodeID, msg.TimestampSec, msg.EmotionType)
 				if err != nil {
@@ -1459,7 +1730,18 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 
 				// Начисляем XP за эмоцию через WebSocket (с учётом анти-фарм лимита на эпизод)
 				awardEmotionXP(userID, msg.EpisodeID)
-				checkAndUnlockAchievements(userID)
+				if newAchievements := checkAndUnlockAchievements(userID); len(newAchievements) > 0 {
+					// Личное уведомление только отправителю, не всей комнате
+					if data, err := json.Marshal(map[string]interface{}{
+						"type":         "achievement_unlocked",
+						"achievements": newAchievements,
+					}); err == nil {
+						select {
+						case client.send <- data:
+						default:
+						}
+					}
+				}
 			}
 		}
 	}()
@@ -1551,6 +1833,10 @@ func apiCommentPost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"Missing fields"}`, http.StatusBadRequest)
 		return
 	}
+	if !actionLimiter.allow(fmt.Sprintf("comment:%d", userID), commentRateLimit, commentRateWindow) {
+		http.Error(w, `{"error":"Слишком много комментариев подряд, подождите немного"}`, http.StatusTooManyRequests)
+		return
+	}
 	// Ограничение длины комментария
 	if len(req.Text) > 500 {
 		req.Text = req.Text[:500]
@@ -1568,10 +1854,13 @@ func apiCommentPost(w http.ResponseWriter, r *http.Request) {
 
 	// Начисляем XP за комментарий (с учётом анти-фарм лимита на эпизод)
 	awardCommentXP(userID, req.EpisodeID)
-	checkAndUnlockAchievements(userID)
+	newAchievements := checkAndUnlockAchievements(userID)
 
 	w.WriteHeader(http.StatusCreated)
-	fmt.Fprint(w, `{"status":"ok"}`)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":               "ok",
+		"unlocked_achievements": newAchievements,
+	})
 }
 
 func apiCommentsGet(w http.ResponseWriter, r *http.Request) {
@@ -1604,14 +1893,21 @@ func apiCommentsGet(w http.ResponseWriter, r *http.Request) {
 
 	offset := (page - 1) * pageSize
 
-	rows, err := db.Query(`
+	userID, _ := getUserIDFromSession(r)
+	query := `
 		SELECT c.id, u.username, c.timestamp_sec, c.text, c.created_at
 		FROM comments c
 		JOIN users u ON c.user_id = u.id
-		WHERE c.episode_id = ?
-		ORDER BY c.created_at DESC
-		LIMIT ? OFFSET ?
-	`, episodeID, pageSize, offset)
+		WHERE c.episode_id = ?`
+	args := []interface{}{episodeID}
+	if !isPremiumUser(userID) {
+		query += " AND c.timestamp_sec <= ?"
+		args = append(args, watchedUpToSec(userID, episodeID))
+	}
+	query += " ORDER BY c.timestamp_sec ASC LIMIT ? OFFSET ?"
+	args = append(args, pageSize, offset)
+
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
 		return
@@ -1780,6 +2076,167 @@ func sniffVideoContainer(f multipart.File) error {
 		return nil
 	}
 	return fmt.Errorf("unrecognized video container signature")
+}
+
+// maxAvatarBytes — верхняя граница размера файла аватара.
+const maxAvatarBytes = 5 << 20 // 5 MiB
+
+// sniffImageContainer проверяет magic bytes на JPEG/PNG/WebP — расширение
+// файла легко подделать (см. sniffVideoContainer).
+func sniffImageContainer(f multipart.File) (ext string, err error) {
+	head := make([]byte, 12)
+	n, err := io.ReadFull(f, head)
+	if err != nil && err != io.ErrUnexpectedEOF {
+		return "", err
+	}
+	head = head[:n]
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return "", err
+	}
+
+	switch {
+	case len(head) >= 3 && bytes.Equal(head[:3], []byte{0xFF, 0xD8, 0xFF}):
+		return ".jpg", nil
+	case len(head) >= 8 && bytes.Equal(head[:8], []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}):
+		return ".png", nil
+	case len(head) >= 12 && string(head[:4]) == "RIFF" && string(head[8:12]) == "WEBP":
+		return ".webp", nil
+	}
+	return "", fmt.Errorf("unrecognized image signature")
+}
+
+// avatarFramePreset — рамка аватара, разблокируется уровнем пользователя (бесплатная
+// косметика за активность, в отличие от загрузки своего файла — см. 18_Монетизация_и_уровни.md)
+type avatarFramePreset struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	MinLevel int    `json:"min_level"`
+	Color    string `json:"color"`
+}
+
+var avatarFramePresets = []avatarFramePreset{
+	{ID: "", Name: "Без рамки", MinLevel: 1, Color: "transparent"},
+	{ID: "bronze", Name: "Бронзовая", MinLevel: 3, Color: "#9A5B32"},
+	{ID: "silver", Name: "Серебряная", MinLevel: 6, Color: "#C0C0C0"},
+	{ID: "gold", Name: "Золотая", MinLevel: 9, Color: "#FFCC00"},
+}
+
+func avatarFrameByID(id string) (avatarFramePreset, bool) {
+	for _, f := range avatarFramePresets {
+		if f.ID == id {
+			return f, true
+		}
+	}
+	return avatarFramePreset{}, false
+}
+
+// apiAvatarUploadHandler принимает файл аватара — только для Premium-пользователей
+// (хранение в MinIO стоит денег, см. 18_Монетизация_и_уровни.md), остальным доступны
+// только рамки-пресеты (apiAvatarFrameHandler).
+func apiAvatarUploadHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	if !isPremiumUser(userID) {
+		http.Error(w, `{"error":"Загрузка своего аватара доступна только по подписке Premium"}`, http.StatusForbidden)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxAvatarBytes)
+	file, _, err := r.FormFile("avatar")
+	if err != nil {
+		if err.Error() == "http: request body too large" {
+			http.Error(w, `{"error":"Файл превышает 5 МБ"}`, http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, `{"error":"Файл (поле avatar) обязателен"}`, http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	ext, err := sniffImageContainer(file)
+	if err != nil {
+		http.Error(w, `{"error":"Файл не распознан как изображение (jpg/png/webp)"}`, http.StatusBadRequest)
+		return
+	}
+
+	tmpFile, err := os.CreateTemp("", "ancen-avatar-*"+ext)
+	if err != nil {
+		http.Error(w, `{"error":"Ошибка временного файла"}`, http.StatusInternalServerError)
+		return
+	}
+	defer os.Remove(tmpFile.Name())
+	if _, err := io.Copy(tmpFile, file); err != nil {
+		tmpFile.Close()
+		http.Error(w, `{"error":"Ошибка записи файла"}`, http.StatusInternalServerError)
+		return
+	}
+	tmpFile.Close()
+
+	objectName := fmt.Sprintf("avatars/%d-%d%s", userID, time.Now().UnixNano(), ext)
+	contentType := "image/jpeg"
+	if ext == ".png" {
+		contentType = "image/png"
+	} else if ext == ".webp" {
+		contentType = "image/webp"
+	}
+	url, err := uploadSingleFile(r.Context(), tmpFile.Name(), objectName, contentType)
+	if err != nil {
+		http.Error(w, `{"error":"Ошибка загрузки в хранилище"}`, http.StatusInternalServerError)
+		return
+	}
+
+	if _, err := db.Exec("UPDATE users SET avatar_url = ? WHERE id = ?", url, userID); err != nil {
+		http.Error(w, `{"error":"Ошибка сохранения аватара"}`, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "avatar_url": url})
+}
+
+// apiAvatarFrameHandler устанавливает рамку аватара из бесплатных пресетов,
+// разблокированных уровнем пользователя.
+func apiAvatarFrameHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	var req struct {
+		FrameID string `json:"frame_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"Invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+	frame, ok := avatarFrameByID(req.FrameID)
+	if !ok {
+		http.Error(w, `{"error":"Неизвестная рамка"}`, http.StatusBadRequest)
+		return
+	}
+	var xp int
+	db.QueryRow("SELECT xp FROM user_xp WHERE user_id = ?", userID).Scan(&xp)
+	if getLevelInfo(xp).Level < frame.MinLevel {
+		http.Error(w, `{"error":"Рамка ещё не разблокирована — нужен более высокий уровень"}`, http.StatusForbidden)
+		return
+	}
+	if _, err := db.Exec("UPDATE users SET avatar_frame = ? WHERE id = ?", frame.ID, userID); err != nil {
+		http.Error(w, `{"error":"Ошибка сохранения"}`, http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 // adminUploadVideoHandler принимает сырой видеофайл, транскодирует его в adaptive
@@ -2336,6 +2793,8 @@ func main() {
 	secureHandle("/anime/", animeHandler)
 	secureHandle("/watch", watchHandler)
 	secureHandle("/profile", profileHandler)
+	secureHandle("/premium", premiumHandler)
+	secureHandle("/privacy-policy", privacyPolicyHandler)
 	secureHandle("/api/emotion", apiEmotionPost)
 	secureHandle("/api/emotions", apiEmotionsGet)
 	secureHandle("/ws", wsHandler)
@@ -2365,6 +2824,8 @@ func main() {
 	secureHandle("/api/level", apiLevelGet)
 	secureHandle("/api/achievements/all", apiAllAchievementsGet)
 	secureHandle("/api/admin/upload-video", adminUploadVideoHandler)
+	secureHandle("/api/profile/avatar", apiAvatarUploadHandler)
+	secureHandle("/api/profile/avatar-frame", apiAvatarFrameHandler)
 	secureHandle("/api/change-password", apiChangePasswordHandler)
 	secureHandle("/api/auth/refresh", apiAuthRefreshHandler)
 	secureHandle("/api/auth/logout", apiAuthLogoutHandler)

@@ -89,3 +89,14 @@ func uploadDir(ctx context.Context, localDir, objectPrefix string) (string, erro
 	}
 	return masterURL, nil
 }
+
+// uploadSingleFile заливает один файл (например, аватар) в MinIO под заданным именем
+// объекта и возвращает публичный URL. В отличие от uploadDir — без обхода директории,
+// для одиночных небольших файлов.
+func uploadSingleFile(ctx context.Context, localPath, objectName, contentType string) (string, error) {
+	_, err := minioClient.FPutObject(ctx, minioBucket, objectName, localPath, minio.PutObjectOptions{ContentType: contentType})
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s/%s/%s", minioPublicBaseURL, minioBucket, objectName), nil
+}

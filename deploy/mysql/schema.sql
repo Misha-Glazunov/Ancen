@@ -5,6 +5,9 @@ CREATE TABLE IF NOT EXISTS users (
     username        VARCHAR(255) NOT NULL UNIQUE,
     password_hash   VARCHAR(255) NOT NULL,
     is_admin        TINYINT(1) NOT NULL DEFAULT 0,
+    is_premium      TINYINT(1) NOT NULL DEFAULT 0,
+    avatar_url      VARCHAR(500) DEFAULT '',
+    avatar_frame    VARCHAR(32) DEFAULT '',
     email           VARCHAR(500) NOT NULL DEFAULT '',
     email_confirmed TINYINT(1) NOT NULL DEFAULT 0,
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -16,6 +19,12 @@ CREATE TABLE IF NOT EXISTS anime (
     description TEXT,
     poster_url  VARCHAR(500) DEFAULT '',
     genres      VARCHAR(255) DEFAULT '',
+    year        VARCHAR(16) DEFAULT '',
+    country     VARCHAR(255) DEFAULT '',
+    source_type VARCHAR(255) DEFAULT '',
+    studio      VARCHAR(255) DEFAULT '',
+    author      VARCHAR(255) DEFAULT '',
+    director    VARCHAR(255) DEFAULT '',
     created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -23,6 +32,7 @@ CREATE TABLE IF NOT EXISTS episodes (
     id              INT AUTO_INCREMENT PRIMARY KEY,
     anime_id        INT NOT NULL,
     episode_num     INT NOT NULL,
+    season          INT NOT NULL DEFAULT 1,
     title           VARCHAR(255) NOT NULL DEFAULT '',
     video_url       VARCHAR(500) NOT NULL DEFAULT '',
     intro_start_sec INT DEFAULT NULL,

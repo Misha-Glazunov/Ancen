@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Профиль — AniMemory</title>
+    <title>{{.Username}} — профиль | AniMemory</title>
     <meta name="robots" content="noindex, nofollow">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -11,125 +11,462 @@
     <link rel="stylesheet" href="/static/css/tokens.css">
     <style>
         * { box-sizing: border-box; }
-        body { margin: 0; background: var(--color-bg); color: var(--color-text); font-family: var(--font-base); }
-        .container { max-width: 900px; margin: 0 auto; padding: 40px 20px; }
-        h2.username {
+        body {
+            margin: 0;
+            color: var(--color-text);
+            font-family: var(--font-base);
+            background: var(--color-bg) url('/static/img/login/background_image_blure_v3.png') no-repeat top center;
+            background-size: cover;
+        }
+
+        .profile-card {
+            max-width: 1160px;
+            margin: 40px auto;
+            padding: 30px;
+            background: rgba(0, 0, 0, 0.1);
+            border-radius: var(--radius-lg);
+        }
+
+        /* ===== Шапка профиля ===== */
+        .profile-hero {
+            display: flex;
+            gap: 40px;
+            align-items: flex-start;
+            flex-wrap: wrap;
+            margin-bottom: 30px;
+        }
+        .profile-avatar {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 220px;
+            height: 220px;
+            border-radius: var(--radius-lg);
+            border: 4px solid var(--color-text);
+            background: var(--color-accent-gradient);
             font-family: var(--font-display);
+            font-size: 72px;
+            flex-shrink: 0;
+            overflow: hidden;
+        }
+        .profile-avatar img { width: 100%; height: 100%; object-fit: cover; }
+
+        /* ===== Кастомизация: загрузка аватара + выбор рамки ===== */
+        .customize-panel { margin-top: 20px; max-width: 460px; }
+        .customize-panel .hint { font-size: var(--fs-small); color: var(--color-gray-500); margin: 0 0 12px; }
+        .frame-options { display: flex; gap: 12px; flex-wrap: wrap; }
+        .frame-option {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 44px;
+            height: 44px;
+            border-radius: var(--radius-md);
+            background: var(--color-gray-950);
+            cursor: pointer;
+            box-sizing: border-box;
+        }
+        .frame-option[data-selected="true"] { box-shadow: 0 0 0 2px var(--color-text); }
+        .frame-option[data-unlocked="false"] { opacity: 0.35; cursor: not-allowed; }
+        .frame-option .swatch { width: 24px; height: 24px; border-radius: 50%; border: 3px solid currentColor; }
+        .avatar-upload-row { display: flex; align-items: center; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
+        .avatar-upload-row input[type=file] { color: var(--color-gray-300); font-size: var(--fs-small); max-width: 220px; }
+        .profile-info h1 {
+            font-family: var(--font-base);
             font-weight: 400;
-            font-size: var(--fs-display-md);
+            font-size: var(--fs-display-lg);
+            margin: 0 0 20px;
+        }
+        .profile-level-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-family: var(--font-base);
+            font-weight: 700;
+            font-size: var(--fs-heading);
+            color: var(--color-accent);
             margin-bottom: 24px;
         }
-        .level-box {
-            background: var(--color-gray-950);
-            border-radius: var(--radius-xl);
-            padding: 24px;
-            margin: 20px 0;
-            text-align: center;
+        .profile-level-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 30px;
+            height: 30px;
+            padding: 0 6px;
+            border: 1px solid currentColor;
+            border-radius: var(--radius-lg);
         }
-        .level-box .level {
+
+        /* ===== Панели (достижения / друзья / буду смотреть) ===== */
+        .panel {
+            background: rgba(15, 15, 15, 0.6);
+            border-radius: var(--radius-lg);
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .panel h2 {
+            font-family: var(--font-base);
+            font-weight: 700;
+            font-size: var(--fs-heading);
+            margin: 0 0 20px;
+        }
+        .panel-inner {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: var(--radius-lg);
+            padding: 20px;
+        }
+
+        .profile-columns { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+        .col-main { flex: 1; min-width: 320px; }
+        .col-friends { width: 315px; flex-shrink: 0; }
+
+        /* Достижения */
+        .achievements-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+        }
+        .achievement-slot { text-align: center; }
+        .achievement-icon {
+            width: 60px;
+            height: 60px;
+            margin: 0 auto 10px;
+            border-radius: var(--radius-lg);
+            background: var(--color-warm-red);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+        }
+        .achievement-slot.locked .achievement-icon { background: var(--color-gray-900); opacity: 0.6; }
+        .achievement-slot.locked .achievement-name { color: var(--color-gray-500); }
+        .achievement-name { font-size: var(--fs-body); font-weight: 700; }
+
+        /* Плашка с описанием ачивки при наведении */
+        .achievement-slot { position: relative; cursor: default; }
+        .achievement-tooltip {
+            position: absolute;
+            left: 50%;
+            bottom: calc(100% + 10px);
+            transform: translateX(-50%) translateY(4px);
+            width: max-content;
+            max-width: 200px;
+            padding: 8px 12px;
+            border-radius: var(--radius-md);
+            background: var(--color-gray-950);
+            border: 1px solid var(--color-gray-700);
+            color: var(--color-text);
+            font-size: var(--fs-small);
+            text-align: center;
+            line-height: 1.4;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease, transform 0.2s ease;
+            z-index: 10;
+        }
+        .achievement-slot:hover .achievement-tooltip { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+        /* Друзья */
+        .friends-list {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            max-height: 900px;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: var(--color-purple) transparent;
+        }
+        .friend-item { display: flex; align-items: center; gap: 20px; }
+        .friend-avatar {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100px;
+            height: 100px;
+            border: 1px solid var(--color-text);
+            border-radius: var(--radius-lg);
+            background: var(--color-accent-gradient);
             font-family: var(--font-display);
-            font-size: var(--fs-display-md);
-            color: var(--color-accent);
+            font-size: 32px;
+            flex-shrink: 0;
         }
-        .level-box .xp-bar { background: var(--color-gray-700); border-radius: var(--radius-pill); height: 16px; margin: 12px 0; overflow: hidden; }
-        .level-box .xp-fill { background: var(--color-accent-gradient); height: 100%; transition: width 0.3s; }
-
-        .stats { display: flex; justify-content: space-around; margin: 24px 0; gap: 16px; flex-wrap: wrap; }
-        .stat-item {
-            text-align: center;
-            background: var(--color-gray-950);
-            padding: 18px;
+        .friend-name { font-size: var(--fs-heading); margin-bottom: 8px; }
+        .friend-level {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 700;
+            font-size: var(--fs-body);
+        }
+        .friend-level b {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 26px;
+            height: 26px;
+            padding: 0 4px;
+            border: 1px solid currentColor;
             border-radius: var(--radius-lg);
-            min-width: 120px;
-            flex: 1;
+            font-size: var(--fs-small);
         }
-        .stat-item .num { font-family: var(--font-display); font-size: 28px; color: var(--color-accent); }
 
-        h3 { font-family: var(--font-base); font-weight: 700; font-size: var(--fs-heading); border-bottom: 1px solid var(--color-gray-700); padding-bottom: 10px; }
-
-        .achievements { display: flex; flex-wrap: wrap; gap: 10px; margin: 20px 0; }
-        .achievement {
-            background: var(--color-gray-950);
+        /* Буду смотреть серию / аниме */
+        .episode-card {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            gap: 8px;
+            height: 126px;
+            padding: 9px 16px;
             border-radius: var(--radius-lg);
-            padding: 14px 18px;
-            text-align: center;
-            min-width: 110px;
-        }
-        .achievement .icon { font-size: 2rem; }
-        .achievement .name { font-size: var(--fs-small); color: var(--color-gray-300); }
-        .achievement .date { font-size: 12px; color: var(--color-gray-500); }
-        .no-achievements { color: var(--color-gray-500); text-align: center; padding: 20px; }
-
-        .back-link {
-            display: inline-block;
-            margin-top: 20px;
+            background: var(--color-gray-900);
             color: var(--color-text);
             text-decoration: none;
-            transition: color 0.2s;
+            transition: transform 0.2s ease;
         }
-        .back-link:hover { color: var(--color-accent); }
+        .episode-card:hover { transform: translateY(-4px); }
+        .episode-card .play-icon { font-size: 18px; line-height: 1; }
+        .episode-card .ep-title { font-size: var(--fs-small); font-weight: 400; text-align: center; line-height: 1.4; }
+        .episode-favorite {
+            position: absolute;
+            top: 12px;
+            right: 14px;
+            background: none;
+            border: none;
+            padding: 0;
+            font-size: 18px;
+            color: var(--color-text);
+            cursor: pointer;
+        }
+        .episodes-row, .catalog-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 26px;
+        }
+        .catalog-card { display: block; text-align: center; color: inherit; text-decoration: none; }
+        .catalog-card img { width: 100%; height: 129px; object-fit: cover; border-radius: var(--radius-sm); display: block; margin-bottom: 10px; transition: transform 0.3s ease; }
+        .catalog-card:hover img { transform: scale(1.04); }
+        .catalog-card .title { font-size: var(--fs-small); }
 
+        .empty-state { color: var(--color-gray-500); }
+
+        @media (max-width: 900px) {
+            .profile-columns { flex-direction: column; }
+            .col-friends { width: 100%; }
+        }
         @media (max-width: 600px) {
-            .container { padding: 24px 16px; }
-            h2.username { font-size: 26px; }
-            .level-box .level { font-size: 26px; }
-            .stats { gap: 10px; }
-            .stat-item { min-width: 0; padding: 14px 10px; }
-            .stat-item .num { font-size: 22px; }
-            .achievement { min-width: 90px; padding: 12px 14px; }
+            .profile-card { padding: 20px; margin: 20px auto; }
+            .profile-hero { flex-direction: column; align-items: center; text-align: center; }
+            .profile-avatar { width: 160px; height: 160px; font-size: 56px; }
+            .profile-info h1 { font-size: 32px; }
+            .profile-level-row { justify-content: center; }
+            .achievements-grid { grid-template-columns: repeat(2, 1fr); }
         }
     </style>
 </head>
 <body>
 {{template "header" .}}
-<div class="container">
-    <h2 class="username">{{.Username}}</h2>
-
-    {{if .Level}}
-    <div class="level-box">
-        <div class="level">Уровень {{.Level.Level}}</div>
-        <p>Опыт: {{.Level.XP}} / {{.Level.NextLevelXP}} XP</p>
-        <div class="xp-bar">
-            <div class="xp-fill" data-width="{{.Level.XPPercent}}"></div>
+<div class="profile-card" data-animate>
+    <div class="profile-hero">
+        <div class="profile-avatar" id="profile-avatar" style="border-color: {{.AvatarFrameColor}}">
+            {{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="{{.Username}}">{{else}}{{initial .Username}}{{end}}
         </div>
-    </div>
-    <script>
-        document.querySelector('.xp-fill').style.width = document.querySelector('.xp-fill').dataset.width + '%';
-    </script>
-    {{end}}
-
-    <div class="stats">
-        <div class="stat-item">
-            <div class="num">{{.EmotionCount}}</div>
-            <div>Эмоций</div>
-        </div>
-        <div class="stat-item">
-            <div class="num">{{.CommentCount}}</div>
-            <div>Комментариев</div>
-        </div>
-        <div class="stat-item">
-            <div class="num">{{.EpisodeCount}}</div>
-            <div>Эпизодов</div>
-        </div>
-    </div>
-
-    <h3>Достижения</h3>
-    <div class="achievements">
-        {{if .Achievements}}
-            {{range .Achievements}}
-            <div class="achievement">
-                <div class="icon">{{.Icon}}</div>
-                <div class="name">{{.Name}}</div>
-                <div class="date">{{.UnlockedAt}}</div>
+        <div class="profile-info">
+            <h1>{{.Username}}</h1>
+            {{if .Level}}
+            <div class="profile-level-row">
+                <span>Уровень</span>
+                <span class="profile-level-badge">{{.Level.Level}}</span>
+                <span>{{.Level.XP}} XP</span>
             </div>
             {{end}}
-        {{else}}
-            <div class="no-achievements">Пока нет достижений. Смотрите аниме и ставьте эмоции!</div>
-        {{end}}
+
+            <div class="customize-panel">
+                <div class="avatar-upload-row">
+                    {{if .IsPremium}}
+                    <input type="file" id="avatar-file" accept="image/jpeg,image/png,image/webp">
+                    <button type="button" id="avatar-upload-btn" class="btn btn-sm">Загрузить аватар</button>
+                    {{else}}
+                    <p class="hint">Загрузка своего аватара — по подписке Premium. Пока доступны рамки за уровень ниже.</p>
+                    {{end}}
+                </div>
+                <p class="hint" style="margin-top:16px;">Рамка аватара</p>
+                <div class="frame-options" id="frame-options">
+                    {{range .FrameOptions}}
+                    <div class="frame-option" data-frame-id="{{.ID}}" data-unlocked="{{.Unlocked}}" data-selected="{{eq .ID $.AvatarFrame}}" title="{{.Name}}{{if not .Unlocked}} (уровень {{.MinLevel}}+){{end}}">
+                        <span class="swatch" style="color: {{.Color}}; border-color: {{.Color}};"></span>
+                    </div>
+                    {{end}}
+                </div>
+            </div>
+        </div>
     </div>
 
-    <a href="/" class="back-link">На главную</a>
+    <div class="profile-columns">
+        <div class="col-main">
+            <div class="panel" data-animate>
+                <h2>Список достижений</h2>
+                <div class="achievements-grid">
+                    {{range .AchievementSlots}}
+                    <div class="achievement-slot{{if not .Unlocked}} locked{{end}}">
+                        <div class="achievement-icon">{{.Icon}}</div>
+                        <div class="achievement-name">{{.Name}}</div>
+                        <div class="achievement-tooltip">{{.Description}}{{if not .Unlocked}} (ещё не получено){{end}}</div>
+                    </div>
+                    {{end}}
+                </div>
+            </div>
+
+            <div class="panel" data-animate>
+                <h2>Буду смотреть серию</h2>
+                {{if .ContinueWatching}}
+                <div class="episodes-row">
+                    {{range .ContinueWatching}}
+                    <a href="/watch?episode={{.EpisodeID}}" class="episode-card" style="background: linear-gradient(0deg, rgba(0,0,0,0.4), rgba(0,0,0,0.4)), url('{{.Poster}}') center/cover no-repeat;">
+                        <span class="play-icon">▶</span>
+                        <span class="ep-title">Серия {{.EpisodeNum}}<br>{{.EpisodeTitle}}</span>
+                    </a>
+                    {{end}}
+                </div>
+                {{else}}
+                <p class="empty-state">Пока нет начатых серий — начните смотреть, и они появятся здесь.</p>
+                {{end}}
+            </div>
+
+            <div class="panel" data-animate>
+                <h2>Буду смотреть аниме</h2>
+                <div class="catalog-row">
+                    <a href="/search?q=Тетрадь смерти" class="catalog-card">
+                        <img src="/static/img/home/carousel_thumb_1.png" alt="Тетрадь смерти">
+                        <div class="title">Тетрадь смерти</div>
+                    </a>
+                    <a href="/search?q=Атака титанов" class="catalog-card">
+                        <img src="/static/img/home/carousel_thumb_2.png" alt="Атака титанов">
+                        <div class="title">Атака титанов</div>
+                    </a>
+                    <a href="/search?q=Гинтама" class="catalog-card">
+                        <img src="/static/img/home/carousel_thumb_3.png" alt="Гинтама">
+                        <div class="title">Гинтама</div>
+                    </a>
+                    <a href="/search?q=Монстр" class="catalog-card">
+                        <img src="/static/img/home/carousel_thumb_4.png" alt="Монстр">
+                        <div class="title">Монстр</div>
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-friends panel" data-animate>
+            <h2>Список друзей</h2>
+            <div class="friends-list">
+                <div class="friend-item">
+                    <div class="friend-avatar">А</div>
+                    <div>
+                        <div class="friend-name">Азат Шехзодович</div>
+                        <span class="friend-level" style="color:#FF0000">Уровень <b>10</b></span>
+                    </div>
+                </div>
+                <div class="friend-item">
+                    <div class="friend-avatar">П</div>
+                    <div>
+                        <div class="friend-name">Поська</div>
+                        <span class="friend-level" style="color:#FFA600">Уровень <b>5</b></span>
+                    </div>
+                </div>
+                <div class="friend-item">
+                    <div class="friend-avatar">А</div>
+                    <div>
+                        <div class="friend-name">Алекс</div>
+                        <span class="friend-level" style="color:#FFFFFF">Уровень <b>1</b></span>
+                    </div>
+                </div>
+                <div class="friend-item">
+                    <div class="friend-avatar">С</div>
+                    <div>
+                        <div class="friend-name">Софья Квачулина</div>
+                        <span class="friend-level" style="color:#FF4400">Уровень <b>8</b></span>
+                    </div>
+                </div>
+                <div class="friend-item">
+                    <div class="friend-avatar">Т</div>
+                    <div>
+                        <div class="friend-name">Тимоха Питерский</div>
+                        <span class="friend-level" style="color:#FFCC00">Уровень <b>3</b></span>
+                    </div>
+                </div>
+                <div class="friend-item">
+                    <div class="friend-avatar">Н</div>
+                    <div>
+                        <div class="friend-name">Настьюшка Опасность</div>
+                        <span class="friend-level" style="color:#FF0000">Уровень <b>10</b></span>
+                    </div>
+                </div>
+                <div class="friend-item">
+                    <div class="friend-avatar">Р</div>
+                    <div>
+                        <div class="friend-name">Русланчик Валеевич</div>
+                        <span class="friend-level" style="color:#FF3C00">Уровень <b>9</b></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 {{template "footer" .}}
+<script src="/static/js/scroll-reveal.js"></script>
+<script src="/static/js/toast.js"></script>
+<script>
+    var uploadBtn = document.getElementById('avatar-upload-btn');
+    if (uploadBtn) {
+        uploadBtn.addEventListener('click', function () {
+            var fileInput = document.getElementById('avatar-file');
+            var file = fileInput.files[0];
+            if (!file) { showToast({ icon: '⚠️', title: 'Выберите файл', body: 'jpg / png / webp, до 5 МБ' }); return; }
+            var formData = new FormData();
+            formData.append('avatar', file);
+            uploadBtn.disabled = true;
+            fetch('/api/profile/avatar', { method: 'POST', body: formData })
+                .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+                .then(function (res) {
+                    if (res.ok) {
+                        document.getElementById('profile-avatar').innerHTML = '<img src="' + res.data.avatar_url + '" alt="">';
+                        showToast({ icon: '🖼️', title: 'Аватар обновлён', body: '' });
+                    } else {
+                        showToast({ icon: '⚠️', title: 'Ошибка', body: res.data.error || 'не удалось загрузить' });
+                    }
+                })
+                .catch(function () { showToast({ icon: '⚠️', title: 'Ошибка сети', body: '' }); })
+                .finally(function () { uploadBtn.disabled = false; });
+        });
+    }
+
+    document.querySelectorAll('.frame-option').forEach(function (el) {
+        el.addEventListener('click', function () {
+            if (el.dataset.unlocked !== 'true') {
+                showToast({ icon: '🔒', title: 'Рамка заблокирована', body: el.getAttribute('title') });
+                return;
+            }
+            fetch('/api/profile/avatar-frame', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ frame_id: el.dataset.frameId })
+            })
+                .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+                .then(function (res) {
+                    if (res.ok) {
+                        document.querySelectorAll('.frame-option').forEach(function (o) { o.dataset.selected = 'false'; });
+                        el.dataset.selected = 'true';
+                        var color = getComputedStyle(el.querySelector('.swatch')).borderColor;
+                        document.getElementById('profile-avatar').style.borderColor = color;
+                    } else {
+                        showToast({ icon: '⚠️', title: 'Ошибка', body: res.data.error || '' });
+                    }
+                })
+                .catch(function () { showToast({ icon: '⚠️', title: 'Ошибка сети', body: '' }); });
+        });
+    });
+</script>
 </body>
 </html>

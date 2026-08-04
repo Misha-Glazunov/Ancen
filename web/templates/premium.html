@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AniMemory Premium</title>
+    <meta name="robots" content="noindex, follow">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;700&family=Manrope:wght@400;500;600&family=MuseoModerno:wght@400;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/tokens.css">
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; background: var(--color-bg); color: var(--color-text); font-family: var(--font-base); }
+        .container { max-width: 800px; margin: 0 auto; padding: 60px 20px 80px; text-align: center; }
+        .container h1 {
+            font-family: var(--font-base);
+            font-weight: 400;
+            font-size: var(--fs-display-lg);
+            margin: 0 0 10px;
+        }
+        .container .subtitle { color: var(--color-gray-300); margin: 0 0 50px; }
+
+        .perks {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 20px;
+            text-align: left;
+            margin-bottom: 50px;
+        }
+        .perk {
+            background: rgba(15, 15, 15, 0.6);
+            border-radius: var(--radius-lg);
+            padding: 24px;
+        }
+        .perk .icon { font-size: 32px; margin-bottom: 12px; }
+        .perk .name { font-weight: 700; margin-bottom: 6px; }
+        .perk .desc { font-size: var(--fs-small); color: var(--color-gray-300); }
+        .perk.soon { opacity: 0.5; }
+        .perk .badge {
+            display: inline-block;
+            margin-top: 10px;
+            padding: 2px 10px;
+            border-radius: var(--radius-pill);
+            background: var(--color-gray-900);
+            font-size: 11px;
+            color: var(--color-gray-500);
+        }
+
+        .status-banner {
+            padding: 16px 20px;
+            border-radius: var(--radius-lg);
+            background: rgba(15, 15, 15, 0.6);
+            border: 1px solid var(--color-accent);
+            margin-bottom: 30px;
+        }
+
+        @media (max-width: 600px) {
+            .container h1 { font-size: 32px; }
+        }
+    </style>
+</head>
+<body>
+{{template "header" .}}
+<div class="container" data-animate>
+    <h1>AniMemory Premium</h1>
+    <p class="subtitle">Поддержи проект и получи больше возможностей</p>
+
+    {{if .IsPremium}}
+    <div class="status-banner">У тебя уже активен Premium ✨</div>
+    {{end}}
+
+    <div class="perks">
+        <div class="perk">
+            <div class="icon">🚫👁️</div>
+            <div class="name">Без анти-спойлер фильтра</div>
+            <div class="desc">Реакции и комментарии видны сразу, без ожидания прогресса просмотра</div>
+        </div>
+        <div class="perk">
+            <div class="icon">🖼️</div>
+            <div class="name">Свой аватар</div>
+            <div class="desc">Загрузка собственного изображения вместо инициала и рамок-пресетов</div>
+        </div>
+        <div class="perk soon">
+            <div class="icon">🚫📢</div>
+            <div class="name">Без рекламы</div>
+            <div class="desc">Когда реклама появится на сайте — у Premium её не будет</div>
+            <span class="badge">скоро</span>
+        </div>
+        <div class="perk soon">
+            <div class="icon">🎬</div>
+            <div class="name">1080p</div>
+            <div class="desc">Просмотр в повышенном качестве</div>
+            <span class="badge">скоро</span>
+        </div>
+    </div>
+
+    <button type="button" class="btn btn-solid" id="premium-cta" {{if .IsPremium}}disabled{{end}}>
+        {{if .IsPremium}}Уже подключено{{else}}Оформить Premium{{end}}
+    </button>
+    <p style="margin-top:16px; color: var(--color-gray-500); font-size: var(--fs-small);">
+        Оплата картой скоро появится. Продолжая, ты соглашаешься с
+        <a href="/privacy-policy" style="color: inherit;">Политикой конфиденциальности</a>.
+    </p>
+</div>
+{{template "footer" .}}
+<script src="/static/js/toast.js"></script>
+<script>
+    var cta = document.getElementById('premium-cta');
+    if (cta && !cta.disabled) {
+        cta.addEventListener('click', function () {
+            showToast({ icon: '💳', title: 'Скоро', body: 'Оплата картой пока не подключена' });
+        });
+    }
+</script>
+</body>
+</html>
