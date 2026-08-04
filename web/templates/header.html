@@ -5,10 +5,23 @@
     <a href="/" class="header-logo">
         <img src="/static/img/header/logo_header.png" alt="AniMemory" class="header-logo-img">
     </a>
-    <form method="GET" action="/search" class="header-search-glass">
-        <span class="search-icon" aria-hidden="true">🔍</span>
-        <input type="text" name="q" placeholder="Поиск аниме">
-    </form>
+    <div class="header-search-wrap">
+        <form method="GET" action="/search" class="header-search-form">
+            <span class="header-search-glass">
+                <span class="search-icon" aria-hidden="true">🔍</span>
+                <input type="text" name="q" placeholder="Поиск аниме" autocomplete="off">
+            </span>
+            <button type="submit" class="header-search-submit">Искать</button>
+        </form>
+        <div class="header-search-results">
+            <div class="header-search-tabs">
+                <button type="button" class="active" data-tab="anime">Аниме</button>
+                <button type="button" data-tab="friends">Друзья</button>
+            </div>
+            <div class="header-search-list" data-list="anime"></div>
+            <div class="header-search-list" data-list="friends" hidden></div>
+        </div>
+    </div>
     <nav class="header-nav">
         <a href="/search">Новое</a>
         <a href="/search">Популярное</a>
@@ -25,10 +38,23 @@
     <a href="/" class="header-logo">
         <img src="/static/img/header/logo_header.png" alt="AniMemory" class="header-logo-img">
     </a>
-    <form method="GET" action="/search" class="header-search-glass">
-        <span class="search-icon" aria-hidden="true">🔍</span>
-        <input type="text" name="q" placeholder="Поиск аниме и друзей">
-    </form>
+    <div class="header-search-wrap">
+        <form method="GET" action="/search" class="header-search-form">
+            <span class="header-search-glass">
+                <span class="search-icon" aria-hidden="true">🔍</span>
+                <input type="text" name="q" placeholder="Поиск аниме и друзей" autocomplete="off">
+            </span>
+            <button type="submit" class="header-search-submit">Искать</button>
+        </form>
+        <div class="header-search-results">
+            <div class="header-search-tabs">
+                <button type="button" class="active" data-tab="anime">Аниме</button>
+                <button type="button" data-tab="friends">Друзья</button>
+            </div>
+            <div class="header-search-list" data-list="anime"></div>
+            <div class="header-search-list" data-list="friends" hidden></div>
+        </div>
+    </div>
     <nav class="header-nav">
         <a href="/search">Новое</a>
         <a href="/search">Популярное</a>
@@ -52,7 +78,7 @@
     z-index: 1000;
 }
 .header-logo-img { width: 160px; height: auto; display: block; object-fit: contain; }
-.header-nav { display: flex; align-items: center; gap: 28px; }
+.header-nav { display: flex; align-items: center; gap: 28px; max-width: 500px; white-space: nowrap; }
 .header-nav a {
     font-family: var(--font-base);
     font-size: var(--fs-body);
@@ -63,7 +89,7 @@
 .header-nav a:hover { color: var(--color-accent); }
 
 /* ===== Header (авторизованный пользователь), из Figma ===== */
-.header-account { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
+.header-account { display: flex; align-items: center; gap: 14px; flex-shrink: 0; max-width: 200px; white-space: nowrap; }
 .header-avatar {
     display: flex;
     align-items: center;
@@ -90,11 +116,40 @@
 
 /* ===== Header_Unlogin (гость), 1:1 из Figma ===== */
 
+.header-search-wrap {
+    position: relative;
+    flex: 0 0 270px;
+    width: 270px;
+    transition: flex-grow 0.4s ease, flex-basis 0.4s ease;
+    z-index: 1001;
+}
+.header-search-wrap.active {
+    flex: 1 1 auto;
+}
+.header-nav,
+.header-account {
+    overflow: hidden;
+    transition: opacity 0.35s ease, max-width 0.4s ease, margin 0.4s ease, padding 0.4s ease;
+}
+.button-login-registry { overflow: hidden; }
+.site-header.search-active .header-nav,
+.site-header.search-active .header-account,
+.site-header.search-active .button-login-registry {
+    opacity: 0;
+    max-width: 0;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    pointer-events: none;
+}
+.header-search-form { display: flex; align-items: center; gap: 10px; width: 100%; }
 .header-search-glass {
     display: flex;
     align-items: center;
     gap: 10px;
-    width: 270px;
+    flex: 1;
+    min-width: 0;
     height: 40px;
     padding: 0 16px;
     box-sizing: border-box;
@@ -129,15 +184,132 @@
     min-width: 0;
 }
 .header-search-glass input::placeholder { color: rgba(255,255,255,0.5); }
+.header-search-submit {
+    flex-shrink: 0;
+    height: 40px;
+    padding: 0 20px;
+    box-sizing: border-box;
+    background-color: rgba(0, 0, 0, 0.01);
+    background-image: linear-gradient(#fff, #fff);
+    background-repeat: no-repeat;
+    background-size: 0% 100%;
+    backdrop-filter: blur(20px);
+    border-radius: var(--radius-lg);
+    font-family: var(--font-base);
+    font-size: var(--fs-small);
+    color: var(--color-text);
+    cursor: pointer;
+    position: relative;
+    border: 1px solid transparent;
+    background-clip: padding-box;
+    display: none;
+    transition: background-size 0.35s ease, color 0.3s ease 0.05s, transform 0.2s ease, box-shadow 0.3s ease;
+}
+.header-search-wrap.active .header-search-submit { display: block; }
+.header-search-submit::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: var(--radius-lg);
+    padding: 1px;
+    background: var(--color-accent-gradient);
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+}
+.header-search-submit:hover {
+    background-size: 100% 100%;
+    color: #000;
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(216, 45, 126, 0.35);
+}
+
+.header-search-results {
+    display: none;
+    position: absolute;
+    top: calc(100% + 10px);
+    left: 0;
+    right: 0;
+    background: #000;
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    max-height: 60vh;
+    overflow-y: auto;
+    box-sizing: border-box;
+    scrollbar-width: thin;
+    scrollbar-color: #933799 transparent;
+}
+.header-search-results::-webkit-scrollbar { width: 10px; }
+.header-search-results::-webkit-scrollbar-track { background: transparent; }
+.header-search-results::-webkit-scrollbar-thumb { background: #933799; border-radius: 10px; }
+.header-search-wrap.active .header-search-results { display: block; }
+.header-search-tabs { display: flex; gap: 12px; margin-bottom: 16px; }
+.header-search-tabs button {
+    padding: 8px 20px;
+    border-radius: var(--radius-lg);
+    border: 2px solid var(--color-purple);
+    background: transparent;
+    color: var(--color-text);
+    font-family: var(--font-base);
+    font-size: var(--fs-body);
+    cursor: pointer;
+    transition: box-shadow 0.2s, border-color 0.2s;
+}
+.header-search-tabs button.active {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 14px rgba(216, 45, 126, 0.6);
+}
+.header-search-item {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 0;
+    text-decoration: none;
+    color: var(--color-text);
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.header-search-item:last-child { border-bottom: none; }
+.header-search-item img { width: 56px; height: 78px; object-fit: cover; border-radius: var(--radius-sm); flex-shrink: 0; }
+.header-search-item.friend img { height: 56px; border-radius: var(--radius-lg); }
+.header-search-item .info { flex: 1; min-width: 0; }
+.header-search-item .info .title { font-size: var(--fs-body); margin-bottom: 6px; }
+.header-search-item .info .genre-tag { margin-bottom: 6px; }
+.header-search-item .info .year { font-size: var(--fs-small); color: var(--color-gray-500); display: block; }
+.header-search-item .score { font-size: 22px; font-weight: 600; flex-shrink: 0; }
+.header-search-item .level {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--fs-small);
+    color: var(--color-warm-red);
+}
+.header-search-item .level b {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 6px;
+    border: 1px solid currentColor;
+    border-radius: 50%;
+    font-weight: 400;
+}
+.header-search-empty { color: var(--color-gray-500); padding: 12px 0; }
 
 .button-login-registry {
     display: flex;
     align-items: center;
     justify-content: center;
     box-sizing: border-box;
-    width: 177px;
-    height: 40px;
-    background: rgba(0, 0, 0, 0.01);
+    width: 181px;
+    max-width: 181px;
+    height: 35px;
+    padding: 4px 20px;
+    background-color: rgba(0, 0, 0, 0.01);
+    background-image: linear-gradient(#fff, #fff);
+    background-repeat: no-repeat;
+    background-size: 0% 100%;
     backdrop-filter: blur(20px);
     border-radius: var(--radius-lg);
     font-family: var(--font-base);
@@ -145,7 +317,8 @@
     cursor: pointer;
     color: var(--color-text);
     text-decoration: none;
-    transition: background 0.2s, color 0.2s;
+    transition: background-size 0.35s ease, color 0.3s ease 0.05s, transform 0.2s ease, box-shadow 0.3s ease,
+        opacity 0.35s ease, max-width 0.4s ease, margin 0.4s ease, padding 0.4s ease;
     border: 1px solid transparent;
     background-clip: padding-box;
     position: relative;
@@ -163,13 +336,18 @@
     mask-composite: exclude;
     pointer-events: none;
 }
-.button-login-registry:hover { background: rgb(255, 255, 255); color: #000; }
+.button-login-registry:hover {
+    background-size: 100% 100%;
+    color: #000;
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(216, 45, 126, 0.35);
+}
 
 @media (max-width: 768px) {
     .site-header { padding: 16px 20px; justify-content: center; text-align: center; }
     .header-logo-img { width: 130px; }
     .header-nav { gap: 14px; flex-wrap: wrap; justify-content: center; width: 100%; order: 3; }
-    .header-search-glass { order: 2; width: 100%; }
+    .header-search-wrap { order: 2; width: 100%; flex-basis: 100%; }
     .button-login-registry { order: 1; }
     .header-account { order: 1; }
 }
@@ -179,4 +357,95 @@
     .header-nav a { font-size: var(--fs-small); }
 }
 </style>
+<script>
+(function () {
+    var ANIME = [
+        { title: 'Тетрадь смерти', genre: 'Приключение /драма', year: '2006', img: '/static/img/home/carousel_thumb_1.png', score: 10 },
+        { title: 'Атака титанов', genre: 'Приключение /драма', year: '2013 - 2023', img: '/static/img/home/carousel_thumb_2.png', score: 8 },
+        { title: 'Гинтама', genre: 'Приключение /драма', year: '2005 - 2021', img: '/static/img/home/carousel_thumb_3.png', score: 6 },
+        { title: 'Монстр', genre: 'Приключение /драма', year: '2004', img: '/static/img/home/carousel_thumb_4.png', score: 5 },
+        { title: 'Ван-пис', genre: 'Приключение /драма', year: '1999 — …', img: '/static/img/home/catalog_1_1.png', score: 9 },
+        { title: 'Demon Slayer', genre: 'Приключение /драма', year: '2019', img: '/static/img/home/hero_banner.png', score: 10 }
+    ];
+    var FRIENDS = [
+        { name: 'Lerchek', level: 10, avatar: '/static/img/home/top1.png' },
+        { name: 'Deadinside', level: 8, avatar: '/static/img/home/top2.png' },
+        { name: 'Vika', level: 5, avatar: '/static/img/home/top3.png' }
+    ];
+
+    function scoreColor(s) { return s >= 9 ? '#4CD964' : s >= 6 ? '#C6FF3D' : '#FF7A00'; }
+    function levelColor(l) { return l >= 8 ? 'var(--color-warm-red)' : l >= 4 ? 'var(--color-warm-orange)' : '#fff'; }
+    function escapeHtml(s) { return s.replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
+    function renderAnime(list, query) {
+        var items = ANIME.filter(function (a) { return a.title.toLowerCase().indexOf(query) !== -1; });
+        if (!items.length) { list.innerHTML = '<div class="header-search-empty">Ничего не найдено</div>'; return; }
+        list.innerHTML = items.map(function (a) {
+            return '<a class="header-search-item" href="/search?q=' + encodeURIComponent(a.title) + '">' +
+                '<img src="' + a.img + '" alt="">' +
+                '<div class="info"><div class="title">' + escapeHtml(a.title) + '</div>' +
+                '<span class="genre-tag">' + escapeHtml(a.genre) + '</span>' +
+                '<span class="year">' + escapeHtml(a.year) + '</span></div>' +
+                '<span class="score" style="color:' + scoreColor(a.score) + '">' + a.score + '</span></a>';
+        }).join('');
+    }
+
+    function renderFriends(list, query) {
+        var items = FRIENDS.filter(function (f) { return f.name.toLowerCase().indexOf(query) !== -1; });
+        if (!items.length) { list.innerHTML = '<div class="header-search-empty">Ничего не найдено</div>'; return; }
+        list.innerHTML = items.map(function (f) {
+            return '<a class="header-search-item friend" href="/profile">' +
+                '<img src="' + f.avatar + '" alt="">' +
+                '<div class="info"><div class="title">' + escapeHtml(f.name) + '</div>' +
+                '<span class="level">Уровень <b style="color:' + levelColor(f.level) + '">' + f.level + '</b></span></div>' +
+                '</a>';
+        }).join('');
+    }
+
+    document.querySelectorAll('.header-search-wrap').forEach(function (wrap) {
+        var input = wrap.querySelector('.header-search-glass input');
+        var animeList = wrap.querySelector('[data-list="anime"]');
+        var friendsList = wrap.querySelector('[data-list="friends"]');
+        var tabs = wrap.querySelectorAll('.header-search-tabs button');
+
+        function activeTab() {
+            var btn = wrap.querySelector('.header-search-tabs button.active');
+            return btn ? btn.dataset.tab : 'anime';
+        }
+
+        function update() {
+            var query = input.value.trim().toLowerCase();
+            renderAnime(animeList, query);
+            renderFriends(friendsList, query);
+        }
+
+        tabs.forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                tabs.forEach(function (b) { b.classList.remove('active'); });
+                btn.classList.add('active');
+                animeList.hidden = btn.dataset.tab !== 'anime';
+                friendsList.hidden = btn.dataset.tab !== 'friends';
+            });
+        });
+
+        var header = wrap.closest('.site-header');
+
+        input.addEventListener('focus', function () {
+            wrap.classList.add('active');
+            if (header) header.classList.add('search-active');
+            update();
+        });
+        input.addEventListener('input', update);
+        document.addEventListener('click', function (e) {
+            if (!wrap.contains(e.target)) {
+                wrap.classList.remove('active');
+                if (header) header.classList.remove('search-active');
+            }
+        });
+        wrap.querySelector('form').addEventListener('submit', function (e) {
+            if (activeTab() === 'friends') e.preventDefault();
+        });
+    });
+})();
+</script>
 {{end}}
