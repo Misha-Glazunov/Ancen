@@ -482,6 +482,7 @@ var achievements = []Achievement{
 	{ID: "early_bird", Name: "Ранний пташка", Description: "Зарегистрироваться в первую неделю запуска", Category: "special", Icon: "🐦"},
 	{ID: "expert_50", Name: "Эксперт", Description: "Посмотреть более 50 эпизодов", Category: "special", Icon: "🎓"},
 	{ID: "timekeeper", Name: "Хранитель таймкодов", Description: "Оставить 20 эмоций с погрешностью <1 сек", Category: "special", Icon: "⏰"},
+	{ID: "friendly", Name: "Дружелюбный", Description: "Добавить 5 друзей", Category: "special", Icon: "🤝"},
 }
 
 // Уровни: сколько всего XP нужно набрать для каждого уровня.
@@ -661,6 +662,11 @@ func checkAndUnlockAchievements(userID int) []Achievement {
 		}},
 		{"guardian_10", func() bool { return episodeCount >= 10 }},
 		{"expert_50", func() bool { return episodeCount >= 50 }},
+		{"friendly", func() bool {
+			var friendCount int
+			db.QueryRow("SELECT COUNT(*) FROM friendships WHERE status = 'accepted' AND (requester_id = ? OR addressee_id = ?)", userID, userID).Scan(&friendCount)
+			return friendCount >= 5
+		}},
 	}
 
 	var newlyUnlocked []Achievement
@@ -731,6 +737,180 @@ func getUserAchievements(userID int) []UserAchievement {
 	return result
 }
 
+// ===== Друзья =====
+
+type FriendInfo struct {
+	UserID           int
+	Username         string
+	AvatarURL        string
+	AvatarFrameColor string
+	Level            int
+}
+
+type FriendRequestInfo struct {
+	RequestID int
+	UserID    int
+	Username  string
+	AvatarURL string
+	Level     int
+}
+
+func friendInfoRows(rows *sql.Rows) []FriendInfo {
+	defer rows.Close()
+	var result []FriendInfo
+	for rows.Next() {
+		var f FriendInfo
+		var avatarFrame string
+		var xp int
+		if rows.Scan(&f.UserID, &f.Username, &f.AvatarURL, &avatarFrame, &xp) == nil {
+			if fr, ok := avatarFrameByID(avatarFrame); ok && fr.ID != "" {
+				f.AvatarFrameColor = fr.Color
+			} else {
+				f.AvatarFrameColor = "#ffffff"
+			}
+			f.Level = getLevelInfo(xp).Level
+			result = append(result, f)
+		}
+	}
+	return result
+}
+
+// getFriends возвращает принятых друзей пользователя.
+func getFriends(userID int) []FriendInfo {
+	rows, err := db.Query(`
+		SELECT u.id, u.username, u.avatar_url, u.avatar_frame, COALESCE(ux.xp, 0)
+		FROM friendships f
+		JOIN users u ON u.id = CASE WHEN f.requester_id = ? THEN f.addressee_id ELSE f.requester_id END
+		LEFT JOIN user_xp ux ON ux.user_id = u.id
+		WHERE f.status = 'accepted' AND (f.requester_id = ? OR f.addressee_id = ?)
+		ORDER BY u.username
+	`, userID, userID, userID)
+	if err != nil {
+		log.Printf("getFriends error: %v", err)
+		return nil
+	}
+	return friendInfoRows(rows)
+}
+
+// getPendingIncoming возвращает входящие заявки в друзья.
+func getPendingIncoming(userID int) []FriendRequestInfo {
+	rows, err := db.Query(`
+		SELECT f.id, u.id, u.username, u.avatar_url, COALESCE(ux.xp, 0)
+		FROM friendships f
+		JOIN users u ON u.id = f.requester_id
+		LEFT JOIN user_xp ux ON ux.user_id = u.id
+		WHERE f.status = 'pending' AND f.addressee_id = ?
+		ORDER BY f.created_at DESC
+	`, userID)
+	if err != nil {
+		log.Printf("getPendingIncoming error: %v", err)
+		return nil
+	}
+	defer rows.Close()
+	var result []FriendRequestInfo
+	for rows.Next() {
+		var r FriendRequestInfo
+		var xp int
+		if rows.Scan(&r.RequestID, &r.UserID, &r.Username, &r.AvatarURL, &xp) == nil {
+			r.Level = getLevelInfo(xp).Level
+			result = append(result, r)
+		}
+	}
+	return result
+}
+
+// getFriendshipStatus сообщает состояние связи между viewerID и otherID:
+// "self", "friends", "pending_sent", "pending_received" или "none".
+func getFriendshipStatus(viewerID, otherID int) string {
+	if viewerID == otherID {
+		return "self"
+	}
+	var status string
+	var requesterID int
+	err := db.QueryRow(`
+		SELECT status, requester_id FROM friendships
+		WHERE (requester_id = ? AND addressee_id = ?) OR (requester_id = ? AND addressee_id = ?)
+	`, viewerID, otherID, otherID, viewerID).Scan(&status, &requesterID)
+	if err == sql.ErrNoRows {
+		return "none"
+	}
+	if err != nil {
+		log.Printf("getFriendshipStatus error: %v", err)
+		return "none"
+	}
+	if status == "accepted" {
+		return "friends"
+	}
+	if requesterID == viewerID {
+		return "pending_sent"
+	}
+	return "pending_received"
+}
+
+// sendFriendRequest отправляет заявку в друзья по username. Если у адресата уже
+// есть встречная заявка — заявки автоматически становятся взаимной дружбой,
+// не плодя дублирующую запись.
+func sendFriendRequest(fromID int, toUsername string) (string, error) {
+	var toID int
+	if err := db.QueryRow("SELECT id FROM users WHERE username = ?", toUsername).Scan(&toID); err != nil {
+		return "", fmt.Errorf("пользователь не найден")
+	}
+	if toID == fromID {
+		return "", fmt.Errorf("нельзя добавить себя в друзья")
+	}
+
+	status := getFriendshipStatus(fromID, toID)
+	switch status {
+	case "friends":
+		return "friends", nil
+	case "pending_sent":
+		return "pending_sent", nil
+	case "pending_received":
+		// у собеседника уже есть входящая заявка от нас — принимаем её встречную
+		if _, err := db.Exec("UPDATE friendships SET status = 'accepted' WHERE requester_id = ? AND addressee_id = ?", toID, fromID); err != nil {
+			return "", err
+		}
+		return "friends", nil
+	}
+
+	if _, err := db.Exec("INSERT INTO friendships (requester_id, addressee_id, status) VALUES (?, ?, 'pending')", fromID, toID); err != nil {
+		return "", err
+	}
+	return "pending_sent", nil
+}
+
+// respondFriendRequest принимает или отклоняет входящую заявку requestID,
+// адресованную userID.
+func respondFriendRequest(userID, requestID int, accept bool) error {
+	if accept {
+		res, err := db.Exec("UPDATE friendships SET status = 'accepted' WHERE id = ? AND addressee_id = ? AND status = 'pending'", requestID, userID)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return fmt.Errorf("заявка не найдена")
+		}
+		return nil
+	}
+	res, err := db.Exec("DELETE FROM friendships WHERE id = ? AND addressee_id = ? AND status = 'pending'", requestID, userID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("заявка не найдена")
+	}
+	return nil
+}
+
+// removeFriendship удаляет дружбу (в любую сторону) между userID и otherID.
+func removeFriendship(userID, otherID int) error {
+	_, err := db.Exec(`
+		DELETE FROM friendships
+		WHERE status = 'accepted' AND ((requester_id = ? AND addressee_id = ?) OR (requester_id = ? AND addressee_id = ?))
+	`, userID, otherID, otherID, userID)
+	return err
+}
+
 // createTables создаёт таблицы для системы ачивок и сброса пароля, если их нет
 func createTables() {
 	tables := []string{
@@ -779,6 +959,16 @@ func createTables() {
 			revoked_at DATETIME DEFAULT NULL,
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY (user_id) REFERENCES users(id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS friendships (
+			id INT AUTO_INCREMENT PRIMARY KEY,
+			requester_id INT NOT NULL,
+			addressee_id INT NOT NULL,
+			status ENUM('pending','accepted') NOT NULL DEFAULT 'pending',
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE KEY uniq_pair (requester_id, addressee_id),
+			FOREIGN KEY (requester_id) REFERENCES users(id),
+			FOREIGN KEY (addressee_id) REFERENCES users(id)
 		)`,
 	}
 	for _, q := range tables {
@@ -1188,24 +1378,67 @@ func watchHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func profileHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	userID, err := getUserIDFromSession(r)
 	if err != nil {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
+	renderProfile(w, r, userID, userID)
+}
+
+// profileByUsernameHandler — публичный профиль /profile/{username}. Если он
+// совпадает с профилем текущего пользователя, отдаём канонический /profile.
+func profileByUsernameHandler(w http.ResponseWriter, r *http.Request) {
+	username := strings.TrimPrefix(r.URL.Path, "/profile/")
+	if username == "" {
+		http.Redirect(w, r, "/profile", http.StatusSeeOther)
+		return
+	}
+
+	var targetID int
+	if err := db.QueryRow("SELECT id FROM users WHERE username = ?", username).Scan(&targetID); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	viewerID, _ := getUserIDFromSession(r)
+	if viewerID == targetID {
+		http.Redirect(w, r, "/profile", http.StatusSeeOther)
+		return
+	}
+	renderProfile(w, r, targetID, viewerID)
+}
+
+// renderProfile строит и рендерит страницу профиля targetID. viewerID — id
+// текущего залогиненного пользователя (0, если гость); используется для
+// определения статуса дружбы и того, свой ли это профиль.
+func renderProfile(w http.ResponseWriter, r *http.Request, targetID, viewerID int) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	isOwn := viewerID == targetID
 
 	var username, avatarURL, avatarFrame string
 	var isPremium bool
-	err = db.QueryRow("SELECT username, avatar_url, avatar_frame, is_premium FROM users WHERE id = ?", userID).
+	err := db.QueryRow("SELECT username, avatar_url, avatar_frame, is_premium FROM users WHERE id = ?", targetID).
 		Scan(&username, &avatarURL, &avatarFrame, &isPremium)
 	if err != nil {
-		username = "Гость"
+		http.NotFound(w, r)
+		return
+	}
+
+	// Username хедера — это залогиненный пользователь (viewer), а не владелец
+	// просматриваемого профиля; header.html показывает по нему свой/гостевой вид.
+	viewerUsername := ""
+	if viewerID > 0 {
+		if isOwn {
+			viewerUsername = username
+		} else {
+			db.QueryRow("SELECT username FROM users WHERE id = ?", viewerID).Scan(&viewerUsername)
+		}
 	}
 
 	// Получаем XP и уровень
 	var xp int
-	db.QueryRow("SELECT xp FROM user_xp WHERE user_id = ?", userID).Scan(&xp)
+	db.QueryRow("SELECT xp FROM user_xp WHERE user_id = ?", targetID).Scan(&xp)
 	levelInfo := getLevelInfo(xp)
 
 	avatarFrameColor := "#ffffff"
@@ -1224,7 +1457,7 @@ func profileHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Получаем ачивки
-	userAchievements := getUserAchievements(userID)
+	userAchievements := getUserAchievements(targetID)
 
 	// Полный каталог ачивок с отметкой "разблокирована" — для грида на странице
 	// профиля (заблокированные показываем затемнёнными, а не просто скрываем)
@@ -1243,11 +1476,12 @@ func profileHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Получаем статистику
 	var emotionCount, commentCount, episodeCount int
-	db.QueryRow("SELECT COUNT(*) FROM emotions WHERE user_id = ?", userID).Scan(&emotionCount)
-	db.QueryRow("SELECT COUNT(*) FROM comments WHERE user_id = ?", userID).Scan(&commentCount)
-	db.QueryRow("SELECT COUNT(DISTINCT episode_id) FROM emotions WHERE user_id = ?", userID).Scan(&episodeCount)
+	db.QueryRow("SELECT COUNT(*) FROM emotions WHERE user_id = ?", targetID).Scan(&emotionCount)
+	db.QueryRow("SELECT COUNT(*) FROM comments WHERE user_id = ?", targetID).Scan(&commentCount)
+	db.QueryRow("SELECT COUNT(DISTINCT episode_id) FROM emotions WHERE user_id = ?", targetID).Scan(&episodeCount)
 
-	// "Буду смотреть серию" — реальный прогресс просмотра (user_progress), последние 5
+	// "Буду смотреть серию" — реальный прогресс просмотра (user_progress), последние 5.
+	// Приватная информация — показываем только владельцу профиля.
 	type ContinueEpisode struct {
 		EpisodeID    int
 		EpisodeNum   int
@@ -1256,55 +1490,83 @@ func profileHandler(w http.ResponseWriter, r *http.Request) {
 		Poster       string
 	}
 	continueWatching := []ContinueEpisode{}
-	cwRows, err := db.Query(`
-		SELECT e.id, e.episode_num, e.title, a.title, a.poster_url
-		FROM user_progress up
-		JOIN episodes e ON up.episode_id = e.id
-		JOIN anime a ON e.anime_id = a.id
-		WHERE up.user_id = ?
-		ORDER BY up.updated_at DESC
-		LIMIT 5
-	`, userID)
-	if err == nil {
-		defer cwRows.Close()
-		for cwRows.Next() {
-			var ce ContinueEpisode
-			if cwRows.Scan(&ce.EpisodeID, &ce.EpisodeNum, &ce.EpisodeTitle, &ce.AnimeTitle, &ce.Poster) == nil {
-				continueWatching = append(continueWatching, ce)
+	if isOwn {
+		cwRows, err := db.Query(`
+			SELECT e.id, e.episode_num, e.title, a.title, a.poster_url
+			FROM user_progress up
+			JOIN episodes e ON up.episode_id = e.id
+			JOIN anime a ON e.anime_id = a.id
+			WHERE up.user_id = ?
+			ORDER BY up.updated_at DESC
+			LIMIT 5
+		`, targetID)
+		if err == nil {
+			defer cwRows.Close()
+			for cwRows.Next() {
+				var ce ContinueEpisode
+				if cwRows.Scan(&ce.EpisodeID, &ce.EpisodeNum, &ce.EpisodeTitle, &ce.AnimeTitle, &ce.Poster) == nil {
+					continueWatching = append(continueWatching, ce)
+				}
 			}
 		}
 	}
 
-	data := struct {
-		Username         string
-		Level            UserLevelInfo
-		AchievementSlots []AchievementSlot
-		EmotionCount     int
-		CommentCount     int
-		EpisodeCount     int
-		ContinueWatching []ContinueEpisode
-		AvatarURL        string
-		AvatarFrame      string
-		AvatarFrameColor string
-		IsPremium        bool
-		FrameOptions     []FrameOption
-	}{
-		Username:         username,
-		Level:            levelInfo,
-		AchievementSlots: achievementSlots,
-		EmotionCount:     emotionCount,
-		CommentCount:     commentCount,
-		EpisodeCount:     episodeCount,
-		ContinueWatching: continueWatching,
-		AvatarURL:        avatarURL,
-		AvatarFrame:      avatarFrame,
-		AvatarFrameColor: avatarFrameColor,
-		IsPremium:        isPremium,
-		FrameOptions:     frameOptions,
+	friends := getFriends(targetID)
+	var pendingRequests []FriendRequestInfo
+	friendshipStatus := "self"
+	friendshipRequestID := 0
+	if !isOwn {
+		friendshipStatus = getFriendshipStatus(viewerID, targetID)
+		if friendshipStatus == "pending_received" {
+			db.QueryRow("SELECT id FROM friendships WHERE requester_id = ? AND addressee_id = ?", targetID, viewerID).Scan(&friendshipRequestID)
+		}
+	} else {
+		pendingRequests = getPendingIncoming(targetID)
 	}
 
-	err = templates.ExecuteTemplate(w, "profile.html", data)
-	if err != nil {
+	data := struct {
+		Username            string // виewer — для header.html
+		ProfileUsername     string // владелец просматриваемого профиля
+		ProfileUserID       int
+		IsOwnProfile        bool
+		FriendshipStatus    string
+		FriendshipRequestID int
+		Friends             []FriendInfo
+		PendingRequests     []FriendRequestInfo
+		Level               UserLevelInfo
+		AchievementSlots    []AchievementSlot
+		EmotionCount        int
+		CommentCount        int
+		EpisodeCount        int
+		ContinueWatching    []ContinueEpisode
+		AvatarURL           string
+		AvatarFrame         string
+		AvatarFrameColor    string
+		IsPremium           bool
+		FrameOptions        []FrameOption
+	}{
+		Username:            viewerUsername,
+		ProfileUsername:     username,
+		ProfileUserID:       targetID,
+		IsOwnProfile:        isOwn,
+		FriendshipStatus:    friendshipStatus,
+		FriendshipRequestID: friendshipRequestID,
+		Friends:             friends,
+		PendingRequests:     pendingRequests,
+		Level:               levelInfo,
+		AchievementSlots:    achievementSlots,
+		EmotionCount:        emotionCount,
+		CommentCount:        commentCount,
+		EpisodeCount:        episodeCount,
+		ContinueWatching:    continueWatching,
+		AvatarURL:           avatarURL,
+		AvatarFrame:         avatarFrame,
+		AvatarFrameColor:    avatarFrameColor,
+		IsPremium:           isPremium,
+		FrameOptions:        frameOptions,
+	}
+
+	if err := templates.ExecuteTemplate(w, "profile.html", data); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
@@ -1377,7 +1639,7 @@ func apiEmotionPost(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":               "ok",
+		"status":                "ok",
 		"unlocked_achievements": newAchievements,
 	})
 }
@@ -1859,7 +2121,7 @@ func apiCommentPost(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":               "ok",
+		"status":                "ok",
 		"unlocked_achievements": newAchievements,
 	})
 }
@@ -2599,6 +2861,119 @@ func apiLevelGet(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(levelInfo)
 }
 
+func apiFriendsGet(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	json.NewEncoder(w).Encode(getFriends(userID))
+}
+
+func apiFriendRequestsGet(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	json.NewEncoder(w).Encode(getPendingIncoming(userID))
+}
+
+func apiFriendRequestPost(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	var body struct {
+		Username string `json:"username"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Username == "" {
+		http.Error(w, `{"error":"username required"}`, http.StatusBadRequest)
+		return
+	}
+	status, err := sendFriendRequest(userID, body.Username)
+	if err != nil {
+		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusBadRequest)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]string{"status": status})
+}
+
+func apiFriendRespondPost(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	var body struct {
+		RequestID int    `json:"request_id"`
+		Action    string `json:"action"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || (body.Action != "accept" && body.Action != "decline") {
+		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		return
+	}
+	if err := respondFriendRequest(userID, body.RequestID, body.Action == "accept"); err != nil {
+		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusBadRequest)
+		return
+	}
+	var newAchievements []Achievement
+	if body.Action == "accept" {
+		newAchievements = checkAndUnlockAchievements(userID)
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "achievements": newAchievements})
+}
+
+func apiFriendRemovePost(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	var body struct {
+		UserID int `json:"user_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.UserID == 0 {
+		http.Error(w, `{"error":"user_id required"}`, http.StatusBadRequest)
+		return
+	}
+	if err := removeFriendship(userID, body.UserID); err != nil {
+		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// apiUsersSearchGet ищет пользователей по имени — для вкладки "Друзья" в поиске хедера.
+func apiUsersSearchGet(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if q == "" {
+		json.NewEncoder(w).Encode([]FriendInfo{})
+		return
+	}
+	viewerID, _ := getUserIDFromSession(r)
+	rows, err := db.Query(`
+		SELECT u.id, u.username, u.avatar_url, u.avatar_frame, COALESCE(ux.xp, 0)
+		FROM users u
+		LEFT JOIN user_xp ux ON ux.user_id = u.id
+		WHERE u.username LIKE ? AND u.id != ?
+		ORDER BY u.username
+		LIMIT 10
+	`, "%"+q+"%", viewerID)
+	if err != nil {
+		http.Error(w, `{"error":"search failed"}`, http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(friendInfoRows(rows))
+}
+
 func apiAllAchievementsGet(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -2874,6 +3249,21 @@ func main() {
 	secureHandle("/api/auth/refresh", apiAuthRefreshHandler)
 	secureHandle("/api/auth/logout", apiAuthLogoutHandler)
 	secureHandle("/api/user/delete", apiUserDeleteHandler)
+	secureHandle("/profile/", profileByUsernameHandler)
+	secureHandle("/api/friends", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			apiFriendsGet(w, r)
+		case http.MethodPost:
+			apiFriendRequestPost(w, r)
+		default:
+			http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		}
+	})
+	secureHandle("/api/friends/requests", apiFriendRequestsGet)
+	secureHandle("/api/friends/respond", apiFriendRespondPost)
+	secureHandle("/api/friends/remove", apiFriendRemovePost)
+	secureHandle("/api/users/search", apiUsersSearchGet)
 
 	log.Println("Сервер Ancen запущен на http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))

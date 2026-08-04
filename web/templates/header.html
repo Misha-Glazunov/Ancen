@@ -29,7 +29,7 @@
         <a href="/premium">Premium</a>
     </nav>
     <div class="header-account">
-        <a href="/profile" class="header-avatar" title="{{.Username}}">{{initial .Username}}</a>
+        <a href="/profile" class="header-avatar" title="{{.Username}}">{{initial .Username}}<span class="header-friend-badge" id="header-friend-badge" hidden>0</span></a>
         <a href="/logout" class="header-logout" title="Выйти">Выход</a>
     </div>
 </header>
@@ -104,8 +104,25 @@
     font-size: 18px;
     text-decoration: none;
     transition: opacity 0.2s;
+    position: relative;
 }
 .header-avatar:hover { opacity: 0.85; }
+.header-friend-badge {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    border-radius: 9px;
+    background: var(--color-accent);
+    color: #fff;
+    font-family: var(--font-base);
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
 .header-logout {
     font-family: var(--font-base);
     font-size: var(--fs-small);
@@ -273,6 +290,11 @@
 .header-search-item:last-child { border-bottom: none; }
 .header-search-item img { width: 56px; height: 78px; object-fit: cover; border-radius: var(--radius-sm); flex-shrink: 0; }
 .header-search-item.friend img { height: 56px; border-radius: var(--radius-lg); }
+.header-search-item.friend .avatar-fallback {
+    width: 56px; height: 56px; flex-shrink: 0; border-radius: var(--radius-lg);
+    background: var(--color-accent-gradient); display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-display); font-size: 18px;
+}
 .header-search-item .info { flex: 1; min-width: 0; }
 .header-search-item .info .title { font-size: var(--fs-body); margin-bottom: 6px; }
 .header-search-item .info .genre-tag { margin-bottom: 6px; }
@@ -368,12 +390,6 @@
         { title: 'Ван-пис', genre: 'Приключение /драма', year: '1999 — …', img: '/static/img/home/catalog_1_1.png', score: 9 },
         { title: 'Demon Slayer', genre: 'Приключение /драма', year: '2019', img: '/static/img/home/hero_banner.png', score: 10 }
     ];
-    var FRIENDS = [
-        { name: 'Lerchek', level: 10, avatar: '/static/img/home/top1.png' },
-        { name: 'Deadinside', level: 8, avatar: '/static/img/home/top2.png' },
-        { name: 'Vika', level: 5, avatar: '/static/img/home/top3.png' }
-    ];
-
     function scoreColor(s) { return s >= 9 ? '#4CD964' : s >= 6 ? '#C6FF3D' : '#FF7A00'; }
     function levelColor(l) { return l >= 8 ? 'var(--color-warm-red)' : l >= 4 ? 'var(--color-warm-orange)' : '#fff'; }
     function escapeHtml(s) { return s.replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
@@ -391,16 +407,25 @@
         }).join('');
     }
 
+    var friendsSearchAbort = null;
     function renderFriends(list, query) {
-        var items = FRIENDS.filter(function (f) { return f.name.toLowerCase().indexOf(query) !== -1; });
-        if (!items.length) { list.innerHTML = '<div class="header-search-empty">Ничего не найдено</div>'; return; }
-        list.innerHTML = items.map(function (f) {
-            return '<a class="header-search-item friend" href="/profile">' +
-                '<img src="' + f.avatar + '" alt="">' +
-                '<div class="info"><div class="title">' + escapeHtml(f.name) + '</div>' +
-                '<span class="level">Уровень <b style="color:' + levelColor(f.level) + '">' + f.level + '</b></span></div>' +
-                '</a>';
-        }).join('');
+        if (!query) { list.innerHTML = '<div class="header-search-empty">Начните вводить имя пользователя</div>'; return; }
+        if (friendsSearchAbort) friendsSearchAbort.abort();
+        friendsSearchAbort = new AbortController();
+        fetch('/api/users/search?q=' + encodeURIComponent(query), { signal: friendsSearchAbort.signal })
+            .then(function (r) { return r.json(); })
+            .then(function (items) {
+                if (!items || !items.length) { list.innerHTML = '<div class="header-search-empty">Ничего не найдено</div>'; return; }
+                list.innerHTML = items.map(function (f) {
+                    var avatar = f.AvatarURL ? '<img src="' + f.AvatarURL + '" alt="">' : '<span class="avatar-fallback">' + escapeHtml(f.Username.charAt(0).toUpperCase()) + '</span>';
+                    return '<a class="header-search-item friend" href="/profile/' + encodeURIComponent(f.Username) + '">' +
+                        avatar +
+                        '<div class="info"><div class="title">' + escapeHtml(f.Username) + '</div>' +
+                        '<span class="level">Уровень <b style="color:' + levelColor(f.Level) + '">' + f.Level + '</b></span></div>' +
+                        '</a>';
+                }).join('');
+            })
+            .catch(function (e) { if (e.name !== 'AbortError') list.innerHTML = '<div class="header-search-empty">Ошибка поиска</div>'; });
     }
 
     document.querySelectorAll('.header-search-wrap').forEach(function (wrap) {
@@ -414,10 +439,12 @@
             return btn ? btn.dataset.tab : 'anime';
         }
 
+        var updateTimer = null;
         function update() {
             var query = input.value.trim().toLowerCase();
             renderAnime(animeList, query);
-            renderFriends(friendsList, query);
+            clearTimeout(updateTimer);
+            updateTimer = setTimeout(function () { renderFriends(friendsList, query); }, 250);
         }
 
         tabs.forEach(function (btn) {
@@ -447,6 +474,19 @@
             if (activeTab() === 'friends') e.preventDefault();
         });
     });
+
+    var badge = document.getElementById('header-friend-badge');
+    if (badge) {
+        fetch('/api/friends/requests')
+            .then(function (r) { return r.ok ? r.json() : []; })
+            .then(function (list) {
+                if (list && list.length) {
+                    badge.textContent = list.length > 9 ? '9+' : String(list.length);
+                    badge.hidden = false;
+                }
+            })
+            .catch(function () {});
+    }
 })();
 </script>
 {{end}}

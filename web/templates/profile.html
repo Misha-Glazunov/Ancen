@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{.Username}} — профиль | AniMemory</title>
+    <title>{{.ProfileUsername}} — профиль | AniMemory</title>
     <meta name="robots" content="noindex, nofollow">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -210,6 +210,15 @@
             border-radius: var(--radius-lg);
             font-size: var(--fs-small);
         }
+        a.friend-item { text-decoration: none; color: inherit; }
+        .friend-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
+        .friend-item.request-item { flex-wrap: wrap; }
+        .friend-item.request-item .friend-avatar { width: 60px; height: 60px; font-size: 20px; }
+        .friend-request-actions { display: flex; flex: 1 1 100%; gap: 8px; }
+        .friend-request-actions .btn { flex: 1; }
+        .btn-ghost { background: transparent; border: 1px solid var(--color-gray-700); color: var(--color-gray-300); }
+        .friend-action { margin: -8px 0 20px; }
+        .friend-action .btn[disabled] { opacity: 0.5; cursor: default; }
 
         /* Буду смотреть серию / аниме */
         .episode-card {
@@ -271,10 +280,10 @@
 <div class="profile-card" data-animate>
     <div class="profile-hero">
         <div class="profile-avatar" id="profile-avatar" style="border-color: {{.AvatarFrameColor}}">
-            {{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="{{.Username}}">{{else}}{{initial .Username}}{{end}}
+            {{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="{{.ProfileUsername}}">{{else}}{{initial .ProfileUsername}}{{end}}
         </div>
         <div class="profile-info">
-            <h1>{{.Username}}</h1>
+            <h1>{{.ProfileUsername}}</h1>
             {{if .Level}}
             <div class="profile-level-row">
                 <span>Уровень</span>
@@ -283,6 +292,21 @@
             </div>
             {{end}}
 
+            {{if not .IsOwnProfile}}
+            <div class="friend-action" id="friend-action" data-user-id="{{.ProfileUserID}}" data-username="{{.ProfileUsername}}" data-status="{{.FriendshipStatus}}" data-request-id="{{.FriendshipRequestID}}">
+                {{if eq .FriendshipStatus "friends"}}
+                <button type="button" class="btn btn-sm" id="friend-action-btn" disabled>Уже друзья</button>
+                {{else if eq .FriendshipStatus "pending_sent"}}
+                <button type="button" class="btn btn-sm" id="friend-action-btn" disabled>Заявка отправлена</button>
+                {{else if eq .FriendshipStatus "pending_received"}}
+                <button type="button" class="btn btn-sm" id="friend-action-btn" data-action="accept">Принять заявку в друзья</button>
+                {{else}}
+                <button type="button" class="btn btn-sm" id="friend-action-btn" data-action="request">Добавить в друзья</button>
+                {{end}}
+            </div>
+            {{end}}
+
+            {{if .IsOwnProfile}}
             <div class="customize-panel">
                 <div class="avatar-upload-row">
                     {{if .IsPremium}}
@@ -301,6 +325,7 @@
                     {{end}}
                 </div>
             </div>
+            {{end}}
         </div>
     </div>
 
@@ -319,6 +344,7 @@
                 </div>
             </div>
 
+            {{if .IsOwnProfile}}
             <div class="panel" data-animate>
                 <h2>Буду смотреть серию</h2>
                 {{if .ContinueWatching}}
@@ -356,59 +382,47 @@
                     </a>
                 </div>
             </div>
+            {{end}}
         </div>
 
-        <div class="col-friends panel" data-animate>
-            <h2>Список друзей</h2>
-            <div class="friends-list">
-                <div class="friend-item">
-                    <div class="friend-avatar">А</div>
-                    <div>
-                        <div class="friend-name">Азат Шехзодович</div>
-                        <span class="friend-level" style="color:#FF0000">Уровень <b>10</b></span>
+        <div class="col-friends">
+            {{if .IsOwnProfile}}
+            {{if .PendingRequests}}
+            <div class="panel" data-animate id="friend-requests-panel">
+                <h2>Заявки в друзья</h2>
+                <div class="friends-list">
+                    {{range .PendingRequests}}
+                    <div class="friend-item request-item" data-request-id="{{.RequestID}}">
+                        <div class="friend-avatar">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="{{.Username}}">{{else}}{{initial .Username}}{{end}}</div>
+                        <div style="flex:1;">
+                            <div class="friend-name">{{.Username}}</div>
+                            <span class="friend-level">Уровень <b>{{.Level}}</b></span>
+                        </div>
+                        <div class="friend-request-actions">
+                            <button type="button" class="btn btn-sm" data-request-action="accept">Принять</button>
+                            <button type="button" class="btn btn-sm btn-ghost" data-request-action="decline">Отклонить</button>
+                        </div>
                     </div>
+                    {{end}}
                 </div>
-                <div class="friend-item">
-                    <div class="friend-avatar">П</div>
-                    <div>
-                        <div class="friend-name">Поська</div>
-                        <span class="friend-level" style="color:#FFA600">Уровень <b>5</b></span>
-                    </div>
-                </div>
-                <div class="friend-item">
-                    <div class="friend-avatar">А</div>
-                    <div>
-                        <div class="friend-name">Алекс</div>
-                        <span class="friend-level" style="color:#FFFFFF">Уровень <b>1</b></span>
-                    </div>
-                </div>
-                <div class="friend-item">
-                    <div class="friend-avatar">С</div>
-                    <div>
-                        <div class="friend-name">Софья Квачулина</div>
-                        <span class="friend-level" style="color:#FF4400">Уровень <b>8</b></span>
-                    </div>
-                </div>
-                <div class="friend-item">
-                    <div class="friend-avatar">Т</div>
-                    <div>
-                        <div class="friend-name">Тимоха Питерский</div>
-                        <span class="friend-level" style="color:#FFCC00">Уровень <b>3</b></span>
-                    </div>
-                </div>
-                <div class="friend-item">
-                    <div class="friend-avatar">Н</div>
-                    <div>
-                        <div class="friend-name">Настьюшка Опасность</div>
-                        <span class="friend-level" style="color:#FF0000">Уровень <b>10</b></span>
-                    </div>
-                </div>
-                <div class="friend-item">
-                    <div class="friend-avatar">Р</div>
-                    <div>
-                        <div class="friend-name">Русланчик Валеевич</div>
-                        <span class="friend-level" style="color:#FF3C00">Уровень <b>9</b></span>
-                    </div>
+            </div>
+            {{end}}
+            {{end}}
+
+            <div class="panel" data-animate>
+                <h2>Список друзей</h2>
+                <div class="friends-list">
+                    {{range .Friends}}
+                    <a class="friend-item" href="/profile/{{.Username}}">
+                        <div class="friend-avatar" style="border-color: {{.AvatarFrameColor}}">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="{{.Username}}">{{else}}{{initial .Username}}{{end}}</div>
+                        <div>
+                            <div class="friend-name">{{.Username}}</div>
+                            <span class="friend-level">Уровень <b>{{.Level}}</b></span>
+                        </div>
+                    </a>
+                    {{else}}
+                    <p class="empty-state">{{if .IsOwnProfile}}Пока нет друзей — найдите их через поиск в хедере.{{else}}Пока нет друзей.{{end}}</p>
+                    {{end}}
                 </div>
             </div>
         </div>
@@ -462,6 +476,74 @@
                         document.getElementById('profile-avatar').style.borderColor = color;
                     } else {
                         showToast({ icon: '⚠️', title: 'Ошибка', body: res.data.error || '' });
+                    }
+                })
+                .catch(function () { showToast({ icon: '⚠️', title: 'Ошибка сети', body: '' }); });
+        });
+    });
+
+    var friendActionBtn = document.getElementById('friend-action-btn');
+    if (friendActionBtn) {
+        friendActionBtn.addEventListener('click', function () {
+            var wrap = document.getElementById('friend-action');
+            var action = friendActionBtn.dataset.action;
+            friendActionBtn.disabled = true;
+            var req = action === 'accept'
+                ? fetch('/api/friends/respond', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ request_id: parseInt(wrap.dataset.requestId, 10), action: 'accept' })
+                })
+                : fetch('/api/friends', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: wrap.dataset.username })
+                });
+            req.then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+                .then(function (res) {
+                    if (!res.ok) {
+                        showToast({ icon: '⚠️', title: 'Ошибка', body: res.data.error || '' });
+                        friendActionBtn.disabled = false;
+                        return;
+                    }
+                    if (action === 'request') {
+                        showToast({ icon: '🤝', title: 'Заявка отправлена', body: '' });
+                        friendActionBtn.textContent = 'Заявка отправлена';
+                    } else {
+                        showToast({ icon: '🤝', title: 'Вы теперь друзья', body: '' });
+                        friendActionBtn.textContent = 'Уже друзья';
+                    }
+                })
+                .catch(function () { showToast({ icon: '⚠️', title: 'Ошибка сети', body: '' }); friendActionBtn.disabled = false; });
+        });
+    }
+
+    document.querySelectorAll('[data-request-action]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var item = btn.closest('.friend-item');
+            var requestId = parseInt(item.dataset.requestId, 10);
+            var action = btn.dataset.requestAction;
+            item.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+            fetch('/api/friends/respond', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ request_id: requestId, action: action })
+            })
+                .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+                .then(function (res) {
+                    if (!res.ok) {
+                        showToast({ icon: '⚠️', title: 'Ошибка', body: res.data.error || '' });
+                        item.querySelectorAll('button').forEach(function (b) { b.disabled = false; });
+                        return;
+                    }
+                    item.remove();
+                    if (action === 'accept') {
+                        showToast({ icon: '🤝', title: 'Заявка принята', body: '' });
+                        if (res.data.achievements && res.data.achievements.length) {
+                            res.data.achievements.forEach(function (a) {
+                                showToast({ icon: a.Icon, title: 'Достижение получено', body: a.Name });
+                            });
+                        }
+                        setTimeout(function () { window.location.reload(); }, 600);
+                    } else {
+                        showToast({ icon: '👋', title: 'Заявка отклонена', body: '' });
                     }
                 })
                 .catch(function () { showToast({ icon: '⚠️', title: 'Ошибка сети', body: '' }); });
