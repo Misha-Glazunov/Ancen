@@ -177,7 +177,8 @@
             scrollbar-width: thin;
             scrollbar-color: var(--color-purple) transparent;
         }
-        .friend-item { display: flex; align-items: center; gap: 20px; }
+        .friend-item { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 20px; }
+        .friend-item [data-remove-friend] { flex: 1 1 100%; }
         .friend-avatar {
             display: flex;
             align-items: center;
@@ -191,7 +192,7 @@
             font-size: 32px;
             flex-shrink: 0;
         }
-        .friend-name { font-size: var(--fs-heading); margin-bottom: 8px; }
+        .friend-name { font-size: var(--fs-heading); margin-bottom: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .friend-level {
             display: inline-flex;
             align-items: center;
@@ -210,7 +211,7 @@
             border-radius: var(--radius-lg);
             font-size: var(--fs-small);
         }
-        a.friend-item { text-decoration: none; color: inherit; }
+        .friend-item-link { display: flex; align-items: center; gap: 20px; flex: 1; min-width: 0; text-decoration: none; color: inherit; }
         .friend-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
         .friend-item.request-item { flex-wrap: wrap; }
         .friend-item.request-item .friend-avatar { width: 60px; height: 60px; font-size: 20px; }
@@ -295,7 +296,7 @@
             {{if not .IsOwnProfile}}
             <div class="friend-action" id="friend-action" data-user-id="{{.ProfileUserID}}" data-username="{{.ProfileUsername}}" data-status="{{.FriendshipStatus}}" data-request-id="{{.FriendshipRequestID}}">
                 {{if eq .FriendshipStatus "friends"}}
-                <button type="button" class="btn btn-sm" id="friend-action-btn" disabled>Уже друзья</button>
+                <button type="button" class="btn btn-sm btn-ghost" id="friend-action-btn" data-action="remove">Удалить из друзей</button>
                 {{else if eq .FriendshipStatus "pending_sent"}}
                 <button type="button" class="btn btn-sm" id="friend-action-btn" disabled>Заявка отправлена</button>
                 {{else if eq .FriendshipStatus "pending_received"}}
@@ -413,13 +414,18 @@
                 <h2>Список друзей</h2>
                 <div class="friends-list">
                     {{range .Friends}}
-                    <a class="friend-item" href="/profile/{{.Username}}">
-                        <div class="friend-avatar" style="border-color: {{.AvatarFrameColor}}">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="{{.Username}}">{{else}}{{initial .Username}}{{end}}</div>
-                        <div>
-                            <div class="friend-name">{{.Username}}</div>
-                            <span class="friend-level">Уровень <b>{{.Level}}</b></span>
-                        </div>
-                    </a>
+                    <div class="friend-item" data-friend-id="{{.UserID}}">
+                        <a class="friend-item-link" href="/profile/{{.Username}}">
+                            <div class="friend-avatar" style="border-color: {{.AvatarFrameColor}}">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="{{.Username}}">{{else}}{{initial .Username}}{{end}}</div>
+                            <div>
+                                <div class="friend-name">{{.Username}}</div>
+                                <span class="friend-level">Уровень <b>{{.Level}}</b></span>
+                            </div>
+                        </a>
+                        {{if $.IsOwnProfile}}
+                        <button type="button" class="btn btn-sm btn-ghost" data-remove-friend>Удалить</button>
+                        {{end}}
+                    </div>
                     {{else}}
                     <p class="empty-state">{{if .IsOwnProfile}}Пока нет друзей — найдите их через поиск в хедере.{{else}}Пока нет друзей.{{end}}</p>
                     {{end}}
@@ -488,15 +494,23 @@
             var wrap = document.getElementById('friend-action');
             var action = friendActionBtn.dataset.action;
             friendActionBtn.disabled = true;
-            var req = action === 'accept'
-                ? fetch('/api/friends/respond', {
+            var req;
+            if (action === 'accept') {
+                req = fetch('/api/friends/respond', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ request_id: parseInt(wrap.dataset.requestId, 10), action: 'accept' })
-                })
-                : fetch('/api/friends', {
+                });
+            } else if (action === 'remove') {
+                req = fetch('/api/friends/remove', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: parseInt(wrap.dataset.userId, 10) })
+                });
+            } else {
+                req = fetch('/api/friends', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ username: wrap.dataset.username })
                 });
+            }
             req.then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
                 .then(function (res) {
                     if (!res.ok) {
@@ -507,6 +521,12 @@
                     if (action === 'request') {
                         showToast({ icon: '🤝', title: 'Заявка отправлена', body: '' });
                         friendActionBtn.textContent = 'Заявка отправлена';
+                    } else if (action === 'remove') {
+                        showToast({ icon: '👋', title: 'Удалено из друзей', body: '' });
+                        friendActionBtn.textContent = 'Добавить в друзья';
+                        friendActionBtn.dataset.action = 'request';
+                        friendActionBtn.classList.remove('btn-ghost');
+                        friendActionBtn.disabled = false;
                     } else {
                         showToast({ icon: '🤝', title: 'Вы теперь друзья', body: '' });
                         friendActionBtn.textContent = 'Уже друзья';
@@ -515,6 +535,29 @@
                 .catch(function () { showToast({ icon: '⚠️', title: 'Ошибка сети', body: '' }); friendActionBtn.disabled = false; });
         });
     }
+
+    document.querySelectorAll('[data-remove-friend]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var item = btn.closest('.friend-item');
+            var userId = parseInt(item.dataset.friendId, 10);
+            btn.disabled = true;
+            fetch('/api/friends/remove', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId })
+            })
+                .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+                .then(function (res) {
+                    if (!res.ok) {
+                        showToast({ icon: '⚠️', title: 'Ошибка', body: res.data.error || '' });
+                        btn.disabled = false;
+                        return;
+                    }
+                    showToast({ icon: '👋', title: 'Удалено из друзей', body: '' });
+                    item.remove();
+                })
+                .catch(function () { showToast({ icon: '⚠️', title: 'Ошибка сети', body: '' }); btn.disabled = false; });
+        });
+    });
 
     document.querySelectorAll('[data-request-action]').forEach(function (btn) {
         btn.addEventListener('click', function () {
