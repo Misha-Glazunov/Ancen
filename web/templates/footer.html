@@ -10,6 +10,7 @@
                 <span class="footer-copy">© 2026 AniMemory</span>
                 <a href="/privacy-policy" class="policy-button">Политика конфиденциальности</a>
             </div>
+            <a href="/premium" class="btn btn-solid btn-sm footer-premium-btn">✨ Premium</a>
         </div>
 
         <!-- Колонки -->
@@ -19,9 +20,9 @@
                 <h4>Аниме</h4>
                 <div class="underline"></div>
                 <ul>
-                    <li class="popular">Популярные</li>
-                    <li class="new">Новинки</li>
-                    <li class="favorites">Избранное</li>
+                    <li class="popular"><a href="/#popular-anime">Популярные</a></li>
+                    <li class="new"><a href="/#new-anime">Новинки</a></li>
+                    <li class="favorites"><a href="{{if .Username}}/profile{{else}}/login{{end}}">Избранное</a></li>
                 </ul>
             </div>
 
@@ -30,9 +31,10 @@
                 <h4>Меню</h4>
                 <div class="underline"></div>
                 <ul>
-                    <li class="home">На главную</li>
-                    <li class="profile">Личный кабинет</li>
-                    <li class="auth">Вход/Регистрация</li>
+                    <li class="home"><a href="/">На главную</a></li>
+                    <li class="profile"><a href="{{if .Username}}/profile{{else}}/login{{end}}">Личный кабинет</a></li>
+                    <li class="premium"><a href="/premium">Premium</a></li>
+                    <li class="auth"><a href="{{if .Username}}/logout{{else}}/login{{end}}">{{if .Username}}Выйти{{else}}Вход/Регистрация{{end}}</a></li>
                 </ul>
             </div>
 
@@ -154,11 +156,17 @@
 .footer-col ul li {
     font-size: 16px;
     font-weight: 500;
-    cursor: pointer;
-    transition: opacity 0.2s;
     line-height: 1;
 }
-.footer-col ul li:hover { opacity: 0.6; }
+.footer-col ul li a {
+    color: inherit;
+    text-decoration: none;
+    cursor: pointer;
+    transition: opacity 0.2s;
+}
+.footer-col ul li a:hover { opacity: 0.6; }
+
+.footer-premium-btn { align-self: flex-start; color: #fff; }
 
 /* Контакты */
 .contacts-email {
