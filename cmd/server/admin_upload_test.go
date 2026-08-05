@@ -60,6 +60,16 @@ func ensureTestSchema(t *testing.T, conn *sql.DB) {
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (user_id) REFERENCES users(id)
 	)`)
+	conn.Exec(`CREATE TABLE IF NOT EXISTS friendships (
+		id INT AUTO_INCREMENT PRIMARY KEY,
+		requester_id INT NOT NULL,
+		addressee_id INT NOT NULL,
+		status ENUM('pending','accepted') NOT NULL DEFAULT 'pending',
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE KEY uniq_pair (requester_id, addressee_id),
+		FOREIGN KEY (requester_id) REFERENCES users(id),
+		FOREIGN KEY (addressee_id) REFERENCES users(id)
+	)`)
 }
 
 // createTestUser inserts a throwaway user (optionally admin) and registers cleanup.
