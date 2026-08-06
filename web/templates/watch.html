@@ -104,6 +104,7 @@
             transition: color 0.15s;
         }
         #emotion-list li:hover, #comments-list li:hover { color: var(--color-accent); }
+        #emotion-list li.friend-emotion { background: rgba(216, 45, 126, 0.08); border-left: 2px solid var(--color-accent); padding-left: 8px; }
 
         .comment-form {
             display: flex;
@@ -336,8 +337,11 @@
         ws.onmessage = function(event) {
             const msg = JSON.parse(event.data);
             if (msg.type === 'emotion') {
-                addEmotionToList(msg.username, msg.emotion_type, msg.timestamp_sec);
+                addEmotionToList(msg.username, msg.emotion_type, msg.timestamp_sec, msg.is_friend);
                 loadStats();   // обновить график
+                if (msg.is_friend && typeof showToast === 'function') {
+                    showToast({ icon: msg.emotion_type, title: msg.username + ' смотрит вместе с вами', body: 'Поставил(а) реакцию на ' + formatTime(msg.timestamp_sec) });
+                }
             } else if (msg.type === 'achievement_unlocked') {
                 showAchievementToasts(msg.achievements);
             }
@@ -387,7 +391,7 @@
             list.innerHTML = '<li>Пока нет эмоций. Будьте первым!</li>';
         } else {
             list.innerHTML = allEmotions.map(e =>
-                `<li data-timestamp="${e.timestamp_sec}"><strong>${escapeHtml(e.username)}</strong> ${e.emotion_type} на ${formatTime(e.timestamp_sec)}</li>`
+                `<li data-timestamp="${e.timestamp_sec}"${e.is_friend ? ' class="friend-emotion" title="Ваш друг"' : ''}><strong>${e.is_friend ? '🤝 ' : ''}${escapeHtml(e.username)}</strong> ${e.emotion_type} на ${formatTime(e.timestamp_sec)}</li>`
             ).join('');
             list.querySelectorAll('li[data-timestamp]').forEach(li => {
                 li.addEventListener('click', () => seekTo(parseInt(li.dataset.timestamp, 10)));
@@ -399,9 +403,9 @@
     // Новая реакция (по WS) добавляется в общий массив и переиспользует ту же отрисовку.
     // Без Premium не показываем реакции впереди своего прогресса даже из live-пуша —
     // сервер их всё равно не отдаст при следующей перезагрузке страницы/страницы списка
-    function addEmotionToList(username, emotionType, timestampSec) {
+    function addEmotionToList(username, emotionType, timestampSec, isFriend) {
         if (!isPremium && timestampSec > Math.floor(player.currentTime() || 0)) return;
-        allEmotions.push({ username, emotion_type: emotionType, timestamp_sec: timestampSec });
+        allEmotions.push({ username, emotion_type: emotionType, timestamp_sec: timestampSec, is_friend: !!isFriend });
         allEmotions.sort((a, b) => a.timestamp_sec - b.timestamp_sec);
         renderEmotionsList();
     }

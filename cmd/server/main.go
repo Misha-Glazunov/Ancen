@@ -1780,8 +1780,14 @@ func apiEmotionsGet(w http.ResponseWriter, r *http.Request) {
 	offset := (page - 1) * pageSize
 
 	userID, _ := getUserIDFromSession(r)
+	friendIDs := make(map[int]bool)
+	if userID > 0 {
+		for _, f := range getFriends(userID) {
+			friendIDs[f.UserID] = true
+		}
+	}
 	query := `
-		SELECT e.emotion_type, e.timestamp_sec, u.username
+		SELECT e.emotion_type, e.timestamp_sec, u.username, e.user_id
 		FROM emotions e
 		JOIN users u ON e.user_id = u.id
 		WHERE e.episode_id = ?`
@@ -1804,13 +1810,16 @@ func apiEmotionsGet(w http.ResponseWriter, r *http.Request) {
 		EmotionType  string `json:"emotion_type"`
 		TimestampSec int    `json:"timestamp_sec"`
 		Username     string `json:"username"`
+		IsFriend     bool   `json:"is_friend"`
 	}
 	emotions := []Emotion{}
 	for rows.Next() {
 		var e Emotion
-		if err := rows.Scan(&e.EmotionType, &e.TimestampSec, &e.Username); err != nil {
+		var authorID int
+		if err := rows.Scan(&e.EmotionType, &e.TimestampSec, &e.Username, &authorID); err != nil {
 			continue
 		}
+		e.IsFriend = friendIDs[authorID]
 		emotions = append(emotions, e)
 	}
 
@@ -1974,6 +1983,7 @@ type WsMessage struct {
 	TimestampSec int    `json:"timestamp_sec"`
 	EmotionType  string `json:"emotion_type"`
 	Username     string `json:"username"`
+	UserID       int    `json:"user_id,omitempty"`
 }
 
 // Клиент
@@ -1981,6 +1991,8 @@ type Client struct {
 	conn      *websocket.Conn
 	send      chan []byte
 	episodeID int
+	userID    int
+	friendIDs map[int]bool // друзья зрителя — для подсветки их реакций в его собственной ленте
 }
 
 // Hub (управляет комнатами)
@@ -2026,8 +2038,15 @@ func (h *Hub) run() {
 			clients := h.rooms[msg.EpisodeID]
 			h.mu.RUnlock()
 
-			data, _ := json.Marshal(msg)
+			// is_friend зависит от того, КТО смотрит, а не от самого сообщения —
+			// поэтому шлём каждому клиенту отдельно промаршаленный вариант, а не
+			// один общий payload на всю комнату.
 			for client := range clients {
+				out := struct {
+					WsMessage
+					IsFriend bool `json:"is_friend"`
+				}{WsMessage: msg, IsFriend: client.friendIDs[msg.UserID]}
+				data, _ := json.Marshal(out)
 				select {
 				case client.send <- data:
 				default:
@@ -2069,10 +2088,16 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Println("WebSocket upgraded successfully")
+	friendIDs := make(map[int]bool)
+	for _, f := range getFriends(userID) {
+		friendIDs[f.UserID] = true
+	}
 	client := &Client{
 		conn:      conn,
 		send:      make(chan []byte, 256),
 		episodeID: episodeID,
+		userID:    userID,
+		friendIDs: friendIDs,
 	}
 	hub.register <- client
 
@@ -2104,6 +2129,7 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				msg.Username = username
+				msg.UserID = userID
 				hub.broadcast <- msg
 
 				// Начисляем XP за эмоцию через WebSocket (с учётом анти-фарм лимита на эпизод)
