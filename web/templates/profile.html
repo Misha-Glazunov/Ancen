@@ -220,6 +220,7 @@
         .btn-ghost { background: transparent; border: 1px solid var(--color-gray-700); color: var(--color-gray-300); }
         .friend-action { margin: -8px 0 20px; }
         .friend-action .btn[disabled] { opacity: 0.5; cursor: default; }
+        .friends-show-more { display: flex; width: 100%; margin-top: 16px; }
 
         /* Буду смотреть серию / аниме */
         .episode-card {
@@ -331,6 +332,56 @@
     </div>
 
     <div class="profile-columns">
+        <div class="col-friends">
+            {{if .IsOwnProfile}}
+            {{if .PendingRequests}}
+            <div class="panel" data-animate id="friend-requests-panel">
+                <h2>Заявки в друзья</h2>
+                <div class="friends-list">
+                    {{range .PendingRequests}}
+                    <div class="friend-item request-item" data-request-id="{{.RequestID}}">
+                        <div class="friend-avatar">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="{{.Username}}">{{else}}{{initial .Username}}{{end}}</div>
+                        <div style="flex:1;">
+                            <div class="friend-name">{{.Username}}</div>
+                            <span class="friend-level">Уровень <b>{{.Level}}</b></span>
+                        </div>
+                        <div class="friend-request-actions">
+                            <button type="button" class="btn btn-sm" data-request-action="accept">Принять</button>
+                            <button type="button" class="btn btn-sm btn-ghost" data-request-action="decline">Отклонить</button>
+                        </div>
+                    </div>
+                    {{end}}
+                </div>
+            </div>
+            {{end}}
+            {{end}}
+
+            <div class="panel" data-animate>
+                <h2>Список друзей</h2>
+                <div class="friends-list">
+                    {{range $i, $f := .Friends}}
+                    <div class="friend-item{{if ge $i 6}} friend-extra{{end}}" data-friend-id="{{$f.UserID}}"{{if ge $i 6}} hidden{{end}}>
+                        <a class="friend-item-link" href="/profile/{{$f.Username}}">
+                            <div class="friend-avatar" style="border-color: {{$f.AvatarFrameColor}}">{{if $f.AvatarURL}}<img src="{{$f.AvatarURL}}" alt="{{$f.Username}}">{{else}}{{initial $f.Username}}{{end}}</div>
+                            <div>
+                                <div class="friend-name">{{$f.Username}}</div>
+                                <span class="friend-level">Уровень <b>{{$f.Level}}</b></span>
+                            </div>
+                        </a>
+                        {{if $.IsOwnProfile}}
+                        <button type="button" class="btn btn-sm btn-ghost" data-remove-friend>Удалить</button>
+                        {{end}}
+                    </div>
+                    {{else}}
+                    <p class="empty-state">{{if .IsOwnProfile}}Пока нет друзей — найдите их через поиск в хедере.{{else}}Пока нет друзей.{{end}}</p>
+                    {{end}}
+                </div>
+                {{if gt (len .Friends) 6}}
+                <button type="button" class="btn btn-sm friends-show-more" id="friends-show-more">Показать больше ({{len .Friends}})</button>
+                {{end}}
+            </div>
+        </div>
+
         <div class="col-main">
             <div class="panel" data-animate>
                 <h2>Список достижений</h2>
@@ -364,73 +415,20 @@
 
             <div class="panel" data-animate>
                 <h2>Буду смотреть аниме</h2>
+                {{if .FavoriteAnime}}
                 <div class="catalog-row">
-                    <a href="/search?q=Тетрадь смерти" class="catalog-card">
-                        <img src="/static/img/home/carousel_thumb_1.png" alt="Тетрадь смерти">
-                        <div class="title">Тетрадь смерти</div>
+                    {{range .FavoriteAnime}}
+                    <a href="/anime/{{.AnimeID}}" class="catalog-card">
+                        <img src="{{.Poster}}" alt="{{.Title}}">
+                        <div class="title">{{.Title}}</div>
                     </a>
-                    <a href="/search?q=Атака титанов" class="catalog-card">
-                        <img src="/static/img/home/carousel_thumb_2.png" alt="Атака титанов">
-                        <div class="title">Атака титанов</div>
-                    </a>
-                    <a href="/search?q=Гинтама" class="catalog-card">
-                        <img src="/static/img/home/carousel_thumb_3.png" alt="Гинтама">
-                        <div class="title">Гинтама</div>
-                    </a>
-                    <a href="/search?q=Монстр" class="catalog-card">
-                        <img src="/static/img/home/carousel_thumb_4.png" alt="Монстр">
-                        <div class="title">Монстр</div>
-                    </a>
-                </div>
-            </div>
-            {{end}}
-        </div>
-
-        <div class="col-friends">
-            {{if .IsOwnProfile}}
-            {{if .PendingRequests}}
-            <div class="panel" data-animate id="friend-requests-panel">
-                <h2>Заявки в друзья</h2>
-                <div class="friends-list">
-                    {{range .PendingRequests}}
-                    <div class="friend-item request-item" data-request-id="{{.RequestID}}">
-                        <div class="friend-avatar">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="{{.Username}}">{{else}}{{initial .Username}}{{end}}</div>
-                        <div style="flex:1;">
-                            <div class="friend-name">{{.Username}}</div>
-                            <span class="friend-level">Уровень <b>{{.Level}}</b></span>
-                        </div>
-                        <div class="friend-request-actions">
-                            <button type="button" class="btn btn-sm" data-request-action="accept">Принять</button>
-                            <button type="button" class="btn btn-sm btn-ghost" data-request-action="decline">Отклонить</button>
-                        </div>
-                    </div>
                     {{end}}
                 </div>
+                {{else}}
+                <p class="empty-state">Пока нет избранных аниме — добавляйте со страницы аниме.</p>
+                {{end}}
             </div>
             {{end}}
-            {{end}}
-
-            <div class="panel" data-animate>
-                <h2>Список друзей</h2>
-                <div class="friends-list">
-                    {{range .Friends}}
-                    <div class="friend-item" data-friend-id="{{.UserID}}">
-                        <a class="friend-item-link" href="/profile/{{.Username}}">
-                            <div class="friend-avatar" style="border-color: {{.AvatarFrameColor}}">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="{{.Username}}">{{else}}{{initial .Username}}{{end}}</div>
-                            <div>
-                                <div class="friend-name">{{.Username}}</div>
-                                <span class="friend-level">Уровень <b>{{.Level}}</b></span>
-                            </div>
-                        </a>
-                        {{if $.IsOwnProfile}}
-                        <button type="button" class="btn btn-sm btn-ghost" data-remove-friend>Удалить</button>
-                        {{end}}
-                    </div>
-                    {{else}}
-                    <p class="empty-state">{{if .IsOwnProfile}}Пока нет друзей — найдите их через поиск в хедере.{{else}}Пока нет друзей.{{end}}</p>
-                    {{end}}
-                </div>
-            </div>
         </div>
     </div>
 </div>
@@ -558,6 +556,14 @@
                 .catch(function () { showToast({ icon: '⚠️', title: 'Ошибка сети', body: '' }); btn.disabled = false; });
         });
     });
+
+    var showMoreBtn = document.getElementById('friends-show-more');
+    if (showMoreBtn) {
+        showMoreBtn.addEventListener('click', function () {
+            document.querySelectorAll('.friend-extra').forEach(function (el) { el.hidden = false; });
+            showMoreBtn.remove();
+        });
+    }
 
     document.querySelectorAll('[data-request-action]').forEach(function (btn) {
         btn.addEventListener('click', function () {

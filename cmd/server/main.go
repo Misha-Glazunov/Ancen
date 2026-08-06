@@ -970,6 +970,22 @@ func createTables() {
 			FOREIGN KEY (requester_id) REFERENCES users(id),
 			FOREIGN KEY (addressee_id) REFERENCES users(id)
 		)`,
+		`CREATE TABLE IF NOT EXISTS favorites (
+			user_id INT NOT NULL,
+			anime_id INT NOT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (user_id, anime_id),
+			FOREIGN KEY (user_id) REFERENCES users(id),
+			FOREIGN KEY (anime_id) REFERENCES anime(id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS favorite_episodes (
+			user_id INT NOT NULL,
+			episode_id INT NOT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (user_id, episode_id),
+			FOREIGN KEY (user_id) REFERENCES users(id),
+			FOREIGN KEY (episode_id) REFERENCES episodes(id)
+		)`,
 	}
 	for _, q := range tables {
 		if _, err := db.Exec(q); err != nil {
@@ -1226,32 +1242,62 @@ func animeHandler(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type Episode struct {
-		ID     int
-		Num    int
-		Season int
-		Title  string
+		ID         int
+		Num        int
+		Season     int
+		Title      string
+		IsFavorite bool
 	}
 	type SeasonGroup struct {
 		Season   int
 		Episodes []Episode
 	}
+
+	userID, _ := getUserIDFromSession(r)
+	favoriteEpisodes := make(map[int]bool)
+	if userID > 0 {
+		feRows, err := db.Query(`
+			SELECT fe.episode_id FROM favorite_episodes fe
+			JOIN episodes e ON e.id = fe.episode_id
+			WHERE fe.user_id = ? AND e.anime_id = ?
+		`, userID, id)
+		if err == nil {
+			defer feRows.Close()
+			for feRows.Next() {
+				var epID int
+				if feRows.Scan(&epID) == nil {
+					favoriteEpisodes[epID] = true
+				}
+			}
+		}
+	}
+
 	var seasons []SeasonGroup
 	for rows.Next() {
 		var ep Episode
 		if err := rows.Scan(&ep.ID, &ep.Num, &ep.Season, &ep.Title); err != nil {
 			continue
 		}
+		ep.IsFavorite = favoriteEpisodes[ep.ID]
 		if len(seasons) == 0 || seasons[len(seasons)-1].Season != ep.Season {
 			seasons = append(seasons, SeasonGroup{Season: ep.Season})
 		}
 		seasons[len(seasons)-1].Episodes = append(seasons[len(seasons)-1].Episodes, ep)
 	}
 
+	isAnimeFavorite := false
+	if userID > 0 {
+		var cnt int
+		db.QueryRow("SELECT COUNT(*) FROM favorites WHERE user_id = ? AND anime_id = ?", userID, id).Scan(&cnt)
+		isAnimeFavorite = cnt > 0
+	}
+
 	data := struct {
-		Anime    interface{}
-		Seasons  []SeasonGroup
-		Username string
-	}{Anime: anime, Seasons: seasons, Username: currentUsername(r)}
+		Anime      interface{}
+		Seasons    []SeasonGroup
+		Username   string
+		IsFavorite bool
+	}{Anime: anime, Seasons: seasons, Username: currentUsername(r), IsFavorite: isAnimeFavorite}
 
 	err = templates.ExecuteTemplate(w, "anime.html", data)
 	if err != nil {
@@ -1490,7 +1536,15 @@ func renderProfile(w http.ResponseWriter, r *http.Request, targetID, viewerID in
 		Poster       string
 	}
 	continueWatching := []ContinueEpisode{}
+	// "Буду смотреть аниме" — избранные аниме пользователя
+	type FavoriteAnime struct {
+		AnimeID int
+		Title   string
+		Poster  string
+	}
+	favoriteAnime := []FavoriteAnime{}
 	if isOwn {
+		seenEpisodes := make(map[int]bool)
 		cwRows, err := db.Query(`
 			SELECT e.id, e.episode_num, e.title, a.title, a.poster_url
 			FROM user_progress up
@@ -1506,6 +1560,45 @@ func renderProfile(w http.ResponseWriter, r *http.Request, targetID, viewerID in
 				var ce ContinueEpisode
 				if cwRows.Scan(&ce.EpisodeID, &ce.EpisodeNum, &ce.EpisodeTitle, &ce.AnimeTitle, &ce.Poster) == nil {
 					continueWatching = append(continueWatching, ce)
+					seenEpisodes[ce.EpisodeID] = true
+				}
+			}
+		}
+		// Добавляем эпизоды, отмеченные звёздочкой "буду смотреть" на странице аниме,
+		// но ещё не начатые (иначе они уже попали выше через user_progress).
+		feRows, err := db.Query(`
+			SELECT e.id, e.episode_num, e.title, a.title, a.poster_url
+			FROM favorite_episodes fe
+			JOIN episodes e ON e.id = fe.episode_id
+			JOIN anime a ON e.anime_id = a.id
+			WHERE fe.user_id = ?
+			ORDER BY fe.created_at DESC
+			LIMIT 8
+		`, targetID)
+		if err == nil {
+			defer feRows.Close()
+			for feRows.Next() {
+				var ce ContinueEpisode
+				if feRows.Scan(&ce.EpisodeID, &ce.EpisodeNum, &ce.EpisodeTitle, &ce.AnimeTitle, &ce.Poster) == nil && !seenEpisodes[ce.EpisodeID] {
+					continueWatching = append(continueWatching, ce)
+					seenEpisodes[ce.EpisodeID] = true
+				}
+			}
+		}
+
+		faRows, err := db.Query(`
+			SELECT a.id, a.title, a.poster_url
+			FROM favorites f
+			JOIN anime a ON a.id = f.anime_id
+			WHERE f.user_id = ?
+			ORDER BY f.created_at DESC
+		`, targetID)
+		if err == nil {
+			defer faRows.Close()
+			for faRows.Next() {
+				var fa FavoriteAnime
+				if faRows.Scan(&fa.AnimeID, &fa.Title, &fa.Poster) == nil {
+					favoriteAnime = append(favoriteAnime, fa)
 				}
 			}
 		}
@@ -1539,6 +1632,7 @@ func renderProfile(w http.ResponseWriter, r *http.Request, targetID, viewerID in
 		CommentCount        int
 		EpisodeCount        int
 		ContinueWatching    []ContinueEpisode
+		FavoriteAnime       []FavoriteAnime
 		AvatarURL           string
 		AvatarFrame         string
 		AvatarFrameColor    string
@@ -1559,6 +1653,7 @@ func renderProfile(w http.ResponseWriter, r *http.Request, targetID, viewerID in
 		CommentCount:        commentCount,
 		EpisodeCount:        episodeCount,
 		ContinueWatching:    continueWatching,
+		FavoriteAnime:       favoriteAnime,
 		AvatarURL:           avatarURL,
 		AvatarFrame:         avatarFrame,
 		AvatarFrameColor:    avatarFrameColor,
@@ -2974,6 +3069,64 @@ func apiUsersSearchGet(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(friendInfoRows(rows))
 }
 
+// apiFavoriteAnimeToggle переключает избранное аниме для текущего пользователя.
+func apiFavoriteAnimeToggle(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	var body struct {
+		AnimeID int `json:"anime_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.AnimeID == 0 {
+		http.Error(w, `{"error":"anime_id required"}`, http.StatusBadRequest)
+		return
+	}
+	var exists int
+	db.QueryRow("SELECT COUNT(*) FROM favorites WHERE user_id = ? AND anime_id = ?", userID, body.AnimeID).Scan(&exists)
+	if exists > 0 {
+		db.Exec("DELETE FROM favorites WHERE user_id = ? AND anime_id = ?", userID, body.AnimeID)
+		json.NewEncoder(w).Encode(map[string]bool{"active": false})
+		return
+	}
+	if _, err := db.Exec("INSERT INTO favorites (user_id, anime_id) VALUES (?, ?)", userID, body.AnimeID); err != nil {
+		http.Error(w, `{"error":"anime not found"}`, http.StatusBadRequest)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]bool{"active": true})
+}
+
+// apiFavoriteEpisodeToggle переключает "буду смотреть" для эпизода.
+func apiFavoriteEpisodeToggle(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	var body struct {
+		EpisodeID int `json:"episode_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.EpisodeID == 0 {
+		http.Error(w, `{"error":"episode_id required"}`, http.StatusBadRequest)
+		return
+	}
+	var exists int
+	db.QueryRow("SELECT COUNT(*) FROM favorite_episodes WHERE user_id = ? AND episode_id = ?", userID, body.EpisodeID).Scan(&exists)
+	if exists > 0 {
+		db.Exec("DELETE FROM favorite_episodes WHERE user_id = ? AND episode_id = ?", userID, body.EpisodeID)
+		json.NewEncoder(w).Encode(map[string]bool{"active": false})
+		return
+	}
+	if _, err := db.Exec("INSERT INTO favorite_episodes (user_id, episode_id) VALUES (?, ?)", userID, body.EpisodeID); err != nil {
+		http.Error(w, `{"error":"episode not found"}`, http.StatusBadRequest)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]bool{"active": true})
+}
+
 func apiAllAchievementsGet(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -3264,6 +3417,8 @@ func main() {
 	secureHandle("/api/friends/respond", apiFriendRespondPost)
 	secureHandle("/api/friends/remove", apiFriendRemovePost)
 	secureHandle("/api/users/search", apiUsersSearchGet)
+	secureHandle("/api/favorites/anime", apiFavoriteAnimeToggle)
+	secureHandle("/api/favorites/episode", apiFavoriteEpisodeToggle)
 
 	log.Println("Сервер Ancen запущен на http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))

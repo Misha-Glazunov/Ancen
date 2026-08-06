@@ -170,15 +170,22 @@
         .next-episode-card .play-icon { font-size: 18px; line-height: 1; }
         .next-episode-card .ep-title { font-size: var(--fs-small); font-weight: 700; line-height: 1.4; }
 
-        /* ===== Навигация между сериями ===== */
+        /* ===== Навигация между сериями =====
+           Grid с 3 явными колонками вместо flex space-between — с flex средняя
+           кнопка "Ко всем сериям" смещалась от истинного центра, когда
+           предыдущей или следующей серии не было (на первом/последнем эпизоде
+           реальных кнопок оставалось 2, а не 3, и space-between распределял
+           между ними поровну, а не относительно центра плеера). */
         .episode-nav {
-            display: flex;
-            justify-content: space-between;
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
             align-items: center;
             gap: 12px;
-            flex-wrap: wrap;
             margin-top: 16px;
         }
+        .ep-nav-prev { justify-self: start; }
+        .ep-nav-all { justify-self: center; }
+        .ep-nav-next { justify-self: end; }
 
         @media (max-width: 768px) {
             .container { padding: 16px 16px 40px; }
@@ -187,6 +194,15 @@
             .comment-form { flex-direction: column; align-items: stretch; }
             .comment-form .timecode { text-align: center; }
             .reactions-comments-grid { grid-template-columns: 1fr; gap: 30px; }
+            /* Предыдущая/Следующая в один ряд по краям, "Ко всем сериям" — своим рядом по центру снизу */
+            .episode-nav {
+                grid-template-columns: 1fr 1fr;
+                grid-template-areas: "prev next" "all all";
+                row-gap: 10px;
+            }
+            .ep-nav-prev { grid-area: prev; }
+            .ep-nav-next { grid-area: next; }
+            .ep-nav-all { grid-area: all; justify-self: center; }
         }
 
         @media (max-width: 480px) {
@@ -221,13 +237,15 @@
     <!-- Навигация между сериями -->
     <div class="episode-nav">
         {{if .PrevEpisodeID}}
-        <a href="/watch?episode={{.PrevEpisodeID}}" class="btn btn-sm">← Предыдущая серия</a>
+        <a href="/watch?episode={{.PrevEpisodeID}}" class="btn btn-sm ep-nav-prev">← Предыдущая серия</a>
         {{else}}
-        <span></span>
+        <span class="ep-nav-prev"></span>
         {{end}}
-        <a href="/anime/{{.AnimeID}}" class="btn btn-sm">Ко всем сериям</a>
+        <a href="/anime/{{.AnimeID}}" class="btn btn-sm ep-nav-all">Ко всем сериям</a>
         {{if .NextEpisodeID}}
-        <a href="/watch?episode={{.NextEpisodeID}}" class="btn btn-sm">Следующая серия →</a>
+        <a href="/watch?episode={{.NextEpisodeID}}" class="btn btn-sm ep-nav-next">Следующая серия →</a>
+        {{else}}
+        <span class="ep-nav-next"></span>
         {{end}}
     </div>
 

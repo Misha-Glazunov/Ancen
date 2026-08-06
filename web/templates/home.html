@@ -45,14 +45,14 @@
     <style>
         * { box-sizing: border-box; }
         body { margin: 0; background: var(--color-bg); color: var(--color-text); font-family: var(--font-base); }
-        #new-anime, #popular-anime { scroll-margin-top: 110px; }
+        #new-anime, #popular-anime, #catalog { scroll-margin-top: 110px; }
 
         a.cta, button.cta {
             display: inline-flex;
             align-items: center;
             justify-content: center;
             box-sizing: border-box;
-            padding: 10px 20px;
+            padding: 8px 18px;
             border-radius: var(--radius-lg);
             background-color: rgba(0, 0, 0, 0.01);
             background-image: linear-gradient(#fff, #fff);
@@ -63,7 +63,7 @@
             text-decoration: none;
             font-family: var(--font-base);
             font-weight: 300;
-            font-size: 24px;
+            font-size: 18px;
             white-space: nowrap;
             position: relative;
             border: 1px solid transparent;
@@ -536,7 +536,7 @@
 
             <div class="about-right">
                 <p>Оставляй реакции<br>и пиши комментарии.<br>Приятного просмотра</p>
-                <a href="/anime/1" class="cta">Смотреть аниме</a>
+                <a href="#catalog" class="cta">Смотреть аниме</a>
             </div>
         </section>
 
@@ -659,7 +659,7 @@
         {{end}}
 
         <!-- ===== Каталог ===== -->
-        <section class="catalog">
+        <section class="catalog" id="catalog">
             <div class="catalog-header">
                 <h2>Приятного просмотра</h2>
             </div>

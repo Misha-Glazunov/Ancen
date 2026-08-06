@@ -189,6 +189,8 @@
 
         .empty-state { color: var(--color-gray-500); padding: 0 140px 40px; }
 
+        .anime-all-link { display: flex; width: max-content; margin: 0 auto 40px; }
+
         @media (max-width: 768px) {
             .anime-hero, .seasons, .empty-state { padding-left: 20px; padding-right: 20px; padding-top: 24px; }
             .anime-hero { flex-direction: column; align-items: center; text-align: center; }
@@ -228,9 +230,9 @@
                 </div>
                 {{end}}
             </div>
-            <button type="button" class="anime-favorite" data-favorite>
-                <span class="heart">♡</span>
-                <span class="favorite-label">Добавить в избранное</span>
+            <button type="button" class="anime-favorite{{if .IsFavorite}} active{{end}}" data-favorite data-anime-id="{{.Anime.ID}}">
+                <span class="heart">{{if .IsFavorite}}♥{{else}}♡{{end}}</span>
+                <span class="favorite-label">{{if .IsFavorite}}В избранном{{else}}Добавить в избранное{{end}}</span>
             </button>
         </div>
     </section>
@@ -243,7 +245,7 @@
             <div class="episode-grid">
                 {{range .Episodes}}
                 <a href="/watch?episode={{.ID}}" class="episode-card">
-                    <button type="button" class="episode-favorite" data-episode-favorite aria-label="Добавить в избранное">☆</button>
+                    <button type="button" class="episode-favorite{{if .IsFavorite}} active{{end}}" data-episode-favorite data-episode-id="{{.ID}}" aria-label="Буду смотреть">{{if .IsFavorite}}★{{else}}☆{{end}}</button>
                     <span class="play-icon">▶</span>
                     <span class="ep-title">Серия {{.Num}}. {{.Title}}</span>
                 </a>
@@ -256,26 +258,56 @@
     <p class="empty-state">Эпизоды пока не добавлены.</p>
     {{end}}
 
+    <a href="/search" class="btn btn-sm anime-all-link">Ко всем аниме</a>
+
     {{template "footer" .}}
+    <script src="/static/js/toast.js"></script>
     <script>
         document.querySelectorAll('[data-episode-favorite]').forEach(function (btn) {
             btn.addEventListener('click', function (e) {
                 e.preventDefault();
                 e.stopPropagation();
-                var active = btn.classList.toggle('active');
-                btn.textContent = active ? '★' : '☆';
+                var episodeId = parseInt(btn.dataset.episodeId, 10);
+                btn.disabled = true;
+                fetch('/api/favorites/episode', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ episode_id: episodeId })
+                })
+                    .then(function (r) { return r.ok ? r.json() : Promise.reject(r); })
+                    .then(function (res) {
+                        btn.classList.toggle('active', res.active);
+                        btn.textContent = res.active ? '★' : '☆';
+                    })
+                    .catch(function (r) {
+                        if (r && r.status === 401) { showToast({ icon: '🔒', title: 'Войдите в аккаунт', body: 'Чтобы отмечать серии' }); }
+                        else { showToast({ icon: '⚠️', title: 'Ошибка сети', body: '' }); }
+                    })
+                    .finally(function () { btn.disabled = false; });
             });
         });
 
         var favBtn = document.querySelector('[data-favorite]');
         if (favBtn) {
             favBtn.addEventListener('click', function () {
-                this.classList.toggle('active');
-                var heart = this.querySelector('.heart');
-                var label = this.querySelector('.favorite-label');
-                var active = this.classList.contains('active');
-                heart.textContent = active ? '♥' : '♡';
-                label.textContent = active ? 'В избранном' : 'Добавить в избранное';
+                var animeId = parseInt(favBtn.dataset.animeId, 10);
+                var heart = favBtn.querySelector('.heart');
+                var label = favBtn.querySelector('.favorite-label');
+                favBtn.disabled = true;
+                fetch('/api/favorites/anime', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ anime_id: animeId })
+                })
+                    .then(function (r) { return r.ok ? r.json() : Promise.reject(r); })
+                    .then(function (res) {
+                        favBtn.classList.toggle('active', res.active);
+                        heart.textContent = res.active ? '♥' : '♡';
+                        label.textContent = res.active ? 'В избранном' : 'Добавить в избранное';
+                    })
+                    .catch(function (r) {
+                        if (r && r.status === 401) { showToast({ icon: '🔒', title: 'Войдите в аккаунт', body: 'Чтобы добавлять в избранное' }); }
+                        else { showToast({ icon: '⚠️', title: 'Ошибка сети', body: '' }); }
+                    })
+                    .finally(function () { favBtn.disabled = false; });
             });
         }
     </script>

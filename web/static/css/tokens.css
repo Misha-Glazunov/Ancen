@@ -54,7 +54,7 @@
     justify-content: center;
     gap: 10px;
     box-sizing: border-box;
-    padding: 10px 20px;
+    padding: 8px 18px;
     border: 1px solid transparent;
     border-radius: var(--radius-lg);
     background-color: rgba(0, 0, 0, 0.01);
@@ -66,7 +66,7 @@
     position: relative;
     font-family: var(--font-base);
     font-weight: 300;
-    font-size: var(--fs-body);
+    font-size: var(--fs-small);
     color: var(--color-text);
     text-decoration: none;
     white-space: nowrap;
@@ -102,7 +102,7 @@
     background-size: 100% 100%;
 }
 .btn-solid:hover { color: #fff; }
-.btn-sm { padding: 6px 14px; font-size: var(--fs-small); }
+.btn-sm { padding: 5px 12px; font-size: var(--fs-small); }
 
 /* ===== Анимация появления блоков при скролле (общая для всех страниц) =====
    Разметка: добавить [data-animate] на блок, подключить /static/js/scroll-reveal.js */
