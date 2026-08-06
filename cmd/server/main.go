@@ -1039,6 +1039,9 @@ func createTables() {
 	if _, err := db.Exec("ALTER TABLE users ADD COLUMN avatar_frame VARCHAR(32) DEFAULT ''"); err != nil {
 		log.Printf("ALTER TABLE users (avatar_frame) может уже существовать: %v", err)
 	}
+	if _, err := db.Exec("ALTER TABLE users ADD COLUMN background_url VARCHAR(500) DEFAULT ''"); err != nil {
+		log.Printf("ALTER TABLE users (background_url) может уже существовать: %v", err)
+	}
 }
 
 // ---------- Обработчики ----------
@@ -1462,10 +1465,10 @@ func renderProfile(w http.ResponseWriter, r *http.Request, targetID, viewerID in
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	isOwn := viewerID == targetID
 
-	var username, avatarURL, avatarFrame string
+	var username, avatarURL, avatarFrame, backgroundURL string
 	var isPremium bool
-	err := db.QueryRow("SELECT username, avatar_url, avatar_frame, is_premium FROM users WHERE id = ?", targetID).
-		Scan(&username, &avatarURL, &avatarFrame, &isPremium)
+	err := db.QueryRow("SELECT username, avatar_url, avatar_frame, is_premium, background_url FROM users WHERE id = ?", targetID).
+		Scan(&username, &avatarURL, &avatarFrame, &isPremium, &backgroundURL)
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -1534,6 +1537,7 @@ func renderProfile(w http.ResponseWriter, r *http.Request, targetID, viewerID in
 		EpisodeTitle string
 		AnimeTitle   string
 		Poster       string
+		IsFavorite   bool // отмечен звёздочкой — можно убрать кнопкой "Удалить"
 	}
 	continueWatching := []ContinueEpisode{}
 	// "Буду смотреть аниме" — избранные аниме пользователя
@@ -1544,6 +1548,18 @@ func renderProfile(w http.ResponseWriter, r *http.Request, targetID, viewerID in
 	}
 	favoriteAnime := []FavoriteAnime{}
 	if isOwn {
+		favoriteEpisodeIDs := make(map[int]bool)
+		feIDRows, err := db.Query("SELECT episode_id FROM favorite_episodes WHERE user_id = ?", targetID)
+		if err == nil {
+			for feIDRows.Next() {
+				var epID int
+				if feIDRows.Scan(&epID) == nil {
+					favoriteEpisodeIDs[epID] = true
+				}
+			}
+			feIDRows.Close()
+		}
+
 		seenEpisodes := make(map[int]bool)
 		cwRows, err := db.Query(`
 			SELECT e.id, e.episode_num, e.title, a.title, a.poster_url
@@ -1559,6 +1575,7 @@ func renderProfile(w http.ResponseWriter, r *http.Request, targetID, viewerID in
 			for cwRows.Next() {
 				var ce ContinueEpisode
 				if cwRows.Scan(&ce.EpisodeID, &ce.EpisodeNum, &ce.EpisodeTitle, &ce.AnimeTitle, &ce.Poster) == nil {
+					ce.IsFavorite = favoriteEpisodeIDs[ce.EpisodeID]
 					continueWatching = append(continueWatching, ce)
 					seenEpisodes[ce.EpisodeID] = true
 				}
@@ -1580,6 +1597,7 @@ func renderProfile(w http.ResponseWriter, r *http.Request, targetID, viewerID in
 			for feRows.Next() {
 				var ce ContinueEpisode
 				if feRows.Scan(&ce.EpisodeID, &ce.EpisodeNum, &ce.EpisodeTitle, &ce.AnimeTitle, &ce.Poster) == nil && !seenEpisodes[ce.EpisodeID] {
+					ce.IsFavorite = true
 					continueWatching = append(continueWatching, ce)
 					seenEpisodes[ce.EpisodeID] = true
 				}
@@ -1636,6 +1654,7 @@ func renderProfile(w http.ResponseWriter, r *http.Request, targetID, viewerID in
 		AvatarURL           string
 		AvatarFrame         string
 		AvatarFrameColor    string
+		BackgroundURL       string
 		IsPremium           bool
 		FrameOptions        []FrameOption
 	}{
@@ -1657,6 +1676,7 @@ func renderProfile(w http.ResponseWriter, r *http.Request, targetID, viewerID in
 		AvatarURL:           avatarURL,
 		AvatarFrame:         avatarFrame,
 		AvatarFrameColor:    avatarFrameColor,
+		BackgroundURL:       backgroundURL,
 		IsPremium:           isPremium,
 		FrameOptions:        frameOptions,
 	}
@@ -2602,6 +2622,76 @@ func apiAvatarUploadHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "avatar_url": url})
 }
 
+// apiBackgroundUploadHandler — загрузка своего фона профиля, тот же паттерн,
+// что apiAvatarUploadHandler (Premium-гейт, magic-bytes, MinIO).
+func apiBackgroundUploadHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	if !isPremiumUser(userID) {
+		http.Error(w, `{"error":"Загрузка своего фона доступна только по подписке Premium"}`, http.StatusForbidden)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxAvatarBytes)
+	file, _, err := r.FormFile("background")
+	if err != nil {
+		if err.Error() == "http: request body too large" {
+			http.Error(w, `{"error":"Файл превышает 5 МБ"}`, http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, `{"error":"Файл (поле background) обязателен"}`, http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	ext, err := sniffImageContainer(file)
+	if err != nil {
+		http.Error(w, `{"error":"Файл не распознан как изображение (jpg/png/webp)"}`, http.StatusBadRequest)
+		return
+	}
+
+	tmpFile, err := os.CreateTemp("", "ancen-background-*"+ext)
+	if err != nil {
+		http.Error(w, `{"error":"Ошибка временного файла"}`, http.StatusInternalServerError)
+		return
+	}
+	defer os.Remove(tmpFile.Name())
+	if _, err := io.Copy(tmpFile, file); err != nil {
+		tmpFile.Close()
+		http.Error(w, `{"error":"Ошибка записи файла"}`, http.StatusInternalServerError)
+		return
+	}
+	tmpFile.Close()
+
+	objectName := fmt.Sprintf("backgrounds/%d-%d%s", userID, time.Now().UnixNano(), ext)
+	contentType := "image/jpeg"
+	if ext == ".png" {
+		contentType = "image/png"
+	} else if ext == ".webp" {
+		contentType = "image/webp"
+	}
+	url, err := uploadSingleFile(r.Context(), tmpFile.Name(), objectName, contentType)
+	if err != nil {
+		http.Error(w, `{"error":"Ошибка загрузки в хранилище"}`, http.StatusInternalServerError)
+		return
+	}
+
+	if _, err := db.Exec("UPDATE users SET background_url = ? WHERE id = ?", url, userID); err != nil {
+		http.Error(w, `{"error":"Ошибка сохранения фона"}`, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "background_url": url})
+}
+
 // apiAvatarFrameHandler устанавливает рамку аватара из бесплатных пресетов,
 // разблокированных уровнем пользователя.
 func apiAvatarFrameHandler(w http.ResponseWriter, r *http.Request) {
@@ -3397,6 +3487,7 @@ func main() {
 	secureHandle("/api/achievements/all", apiAllAchievementsGet)
 	secureHandle("/api/admin/upload-video", adminUploadVideoHandler)
 	secureHandle("/api/profile/avatar", apiAvatarUploadHandler)
+	secureHandle("/api/profile/background", apiBackgroundUploadHandler)
 	secureHandle("/api/profile/avatar-frame", apiAvatarFrameHandler)
 	secureHandle("/api/change-password", apiChangePasswordHandler)
 	secureHandle("/api/auth/refresh", apiAuthRefreshHandler)

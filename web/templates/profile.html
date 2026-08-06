@@ -261,6 +261,27 @@
         .catalog-card:hover img { transform: scale(1.04); }
         .catalog-card .title { font-size: var(--fs-small); }
 
+        .episode-card-wrap, .catalog-card-wrap { position: relative; }
+        .card-remove {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            width: 22px;
+            height: 22px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            border: none;
+            background: rgba(0, 0, 0, 0.6);
+            color: #fff;
+            font-size: 16px;
+            line-height: 1;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .card-remove:hover { background: var(--color-accent); }
+
         .empty-state { color: var(--color-gray-500); }
 
         @media (max-width: 900px) {
@@ -274,10 +295,12 @@
             .profile-info h1 { font-size: 32px; }
             .profile-level-row { justify-content: center; }
             .achievements-grid { grid-template-columns: repeat(2, 1fr); }
+            /* Только на мобильных друзья идут выше достижений — на десктопе/планшете обычный порядок */
+            .col-friends { order: -1; }
         }
     </style>
 </head>
-<body>
+<body{{if .BackgroundURL}} style="background-image: url('{{.BackgroundURL}}')"{{end}}>
 {{template "header" .}}
 <div class="profile-card" data-animate>
     <div class="profile-hero">
@@ -326,12 +349,79 @@
                     </div>
                     {{end}}
                 </div>
+
+                <p class="hint" style="margin-top:16px;">Фон профиля</p>
+                <div class="avatar-upload-row">
+                    {{if .IsPremium}}
+                    <input type="file" id="background-file" accept="image/jpeg,image/png,image/webp">
+                    <button type="button" id="background-upload-btn" class="btn btn-sm">Загрузить фон</button>
+                    {{else}}
+                    <p class="hint">Смена фона профиля — по подписке Premium.</p>
+                    {{end}}
+                </div>
             </div>
             {{end}}
         </div>
     </div>
 
     <div class="profile-columns">
+        <div class="col-main">
+            <div class="panel" data-animate>
+                <h2>Список достижений</h2>
+                <div class="achievements-grid">
+                    {{range .AchievementSlots}}
+                    <div class="achievement-slot{{if not .Unlocked}} locked{{end}}">
+                        <div class="achievement-icon">{{.Icon}}</div>
+                        <div class="achievement-name">{{.Name}}</div>
+                        <div class="achievement-tooltip">{{.Description}}{{if not .Unlocked}} (ещё не получено){{end}}</div>
+                    </div>
+                    {{end}}
+                </div>
+            </div>
+
+            {{if .IsOwnProfile}}
+            <div class="panel" data-animate>
+                <h2>Буду смотреть серию</h2>
+                {{if .ContinueWatching}}
+                <div class="episodes-row">
+                    {{range .ContinueWatching}}
+                    <div class="episode-card-wrap">
+                        <a href="/watch?episode={{.EpisodeID}}" class="episode-card" style="background: linear-gradient(0deg, rgba(0,0,0,0.4), rgba(0,0,0,0.4)), url('{{.Poster}}') center/cover no-repeat;">
+                            <span class="play-icon">▶</span>
+                            <span class="ep-title">Серия {{.EpisodeNum}}<br>{{.EpisodeTitle}}</span>
+                        </a>
+                        {{if .IsFavorite}}
+                        <button type="button" class="card-remove" data-remove-episode="{{.EpisodeID}}" aria-label="Убрать из списка">×</button>
+                        {{end}}
+                    </div>
+                    {{end}}
+                </div>
+                {{else}}
+                <p class="empty-state">Пока нет начатых серий — начните смотреть, и они появятся здесь.</p>
+                {{end}}
+            </div>
+
+            <div class="panel" data-animate>
+                <h2>Буду смотреть аниме</h2>
+                {{if .FavoriteAnime}}
+                <div class="catalog-row">
+                    {{range .FavoriteAnime}}
+                    <div class="catalog-card-wrap">
+                        <a href="/anime/{{.AnimeID}}" class="catalog-card">
+                            <img src="{{.Poster}}" alt="{{.Title}}">
+                            <div class="title">{{.Title}}</div>
+                        </a>
+                        <button type="button" class="card-remove" data-remove-anime="{{.AnimeID}}" aria-label="Убрать из избранного">×</button>
+                    </div>
+                    {{end}}
+                </div>
+                {{else}}
+                <p class="empty-state">Пока нет избранных аниме — добавляйте со страницы аниме.</p>
+                {{end}}
+            </div>
+            {{end}}
+        </div>
+
         <div class="col-friends">
             {{if .IsOwnProfile}}
             {{if .PendingRequests}}
@@ -381,55 +471,6 @@
                 {{end}}
             </div>
         </div>
-
-        <div class="col-main">
-            <div class="panel" data-animate>
-                <h2>Список достижений</h2>
-                <div class="achievements-grid">
-                    {{range .AchievementSlots}}
-                    <div class="achievement-slot{{if not .Unlocked}} locked{{end}}">
-                        <div class="achievement-icon">{{.Icon}}</div>
-                        <div class="achievement-name">{{.Name}}</div>
-                        <div class="achievement-tooltip">{{.Description}}{{if not .Unlocked}} (ещё не получено){{end}}</div>
-                    </div>
-                    {{end}}
-                </div>
-            </div>
-
-            {{if .IsOwnProfile}}
-            <div class="panel" data-animate>
-                <h2>Буду смотреть серию</h2>
-                {{if .ContinueWatching}}
-                <div class="episodes-row">
-                    {{range .ContinueWatching}}
-                    <a href="/watch?episode={{.EpisodeID}}" class="episode-card" style="background: linear-gradient(0deg, rgba(0,0,0,0.4), rgba(0,0,0,0.4)), url('{{.Poster}}') center/cover no-repeat;">
-                        <span class="play-icon">▶</span>
-                        <span class="ep-title">Серия {{.EpisodeNum}}<br>{{.EpisodeTitle}}</span>
-                    </a>
-                    {{end}}
-                </div>
-                {{else}}
-                <p class="empty-state">Пока нет начатых серий — начните смотреть, и они появятся здесь.</p>
-                {{end}}
-            </div>
-
-            <div class="panel" data-animate>
-                <h2>Буду смотреть аниме</h2>
-                {{if .FavoriteAnime}}
-                <div class="catalog-row">
-                    {{range .FavoriteAnime}}
-                    <a href="/anime/{{.AnimeID}}" class="catalog-card">
-                        <img src="{{.Poster}}" alt="{{.Title}}">
-                        <div class="title">{{.Title}}</div>
-                    </a>
-                    {{end}}
-                </div>
-                {{else}}
-                <p class="empty-state">Пока нет избранных аниме — добавляйте со страницы аниме.</p>
-                {{end}}
-            </div>
-            {{end}}
-        </div>
     </div>
 </div>
 {{template "footer" .}}
@@ -457,6 +498,30 @@
                 })
                 .catch(function () { showToast({ icon: '⚠️', title: 'Ошибка сети', body: '' }); })
                 .finally(function () { uploadBtn.disabled = false; });
+        });
+    }
+
+    var bgUploadBtn = document.getElementById('background-upload-btn');
+    if (bgUploadBtn) {
+        bgUploadBtn.addEventListener('click', function () {
+            var fileInput = document.getElementById('background-file');
+            var file = fileInput.files[0];
+            if (!file) { showToast({ icon: '⚠️', title: 'Выберите файл', body: 'jpg / png / webp, до 5 МБ' }); return; }
+            var formData = new FormData();
+            formData.append('background', file);
+            bgUploadBtn.disabled = true;
+            fetch('/api/profile/background', { method: 'POST', body: formData })
+                .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+                .then(function (res) {
+                    if (res.ok) {
+                        document.body.style.backgroundImage = "url('" + res.data.background_url + "')";
+                        showToast({ icon: '🖼️', title: 'Фон обновлён', body: '' });
+                    } else {
+                        showToast({ icon: '⚠️', title: 'Ошибка', body: res.data.error || 'не удалось загрузить' });
+                    }
+                })
+                .catch(function () { showToast({ icon: '⚠️', title: 'Ошибка сети', body: '' }); })
+                .finally(function () { bgUploadBtn.disabled = false; });
         });
     }
 
@@ -564,6 +629,36 @@
             showMoreBtn.remove();
         });
     }
+
+    document.querySelectorAll('[data-remove-episode]').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+            e.preventDefault();
+            var wrap = btn.closest('.episode-card-wrap');
+            btn.disabled = true;
+            fetch('/api/favorites/episode', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ episode_id: parseInt(btn.dataset.removeEpisode, 10) })
+            })
+                .then(function (r) { return r.ok ? r.json() : Promise.reject(r); })
+                .then(function () { wrap.remove(); })
+                .catch(function () { showToast({ icon: '⚠️', title: 'Ошибка сети', body: '' }); btn.disabled = false; });
+        });
+    });
+
+    document.querySelectorAll('[data-remove-anime]').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+            e.preventDefault();
+            var wrap = btn.closest('.catalog-card-wrap');
+            btn.disabled = true;
+            fetch('/api/favorites/anime', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ anime_id: parseInt(btn.dataset.removeAnime, 10) })
+            })
+                .then(function (r) { return r.ok ? r.json() : Promise.reject(r); })
+                .then(function () { wrap.remove(); })
+                .catch(function () { showToast({ icon: '⚠️', title: 'Ошибка сети', body: '' }); btn.disabled = false; });
+        });
+    });
 
     document.querySelectorAll('[data-request-action]').forEach(function (btn) {
         btn.addEventListener('click', function () {
