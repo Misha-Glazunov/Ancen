@@ -9,6 +9,11 @@ cmd/server/server
 # Environment files
 .env
 
+# Keys / secrets (e.g. AUTH_MODE=jwt RS256 keys)
+*.pem
+*.key
+id_rsa*
+
 # IDE
 .vscode/
 .idea/

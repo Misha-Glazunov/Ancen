@@ -116,6 +116,12 @@ const (
 	emotionRateWindow = 10 * time.Second
 	commentRateLimit  = 5
 	commentRateWindow = 30 * time.Second
+
+	registerRateLimit  = 5
+	registerRateWindow = time.Hour
+
+	forgotPasswordRateLimit  = 3
+	forgotPasswordRateWindow = time.Hour
 )
 
 var validEmotions = map[string]bool{
@@ -1042,7 +1048,15 @@ func createTables() {
 	if _, err := db.Exec("ALTER TABLE users ADD COLUMN background_url VARCHAR(500) DEFAULT ''"); err != nil {
 		log.Printf("ALTER TABLE users (background_url) может уже существовать: %v", err)
 	}
+	if _, err := db.Exec("ALTER TABLE users ALTER COLUMN background_url SET DEFAULT '" + defaultBackgroundURL + "'"); err != nil {
+		log.Printf("ALTER TABLE users (background_url default) не применился: %v", err)
+	}
+	if _, err := db.Exec("UPDATE users SET background_url = ? WHERE background_url = ''", defaultBackgroundURL); err != nil {
+		log.Printf("UPDATE users (background_url для старых аккаунтов) не применился: %v", err)
+	}
 }
+
+const defaultBackgroundURL = "/static/img/profile/default_bg.jpg"
 
 // ---------- Обработчики ----------
 
@@ -1108,6 +1122,11 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 
 func registerHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
+		if !actionLimiter.allow("register:"+clientIP(r), registerRateLimit, registerRateWindow) {
+			render(w, "register.html", PageData{Title: "Регистрация", Error: "Слишком много попыток регистрации. Попробуйте позже."})
+			return
+		}
+
 		username := r.FormValue("username")
 		password := r.FormValue("password")
 		email := r.FormValue("email")
@@ -3294,6 +3313,13 @@ func forgotPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		email := r.FormValue("email")
 		if email == "" {
 			render(w, "forgot-password.html", PageData{Title: "Восстановление пароля", Error: "Введите email"})
+			return
+		}
+
+		if !actionLimiter.allow("forgot:"+clientIP(r), forgotPasswordRateLimit, forgotPasswordRateWindow) ||
+			!actionLimiter.allow("forgot:"+strings.ToLower(email), forgotPasswordRateLimit, forgotPasswordRateWindow) {
+			// Тот же нейтральный ответ, что и при несуществующем email — не палим наличие лимита
+			render(w, "forgot-password.html", PageData{Title: "Восстановление пароля", Success: "На вашу почту отправлено сообщение для сброса пароля."})
 			return
 		}
 
