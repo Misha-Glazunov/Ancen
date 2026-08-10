@@ -230,7 +230,9 @@
         .hero-rail .year { font-size: var(--fs-caption); color: var(--color-gray-500); display: block; }
 
         @media (max-width: 900px) {
-            .hero-rail-col { flex: 1 1 100%; }
+            .hero-featured-col { flex: 1 1 100%; width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
+            .hero-featured-visual { min-height: 420px; max-width: 100%; }
+            .hero-rail-col { flex: 1 1 100%; width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
             .hero-rail { flex-direction: row; flex-wrap: wrap; gap: 20px; }
             .hero-rail li { flex: 1 1 45%; }
         }
@@ -329,17 +331,25 @@
 
         /* ===== "Об AniMemory" / реакции / топ пользователей ===== */
         .about-section {
+            position: relative;
             display: flex;
             justify-content: space-between;
             align-items: stretch;
             margin: 40px 140px 100px;
             border-radius: var(--radius-lg);
-            padding: 20px 1px 20px 20px;
+            padding: 20px;
             aspect-ratio: 1160 / 650;
-            background-size: cover;
-            background-position: center;
             overflow: hidden;
         }
+        .about-video {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 0;
+        }
+        .about-left, .about-right { position: relative; z-index: 2; }
         .about-left {
             display: flex;
             flex-direction: column;
@@ -347,15 +357,16 @@
             width: 437px;
             max-width: 44%;
         }
-        .about-card, .top-card {
-            background: rgba(0,0,0,0.01);
+        .about-card, .top-card, .about-right {
+            background: rgba(0, 0, 0, 0.004);
             -webkit-backdrop-filter: blur(20px);
             backdrop-filter: blur(20px);
             border-radius: var(--radius-lg);
             padding: 20px;
             display: flex;
             flex-direction: column;
-            gap: 19px;
+            align-items: flex-start;
+            gap: 10px;
         }
         .card-header {
             display: flex;
@@ -374,15 +385,12 @@
         .card-header img { width: 30px; height: 30px; flex-shrink: 0; }
         .about-card p { color: #fff; font-size: 16px; line-height: 23px; margin: 0; white-space: pre-line; }
         .about-right {
-            display: flex;
-            flex-direction: column;
-            align-items: flex-end;
             justify-content: flex-end;
-            gap: 40px;
-            width: 273px;
+            width: 320px;
+            max-width: 100%;
             margin-top: auto;
         }
-        .about-right p { color: #fff; font-family: 'Jost', var(--font-base); font-size: 20px; line-height: 29px; margin: 0; width: 263px; text-align: left; }
+        .about-right p { color: #fff; font-family: 'Jost', var(--font-base); font-size: 18px; line-height: 27px; margin: 0; text-align: left; }
         .about-right .cta { align-self: stretch; padding: 4px 20px; }
         .top-card ul { list-style: none; margin: 0; padding: 0; display: flex; gap: 48px; }
         .top-card li { display: flex; flex-direction: column; align-items: center; gap: 2px; }
@@ -392,10 +400,11 @@
         .top-card li span:last-child { font-size: 16px; line-height: 23px; color: #fff; }
 
         @media (max-width: 900px) {
-            .about-section { flex-direction: column; align-items: stretch; aspect-ratio: auto; padding: 24px; gap: 24px; }
+            .about-section { flex-direction: column; align-items: stretch; aspect-ratio: auto; padding: 20px; gap: 20px; }
             .about-left, .about-right { width: auto; max-width: none; align-items: flex-start; }
             .about-right .cta { width: 100%; }
-            .top-card ul { flex-wrap: wrap; gap: 20px; }
+            .top-card ul { display: grid; grid-template-columns: 1fr 1fr; justify-items: center; gap: 20px; }
+            .top-card ul li:first-child { grid-column: 1 / -1; }
         }
 
         /* ===== Форма обратной связи ===== */
@@ -443,8 +452,10 @@
             .hero-featured, .catalog, .about-section { margin-left: 20px; margin-right: 20px; }
             .feedback { padding-left: 20px; padding-right: 20px; }
             .catalog { padding: 30px 20px 24px; }
-            .about-section { padding: 30px 20px; }
+            .about-section { padding: 20px; }
+            .feedback-form { padding: 0 20px; }
             .feedback-form button { width: 100%; white-space: normal; }
+            .catalog-grid .catalog-card:nth-child(n+6) { display: none; }
         }
         @media (max-width: 420px) {
             .hero-featured-content h1 { font-size: 32px; }
@@ -498,7 +509,8 @@
 
     <main>
         <!-- ===== Об AniMemory / реакции / топ пользователей ===== -->
-        <section class="about-section" style="background-image: url('/static/img/home/about_banner.png')">
+        <section class="about-section">
+            <video class="about-video" src="/static/video/home_hero.mp4" poster="/static/img/home/about_banner.png" autoplay muted loop playsinline></video>
             <div class="about-left">
                 <div class="about-card" data-animate>
                     <div class="card-header">
@@ -535,7 +547,7 @@
             </div>
 
             <div class="about-right">
-                <p>Оставляй реакции<br>и пиши комментарии.<br>Приятного просмотра</p>
+                <p>Оставляй реакции и пиши комментарии чтобы получить ачивки, они позволят прокачать свой аккаунт. Приятного просмотра</p>
                 <a href="#catalog" class="cta">Смотреть аниме</a>
             </div>
         </section>
@@ -749,7 +761,7 @@
                     <input type="text" placeholder="Telegram для связи, чтобы уточнить вашу идею">
                 </div>
                 <textarea rows="3" placeholder="Ваше предложение для улучшения"></textarea>
-                <button type="submit" class="cta">Предложить фичу или сообщить о баге</button>
+                <button type="submit" class="cta">Предложить фичу / сообщить о баге</button>
             </form>
         </section>
     </main>
