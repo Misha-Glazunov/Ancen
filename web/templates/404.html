@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Страница не найдена — AniMemory</title>
+    <meta name="robots" content="noindex, follow">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;700&family=Manrope:wght@400;500;600&family=MuseoModerno:wght@400;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/tokens.css?v=2">
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; background: var(--color-bg); color: var(--color-text); font-family: var(--font-base); }
+        .not-found {
+            min-height: calc(100vh - 400px);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 60px 20px;
+        }
+        .not-found .code {
+            font-family: var(--font-display);
+            font-size: 160px;
+            line-height: 1;
+            margin: 0;
+            background: var(--color-accent-gradient);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .not-found h1 {
+            font-family: var(--font-base);
+            font-weight: 400;
+            font-size: var(--fs-display-md);
+            margin: 10px 0 12px;
+        }
+        .not-found p {
+            color: var(--color-gray-300);
+            margin: 0 0 30px;
+            max-width: 420px;
+        }
+
+        @media (max-width: 600px) {
+            .not-found { min-height: calc(100vh - 500px); padding: 40px 20px; }
+            .not-found .code { font-size: 96px; }
+            .not-found h1 { font-size: 24px; }
+        }
+    </style>
+</head>
+<body>
+{{template "header" .}}
+<section class="not-found" data-animate>
+    <p class="code">404</p>
+    <h1>Такой страницы не существует</h1>
+    <p>Возможно, ссылка устарела или адрес введён с ошибкой. Вернись на главную и найди своё аниме там.</p>
+    <a href="/" class="btn">На главную</a>
+</section>
+{{template "footer" .}}
+<script src="/static/js/scroll-reveal.js"></script>
+</body>
+</html>

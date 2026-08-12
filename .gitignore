@@ -27,4 +27,4 @@ logs/*.log
 
 # Claude Code / claude-flow tool state (belongs one level up, in Ancen_web/)
 /.claude/
-/.claude-flow/
+.claude-flow/

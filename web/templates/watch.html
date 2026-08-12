@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;700&family=Manrope:wght@400;500;600&family=MuseoModerno:wght@400;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/tokens.css">
+    <link rel="stylesheet" href="/static/css/tokens.css?v=2">
     <!-- Video.js CSS -->
     <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
     <style>
@@ -218,7 +218,7 @@
 
     <div id="resumeDialog">
         <p>У вас есть сохранённый прогресс: <span id="resumeTime">0:00</span></p>
-        <button id="resumeBtn" class="btn btn-solid">Продолжить</button>
+        <button id="resumeBtn" class="btn">Продолжить</button>
         <button id="restartBtn" class="btn">Начать сначала</button>
     </div>
 
@@ -284,7 +284,7 @@
             <h3>Комментарии к таймкоду</h3>
             <div class="comment-form">
                 <input type="text" id="commentText" placeholder="Ваш комментарий">
-                <button id="sendCommentBtn" class="btn btn-solid">Отправить</button>
+                <button id="sendCommentBtn" class="btn">Отправить</button>
                 <span class="timecode">Таймкод: <span id="currentTimeDisplay">0:00</span></span>
             </div>
             {{if .IsPremium}}

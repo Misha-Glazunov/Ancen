@@ -10,7 +10,7 @@
                 <span class="footer-copy">© 2026 AniMemory</span>
                 <a href="/privacy-policy" class="policy-button">Политика конфиденциальности</a>
             </div>
-            <a href="/premium" class="btn btn-solid btn-sm footer-premium-btn">✨ Premium</a>
+            <a href="/premium" class="btn btn-sm footer-premium-btn">✨ Premium</a>
         </div>
 
         <!-- Колонки -->
@@ -166,7 +166,12 @@
 }
 .footer-col ul li a:hover { opacity: 0.6; }
 
-.footer-premium-btn { align-self: flex-start; color: #fff; }
+/* Подвал светлый — у .btn инвертируем цвета: текст чёрный в покое, заливка
+   на hover идёт акцентным градиентом (а не белой, как на тёмных страницах),
+   поэтому текст на hover становится белым. */
+.footer-premium-btn { align-self: flex-start; color: #000; }
+.footer-premium-btn::after { background: var(--color-accent-gradient); }
+.footer-premium-btn:hover { color: #fff; }
 
 /* Контакты */
 .contacts-email {
@@ -198,13 +203,16 @@
         flex-direction: column;
     }
     .footer-columns {
+        flex-direction: column;
         gap: 40px;
     }
     .footer-logo img {
         width: 180px;
         height: 40px;
     }
+    .footer-copy-row { flex-wrap: wrap; }
 }
 </style>
 </footer>
+<script src="/static/js/letter-swap.js"></script>
 {{end}}

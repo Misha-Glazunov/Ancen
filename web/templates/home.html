@@ -26,7 +26,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;700&family=Manrope:wght@400;500;600&family=MuseoModerno:wght@400;700;800&family=Nothing+You+Could+Do&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/tokens.css">
+    <link rel="stylesheet" href="/static/css/tokens.css?v=2">
 
     <script type="application/ld+json">
     {
@@ -55,9 +55,6 @@
             padding: 8px 18px;
             border-radius: var(--radius-lg);
             background-color: rgba(0, 0, 0, 0.01);
-            background-image: linear-gradient(#fff, #fff);
-            background-repeat: no-repeat;
-            background-size: 0% 100%;
             backdrop-filter: blur(20px);
             color: var(--color-text);
             text-decoration: none;
@@ -66,9 +63,11 @@
             font-size: 18px;
             white-space: nowrap;
             position: relative;
+            overflow: hidden;
+            isolation: isolate;
             border: 1px solid transparent;
             background-clip: padding-box;
-            transition: background-size 0.35s ease, color 0.3s ease 0.05s, transform 0.2s ease, box-shadow 0.3s ease;
+            transition: color 0.3s ease 0.05s, transform 0.2s ease, box-shadow 0.3s ease;
         }
         a.cta::before, button.cta::before {
             content: '';
@@ -82,8 +81,24 @@
             mask-composite: exclude;
             pointer-events: none;
         }
+        /* ellipse-fill hover — подсмотрено на incredibles.dev: заливка "всплывает"
+           снизу эллипсом через clip-path, вместо линейной заливки слева направо */
+        a.cta::after, button.cta::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            z-index: -1;
+            border-radius: inherit;
+            background: #fff;
+            clip-path: ellipse(80% 50% at 50% 152%);
+            transition: clip-path 0.6s cubic-bezier(0.19, 1, 0.22, 1);
+            pointer-events: none;
+        }
+        a.cta:hover::after, button.cta:hover::after {
+            clip-path: ellipse(100% 70% at 50% 50%);
+            transition: clip-path 0.8s cubic-bezier(0.86, 0, 0.07, 1);
+        }
         a.cta:hover, button.cta:hover {
-            background-size: 100% 100%;
             color: #000;
             transform: translateY(-2px);
             box-shadow: 0 8px 20px rgba(216, 45, 126, 0.35);
@@ -235,6 +250,25 @@
             .hero-rail-col { flex: 1 1 100%; width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
             .hero-rail { flex-direction: row; flex-wrap: wrap; gap: 20px; }
             .hero-rail li { flex: 1 1 45%; }
+
+            /* Карточка "Новое": одинаковые отступы у текста от краёв и между
+               собой (flex+gap вместо разных margin). Описание не помещается
+               по высоте на мобильных — прячем его тут, читать его можно на
+               странице конкретного аниме. Кнопка отцентрована, дальше от
+               индикаторов (контент приподнят над dots отдельным отступом). */
+            .hero-featured-content {
+                left: 20px;
+                right: 20px;
+                bottom: 60px;
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+            }
+            .hero-featured-content h1 { margin: 0; font-size: 28px; }
+            .hero-featured-content .genre-tag { margin: 0; align-self: flex-start; }
+            .hero-featured-content p.description { display: none; }
+            .hero-featured-content > div { margin: 0; display: flex; justify-content: center; }
+            .hero-dots { bottom: 16px; }
         }
 
         /* ===== Продолжить просмотр (авторизован) ===== */
@@ -393,7 +427,7 @@
         .about-right p { color: #fff; font-family: 'Jost', var(--font-base); font-size: 18px; line-height: 27px; margin: 0; text-align: left; }
         .about-right .cta { align-self: stretch; padding: 4px 20px; }
         .top-card ul { list-style: none; margin: 0; padding: 0; display: flex; gap: 48px; }
-        .top-card li { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+        .top-card li { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; }
         .top-card li img { width: 100px; height: 100px; border-radius: 10px; object-fit: cover; }
         .top-card li div { display: flex; flex-direction: column; align-items: center; gap: 10px; }
         .top-card li .place { font-size: 16px; line-height: 23px; color: #fff; display: block; text-align: center; }
@@ -403,7 +437,9 @@
             .about-section { flex-direction: column; align-items: stretch; aspect-ratio: auto; padding: 20px; gap: 20px; }
             .about-left, .about-right { width: auto; max-width: none; align-items: flex-start; }
             .about-right .cta { width: 100%; }
-            .top-card ul { display: grid; grid-template-columns: 1fr 1fr; justify-items: center; gap: 20px; }
+            .top-card { width: 100%; box-sizing: border-box; }
+            .top-card ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); justify-items: center; gap: 20px; width: 100%; }
+            .top-card li img { max-width: 100%; height: auto; }
             .top-card ul li:first-child { grid-column: 1 / -1; }
         }
 
@@ -458,7 +494,7 @@
             .catalog-grid .catalog-card:nth-child(n+6) { display: none; }
         }
         @media (max-width: 420px) {
-            .hero-featured-content h1 { font-size: 32px; }
+            .hero-featured-content h1 { font-size: 24px; }
             .catalog-header h2 { font-size: 26px; }
             .feedback h2 { font-size: 26px; }
         }

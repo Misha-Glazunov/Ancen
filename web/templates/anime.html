@@ -24,7 +24,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;700&family=Manrope:wght@400;500;600&family=MuseoModerno:wght@400;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/tokens.css">
+    <link rel="stylesheet" href="/static/css/tokens.css?v=2">
 
     <script type="application/ld+json">
     {
@@ -110,9 +110,6 @@
             padding: 4px 10px;
             border-radius: var(--radius-lg);
             background-color: rgba(0, 0, 0, 0.01);
-            background-image: linear-gradient(#fff, #fff);
-            background-repeat: no-repeat;
-            background-size: 0% 100%;
             backdrop-filter: blur(20px);
             border: 1px solid transparent;
             background-clip: padding-box;
@@ -120,7 +117,9 @@
             font-size: var(--fs-body);
             color: var(--color-text);
             cursor: pointer;
-            transition: background-size 0.35s ease, color 0.3s ease 0.05s, transform 0.2s ease, box-shadow 0.3s ease;
+            overflow: hidden;
+            isolation: isolate;
+            transition: color 0.3s ease 0.05s, transform 0.2s ease, box-shadow 0.3s ease;
         }
         .anime-favorite::before {
             content: '';
@@ -134,7 +133,22 @@
             mask-composite: exclude;
             pointer-events: none;
         }
-        .anime-favorite:hover { background-size: 100% 100%; color: #000; transform: translateY(-2px); box-shadow: 0 8px 20px rgba(216, 45, 126, 0.35); }
+        .anime-favorite::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            z-index: -1;
+            border-radius: inherit;
+            background: #fff;
+            clip-path: ellipse(80% 50% at 50% 152%);
+            transition: clip-path 0.6s cubic-bezier(0.19, 1, 0.22, 1);
+            pointer-events: none;
+        }
+        .anime-favorite:hover::after {
+            clip-path: ellipse(100% 70% at 50% 50%);
+            transition: clip-path 0.8s cubic-bezier(0.86, 0, 0.07, 1);
+        }
+        .anime-favorite:hover { color: #000; transform: translateY(-2px); box-shadow: 0 8px 20px rgba(216, 45, 126, 0.35); }
         .anime-favorite .heart { font-size: 18px; }
         .anime-favorite.active .heart { color: var(--color-accent); }
 
@@ -191,14 +205,37 @@
 
         .anime-all-link { display: flex; width: max-content; margin: 0 auto 40px; }
 
+        .description-more {
+            display: none;
+            align-self: flex-start;
+            background: none;
+            border: none;
+            padding: 0;
+            font-size: var(--fs-body);
+            color: var(--color-accent);
+            text-decoration: underline;
+            cursor: pointer;
+        }
+        .description-more.is-visible { display: inline-block; }
+        .anime-info .description.is-expanded {
+            -webkit-line-clamp: unset;
+            overflow: visible;
+        }
+
         @media (max-width: 768px) {
             .anime-hero, .seasons, .empty-state { padding-left: 20px; padding-right: 20px; padding-top: 24px; }
             .anime-hero { flex-direction: column; align-items: center; text-align: center; }
             .anime-info { height: auto; }
             .anime-info-top { align-items: center; }
             .anime-favorite { position: static; margin: 20px auto 0; }
-            .anime-tags { justify-content: center; }
-            .anime-meta .meta-row { justify-content: center; }
+            /* Жанр и год — каждый на своей строке по центру, год под жанром */
+            .anime-tags { flex-direction: column; gap: 6px; }
+            .anime-info .description { text-align: left; }
+            /* Страна/первоисточник/студия/автор/режиссёр — колонкой по левому
+               краю (и подписи, и значения выровнены между собой по левому
+               краю за счёт фиксированной ширины подписи в .meta-row b) */
+            .anime-meta { align-items: flex-start; text-align: left; }
+            .anime-meta .meta-row { justify-content: flex-start; }
             .anime-poster { width: 100%; max-width: 295px; height: auto; }
             .anime-info h1 { font-size: 28px; }
         }
@@ -219,7 +256,8 @@
                     <span class="anime-genres">{{.Anime.Genres}}</span>
                     {{if .Anime.Year}}<span class="anime-year">{{.Anime.Year}}</span>{{end}}
                 </div>
-                <p class="description">{{.Anime.Description}}</p>
+                <p class="description" id="anime-description">{{.Anime.Description}}</p>
+                <button type="button" class="description-more" id="description-more-btn">Подробнее</button>
                 {{if or .Anime.Country .Anime.SourceType .Anime.Studio .Anime.Author .Anime.Director}}
                 <div class="anime-meta">
                     {{if .Anime.Country}}<div class="meta-row"><b>Страна</b><span>{{.Anime.Country}}</span></div>{{end}}
@@ -263,6 +301,19 @@
     {{template "footer" .}}
     <script src="/static/js/toast.js"></script>
     <script>
+        (function () {
+            var desc = document.getElementById('anime-description');
+            var moreBtn = document.getElementById('description-more-btn');
+            if (!desc || !moreBtn) return;
+            if (desc.scrollHeight > desc.clientHeight + 1) {
+                moreBtn.classList.add('is-visible');
+            }
+            moreBtn.addEventListener('click', function () {
+                var expanded = desc.classList.toggle('is-expanded');
+                moreBtn.textContent = expanded ? 'Свернуть' : 'Подробнее';
+            });
+        })();
+
         document.querySelectorAll('[data-episode-favorite]').forEach(function (btn) {
             btn.addEventListener('click', function (e) {
                 e.preventDefault();
