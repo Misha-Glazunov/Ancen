@@ -1280,7 +1280,7 @@ func animeHandler(w http.ResponseWriter, r *http.Request) {
 	idStr := strings.TrimPrefix(r.URL.Path, "/anime/")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		http.NotFound(w, r)
+		notFoundHandler(w, r)
 		return
 	}
 
@@ -1302,7 +1302,7 @@ func animeHandler(w http.ResponseWriter, r *http.Request) {
 		&anime.Country, &anime.SourceType, &anime.Studio, &anime.Author, &anime.Director)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			http.NotFound(w, r)
+			notFoundHandler(w, r)
 		} else {
 			http.Error(w, "Database error", http.StatusInternalServerError)
 		}
@@ -1412,7 +1412,7 @@ func watchHandler(w http.ResponseWriter, r *http.Request) {
 		&episode.IntroStart, &episode.IntroEnd, &episode.OutroStart, &episode.OutroEnd)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			http.NotFound(w, r)
+			notFoundHandler(w, r)
 		} else {
 			http.Error(w, "Database error", http.StatusInternalServerError)
 		}
@@ -1518,7 +1518,7 @@ func profileByUsernameHandler(w http.ResponseWriter, r *http.Request) {
 
 	var targetID int
 	if err := db.QueryRow("SELECT id FROM users WHERE username = ?", username).Scan(&targetID); err != nil {
-		http.NotFound(w, r)
+		notFoundHandler(w, r)
 		return
 	}
 
@@ -1542,7 +1542,7 @@ func renderProfile(w http.ResponseWriter, r *http.Request, targetID, viewerID in
 	err := db.QueryRow("SELECT username, avatar_url, avatar_frame, is_premium, background_url, is_banned FROM users WHERE id = ?", targetID).
 		Scan(&username, &avatarURL, &avatarFrame, &isPremium, &backgroundURL, &isBanned)
 	if err != nil {
-		http.NotFound(w, r)
+		notFoundHandler(w, r)
 		return
 	}
 
