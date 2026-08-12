@@ -503,6 +503,19 @@ var achievements = []Achievement{
 // макс. уровень за ~2-3 месяца.
 var levelXPRequirements = buildLevelXPRequirements(12)
 
+// animeGenreList — фиксированный список жанров для мультиселекта в админке.
+// Жанры по-прежнему хранятся в anime.genres как CSV-строка (фильтр в
+// searchHandler уже работает через LIKE по этой строке) — фиксированный
+// список тут только чтобы админ не мог напечатать опечатку/дубликат жанра
+// (напр. "Экшен" и "экшн" как разные жанры), из-за которой фильтр на
+// /search молча переставал бы находить часть тайтлов.
+var animeGenreList = []string{
+	"Экшен", "Приключения", "Комедия", "Драма", "Фэнтези", "Ужасы",
+	"Меха", "Музыка", "Детектив", "Психологическое", "Романтика",
+	"Фантастика", "Спорт", "Сверхъестественное", "Триллер",
+	"Повседневность", "Военное", "Исторический", "Демоны", "Магия",
+}
+
 func buildLevelXPRequirements(maxLevel int) []int {
 	req := make([]int, maxLevel+1) // index 0 не используется (уровень 0)
 	for i := 1; i <= maxLevel; i++ {
@@ -3361,11 +3374,12 @@ func adminAnimeDetailHandler(w http.ResponseWriter, r *http.Request) {
 
 	username, initial := adminInitial(r)
 	data := struct {
-		Username     string
-		AdminInitial string
-		Anime        animeDetail
-		Episodes     []adminEpisodeRow
-	}{Username: username, AdminInitial: initial, Anime: a, Episodes: episodes}
+		Username        string
+		AdminInitial    string
+		Anime           animeDetail
+		Episodes        []adminEpisodeRow
+		AvailableGenres []string
+	}{Username: username, AdminInitial: initial, Anime: a, Episodes: episodes, AvailableGenres: animeGenreList}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := templates.ExecuteTemplate(w, "admin_catalog_anime.html", data); err != nil {

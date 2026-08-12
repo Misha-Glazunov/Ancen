@@ -42,6 +42,9 @@
   .field label{font-size:11px;color:var(--muted);font-family:var(--font-secondary);text-transform:uppercase;letter-spacing:.05em;}
   .field input, .field textarea{background:var(--card2);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:9px 12px;color:var(--text);font-family:var(--font-secondary);font-size:13px;resize:vertical;width:100%;}
   .field input:focus, .field textarea:focus{outline:1px solid var(--accent);}
+  .genre-checks{display:flex;flex-wrap:wrap;gap:6px 12px;background:var(--card2);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:10px 12px;}
+  .genre-check{display:flex;align-items:center;gap:6px;font-size:12px;font-family:var(--font-secondary);color:var(--text);cursor:pointer;text-transform:none;letter-spacing:normal;}
+  .genre-check input{width:auto;}
   .btn-pink{background:var(--accent);border:none;border-radius:999px;padding:10px 18px;color:#fff;font-family:var(--font-secondary);font-weight:600;font-size:13px;cursor:pointer;}
   .btn-ghost-sm{background:var(--card2);border:1px solid rgba(255,255,255,.1);border-radius:999px;padding:6px 12px;color:var(--text);font-family:var(--font-secondary);font-size:12px;cursor:pointer;}
   .btn-danger-sm{background:transparent;border:1px solid var(--red);color:var(--red);border-radius:999px;padding:6px 12px;font-family:var(--font-secondary);font-size:12px;cursor:pointer;}
@@ -107,7 +110,14 @@
         <div class="field"><label>Название *</label><input type="text" name="title" value="{{.Anime.Title}}" required></div>
         <div class="field"><label>Описание</label><textarea name="description" rows="4">{{.Anime.Description}}</textarea></div>
         <div class="field"><label>URL постера</label><input type="text" name="poster_url" value="{{.Anime.Poster}}"></div>
-        <div class="field"><label>Жанры</label><input type="text" name="genres" value="{{.Anime.Genres}}"></div>
+        <div class="field">
+          <label>Жанры</label>
+          <div class="genre-checks" id="genreChecks">
+            {{range .AvailableGenres}}
+            <label class="genre-check"><input type="checkbox" name="genre_checkbox" value="{{.}}"> {{.}}</label>
+            {{end}}
+          </div>
+        </div>
         <div class="field"><label>Год</label><input type="text" name="year" value="{{.Anime.Year}}"></div>
         <div class="field"><label>Страна</label><input type="text" name="country" value="{{.Anime.Country}}"></div>
         <div class="field"><label>Первоисточник</label><input type="text" name="source_type" value="{{.Anime.SourceType}}"></div>
@@ -166,10 +176,20 @@
 <script>
   const animeID = {{.Anime.ID}};
 
+  // Жанры хранятся в БД как CSV-строка ("Экшен, Комедия") — чекбоксы лишь
+  // фиксируют список допустимых значений, чтобы не плодить опечатки-дубликаты,
+  // которые фильтр /search (LIKE по этой строке) молча не находил бы.
+  const existingGenres = {{.Anime.Genres}}.split(',').map(g => g.trim()).filter(Boolean);
+  document.querySelectorAll('#genreChecks input[type=checkbox]').forEach(cb => {
+    if (existingGenres.includes(cb.value)) cb.checked = true;
+  });
+
   document.getElementById('anime-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const body = Object.fromEntries(new FormData(e.target).entries());
     body.id = parseInt(body.id, 10);
+    body.genres = Array.from(document.querySelectorAll('#genreChecks input:checked')).map(cb => cb.value).join(', ');
+    delete body.genre_checkbox;
     const res = await fetch('/api/admin/anime/save', {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
     });
