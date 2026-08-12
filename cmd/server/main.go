@@ -283,6 +283,9 @@ func init() {
 			}
 			return "video/mp4"
 		},
+		// add/subtract — арифметика для пагинации в шаблонах (/admin/users)
+		"add":      func(a, b int) int { return a + b },
+		"subtract": func(a, b int) int { return a - b },
 	}
 	templates = template.Must(template.New("").Funcs(funcMap).ParseGlob("web/templates/*.html"))
 	fs := http.FileServer(http.Dir("web/static"))
@@ -1013,6 +1016,10 @@ func createTables() {
 	if _, err := db.Exec("ALTER TABLE users ADD COLUMN is_admin TINYINT(1) DEFAULT 0 AFTER password_hash"); err != nil {
 		log.Printf("ALTER TABLE users (is_admin) может уже существовать: %v", err)
 	}
+	// Блокировка пользователя из админ-панели (/admin/users) — банит вход, не удаляя аккаунт
+	if _, err := db.Exec("ALTER TABLE users ADD COLUMN is_banned TINYINT(1) DEFAULT 0 AFTER is_admin"); err != nil {
+		log.Printf("ALTER TABLE users (is_banned) может уже существовать: %v", err)
+	}
 	// Таймкоды автоскипа опенинга/эндинга (NULL = не задано, кнопка на плеере не показывается)
 	for _, col := range []string{"intro_start_sec", "intro_end_sec", "outro_start_sec", "outro_end_sec"} {
 		if _, err := db.Exec("ALTER TABLE episodes ADD COLUMN " + col + " INT DEFAULT NULL"); err != nil {
@@ -1054,6 +1061,15 @@ func createTables() {
 	if _, err := db.Exec("UPDATE users SET background_url = ? WHERE background_url = ''", defaultBackgroundURL); err != nil {
 		log.Printf("UPDATE users (background_url для старых аккаунтов) не применился: %v", err)
 	}
+	// Метки времени для дашборда админки (рост пользователей/реакций по дням).
+	// У существующих строк проставится текущий момент — это ожидаемо, метрика
+	// "новое за период" станет осмысленной по мере накопления новых данных.
+	if _, err := db.Exec("ALTER TABLE users ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"); err != nil {
+		log.Printf("ALTER TABLE users (created_at) может уже существовать: %v", err)
+	}
+	if _, err := db.Exec("ALTER TABLE emotions ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"); err != nil {
+		log.Printf("ALTER TABLE emotions (created_at) может уже существовать: %v", err)
+	}
 }
 
 const defaultBackgroundURL = "/static/img/profile/default_bg.jpg"
@@ -1061,12 +1077,29 @@ const defaultBackgroundURL = "/static/img/profile/default_bg.jpg"
 // ---------- Обработчики ----------
 
 func homeHandler(w http.ResponseWriter, r *http.Request) {
+	// "/" зарегистрирован в DefaultServeMux как catch-all: Go отдаёт этот
+	// хендлер для ЛЮБОГО пути без отдельного маршрута, так что несуществующие
+	// URL нужно ловить здесь и рендерить 404, а не отдавать им главную.
+	if r.URL.Path != "/" {
+		notFoundHandler(w, r)
+		return
+	}
+
 	// Отдаём реальный контент главной страницы сразу по "/" (важно для SEO —
 	// поисковый робот должен видеть контент без JS-редиректа). Прелоадер
 	// показывается как визуальный оверлей внутри home.html и просто гаснет,
 	// без навигации на отдельный URL.
 	render(w, "home.html", PageData{
 		Title:    "AniMemory — смотри аниме и делись эмоциями в реальном времени",
+		Username: currentUsername(r),
+	})
+}
+
+func notFoundHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusNotFound)
+	templates.ExecuteTemplate(w, "404.html", PageData{
+		Title:    "Страница не найдена — AniMemory",
 		Username: currentUsername(r),
 	})
 }
@@ -1085,7 +1118,8 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 
 		var userID int
 		var dbPassword string
-		err := db.QueryRow("SELECT id, password_hash FROM users WHERE username = ?", username).Scan(&userID, &dbPassword)
+		var isBanned bool
+		err := db.QueryRow("SELECT id, password_hash, is_banned FROM users WHERE username = ?", username).Scan(&userID, &dbPassword, &isBanned)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				log.Println("Login failed: user not found", username)
@@ -1103,6 +1137,12 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 			log.Println("Login failed: wrong password for", username)
 			registerFailedLogin(username, ip)
 			render(w, "login.html", PageData{Title: "Вход", Error: "Неверный логин или пароль"})
+			return
+		}
+
+		if isBanned {
+			log.Printf("Login blocked (banned): %s (id=%d)", username, userID)
+			render(w, "login.html", PageData{Title: "Вход", Error: "Аккаунт заблокирован администратором"})
 			return
 		}
 
@@ -1485,9 +1525,9 @@ func renderProfile(w http.ResponseWriter, r *http.Request, targetID, viewerID in
 	isOwn := viewerID == targetID
 
 	var username, avatarURL, avatarFrame, backgroundURL string
-	var isPremium bool
-	err := db.QueryRow("SELECT username, avatar_url, avatar_frame, is_premium, background_url FROM users WHERE id = ?", targetID).
-		Scan(&username, &avatarURL, &avatarFrame, &isPremium, &backgroundURL)
+	var isPremium, isBanned bool
+	err := db.QueryRow("SELECT username, avatar_url, avatar_frame, is_premium, background_url, is_banned FROM users WHERE id = ?", targetID).
+		Scan(&username, &avatarURL, &avatarFrame, &isPremium, &backgroundURL, &isBanned)
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -1676,6 +1716,8 @@ func renderProfile(w http.ResponseWriter, r *http.Request, targetID, viewerID in
 		BackgroundURL       string
 		IsPremium           bool
 		FrameOptions        []FrameOption
+		IsViewerAdmin       bool
+		IsBanned            bool
 	}{
 		Username:            viewerUsername,
 		ProfileUsername:     username,
@@ -1698,6 +1740,8 @@ func renderProfile(w http.ResponseWriter, r *http.Request, targetID, viewerID in
 		BackgroundURL:       backgroundURL,
 		IsPremium:           isPremium,
 		FrameOptions:        frameOptions,
+		IsViewerAdmin:       !isOwn && isUserAdmin(viewerID),
+		IsBanned:            isBanned,
 	}
 
 	if err := templates.ExecuteTemplate(w, "profile.html", data); err != nil {
@@ -2775,6 +2819,820 @@ func apiAvatarFrameHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
+// adminBarItem — одна строка в полосе-метрике (лейбл + значение + % от максимума
+// в группе, посчитанный на Go-стороне, чтобы шаблон просто вставлял готовую ширину).
+type adminBarItem struct {
+	Label   string
+	Value   int
+	Percent int
+}
+
+// buildBarItems считает Percent относительно максимального Value в срезе —
+// общий хелпер для всех полос-метрик дашборда (реакции по типам, топ аниме, топ XP).
+func buildBarItems(labels []string, values []int) []adminBarItem {
+	max := 0
+	for _, v := range values {
+		if v > max {
+			max = v
+		}
+	}
+	items := make([]adminBarItem, len(labels))
+	for i, l := range labels {
+		percent := 0
+		if max > 0 {
+			percent = values[i] * 100 / max
+		}
+		items[i] = adminBarItem{Label: l, Value: values[i], Percent: percent}
+	}
+	return items
+}
+
+// adminDashboardHandler — GET /admin. Требует is_admin=1 (см. adminUploadVideoHandler).
+// Первая итерация Stage 3: только страница метрик, без управления пользователями/аниме.
+func adminDashboardHandler(w http.ResponseWriter, r *http.Request) {
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	if !isUserAdmin(userID) {
+		http.Error(w, "Доступ запрещён", http.StatusForbidden)
+		return
+	}
+
+	var totalUsers, premiumUsers, newUsers7d int
+	db.QueryRow("SELECT COUNT(*) FROM users").Scan(&totalUsers)
+	db.QueryRow("SELECT COUNT(*) FROM users WHERE is_premium = 1").Scan(&premiumUsers)
+	db.QueryRow("SELECT COUNT(*) FROM users WHERE created_at >= NOW() - INTERVAL 7 DAY").Scan(&newUsers7d)
+
+	var totalAnime, totalEpisodes int
+	db.QueryRow("SELECT COUNT(*) FROM anime").Scan(&totalAnime)
+	db.QueryRow("SELECT COUNT(*) FROM episodes").Scan(&totalEpisodes)
+
+	var totalReactions, totalComments, totalAchievements, totalFriendships int
+	db.QueryRow("SELECT COUNT(*) FROM emotions").Scan(&totalReactions)
+	db.QueryRow("SELECT COUNT(*) FROM comments").Scan(&totalComments)
+	db.QueryRow("SELECT COUNT(*) FROM user_achievements").Scan(&totalAchievements)
+	db.QueryRow("SELECT COUNT(*) FROM friendships WHERE status = 'accepted'").Scan(&totalFriendships)
+
+	// Реакции по типам — полоса-метрика
+	var reactionLabels []string
+	var reactionValues []int
+	if rows, err := db.Query("SELECT emotion_type, COUNT(*) c FROM emotions GROUP BY emotion_type ORDER BY c DESC"); err == nil {
+		for rows.Next() {
+			var t string
+			var c int
+			if rows.Scan(&t, &c) == nil {
+				reactionLabels = append(reactionLabels, t)
+				reactionValues = append(reactionValues, c)
+			}
+		}
+		rows.Close()
+	}
+
+	// Топ-5 аниме по избранному
+	var topAnimeLabels []string
+	var topAnimeValues []int
+	if rows, err := db.Query(`
+		SELECT a.title, COUNT(*) c FROM favorites f
+		JOIN anime a ON a.id = f.anime_id
+		GROUP BY a.id ORDER BY c DESC LIMIT 5
+	`); err == nil {
+		for rows.Next() {
+			var title string
+			var c int
+			if rows.Scan(&title, &c) == nil {
+				topAnimeLabels = append(topAnimeLabels, title)
+				topAnimeValues = append(topAnimeValues, c)
+			}
+		}
+		rows.Close()
+	}
+
+	// Топ-5 пользователей по XP
+	var topXPLabels []string
+	var topXPValues []int
+	if rows, err := db.Query(`
+		SELECT u.username, x.xp FROM user_xp x
+		JOIN users u ON u.id = x.user_id
+		ORDER BY x.xp DESC LIMIT 5
+	`); err == nil {
+		for rows.Next() {
+			var username string
+			var xp int
+			if rows.Scan(&username, &xp) == nil {
+				topXPLabels = append(topXPLabels, username)
+				topXPValues = append(topXPValues, xp)
+			}
+		}
+		rows.Close()
+	}
+
+	// Комментарии по дням за последние 14 дней — точки для SVG-графика
+	dayCounts := make(map[string]int)
+	if rows, err := db.Query(`
+		SELECT DATE(created_at) d, COUNT(*) c FROM comments
+		WHERE created_at >= NOW() - INTERVAL 14 DAY
+		GROUP BY d
+	`); err == nil {
+		for rows.Next() {
+			var d string
+			var c int
+			if rows.Scan(&d, &c) == nil {
+				dayCounts[d] = c
+			}
+		}
+		rows.Close()
+	}
+	maxDayCount := 1
+	dayValues := make([]int, 14)
+	for i := 0; i < 14; i++ {
+		day := time.Now().AddDate(0, 0, -13+i).Format("2006-01-02")
+		dayValues[i] = dayCounts[day]
+		if dayValues[i] > maxDayCount {
+			maxDayCount = dayValues[i]
+		}
+	}
+	points := ""
+	for i, v := range dayValues {
+		x := i * 100 / 13
+		y := 100 - v*100/maxDayCount
+		if i > 0 {
+			points += " "
+		}
+		points += fmt.Sprintf("%d,%d", x, y)
+	}
+
+	// Спарклайн новых пользователей за 7 дней — для карточки "Пользователи"
+	newUsersDaily := make([]int, 7)
+	if rows, err := db.Query(`
+		SELECT DATE(created_at) d, COUNT(*) c FROM users
+		WHERE created_at >= NOW() - INTERVAL 7 DAY
+		GROUP BY d
+	`); err == nil {
+		byDay := make(map[string]int)
+		for rows.Next() {
+			var d string
+			var c int
+			if rows.Scan(&d, &c) == nil {
+				byDay[d] = c
+			}
+		}
+		rows.Close()
+		for i := 0; i < 7; i++ {
+			day := time.Now().AddDate(0, 0, -6+i).Format("2006-01-02")
+			newUsersDaily[i] = byDay[day]
+		}
+	}
+
+	// JSON-снимок для JS-рендера карточек (dashboard.js) — единая точка,
+	// куда в будущем добавляются новые метрики без правки шаблона.
+	dashboardJSON, err := json.Marshal(map[string]interface{}{
+		"users": map[string]interface{}{
+			"total": totalUsers, "premium": premiumUsers, "newLast7Days": newUsers7d,
+			"sparkline": newUsersDaily,
+		},
+		"catalog":            map[string]int{"animeCount": totalAnime, "episodes": totalEpisodes},
+		"activity":           map[string]int{"reactions": totalReactions, "comments": totalComments},
+		"reactionsByType":    buildBarItems(reactionLabels, reactionValues),
+		"commentsLast14Days": dayValues,
+		"community":          map[string]int{"friendships": totalFriendships, "achievements": totalAchievements},
+		"topAnime":           buildBarItems(topAnimeLabels, topAnimeValues),
+		"topXP":              buildBarItems(topXPLabels, topXPValues),
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	username := currentUsername(r)
+	initial := "?"
+	if runes := []rune(username); len(runes) > 0 {
+		initial = strings.ToUpper(string(runes[:1]))
+	}
+
+	data := struct {
+		Username          string
+		AdminInitial      string
+		DashboardDataJSON template.JS
+	}{
+		Username:          username,
+		AdminInitial:      initial,
+		DashboardDataJSON: template.JS(dashboardJSON),
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := templates.ExecuteTemplate(w, "admin_dashboard.html", data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// adminUserRow — одна строка таблицы на /admin/users.
+type adminUserRow struct {
+	ID        int
+	Username  string
+	XP        int
+	Level     int
+	IsPremium bool
+	IsAdmin   bool
+	IsBanned  bool
+	CreatedAt string
+}
+
+const adminUsersPageSize = 25
+
+// adminUsersHandler — GET /admin/users. Список пользователей с поиском по
+// username и пагинацией; управление ролями идёт через apiAdminUserToggle.
+func adminUsersHandler(w http.ResponseWriter, r *http.Request) {
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	if !isUserAdmin(userID) {
+		http.Error(w, "Доступ запрещён", http.StatusForbidden)
+		return
+	}
+
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	offset := (page - 1) * adminUsersPageSize
+
+	where := ""
+	args := []interface{}{}
+	if q != "" {
+		where = "WHERE u.username LIKE ?"
+		args = append(args, "%"+q+"%")
+	}
+
+	var total int
+	countArgs := append([]interface{}{}, args...)
+	db.QueryRow("SELECT COUNT(*) FROM users u "+where, countArgs...).Scan(&total)
+
+	rowsArgs := append(append([]interface{}{}, args...), adminUsersPageSize, offset)
+	rows, err := db.Query(`
+		SELECT u.id, u.username, COALESCE(ux.xp, 0), u.is_premium, u.is_admin, u.is_banned, u.created_at
+		FROM users u
+		LEFT JOIN user_xp ux ON ux.user_id = u.id
+		`+where+`
+		ORDER BY u.id DESC
+		LIMIT ? OFFSET ?
+	`, rowsArgs...)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var users []adminUserRow
+	for rows.Next() {
+		var u adminUserRow
+		var createdAt sql.NullTime
+		if err := rows.Scan(&u.ID, &u.Username, &u.XP, &u.IsPremium, &u.IsAdmin, &u.IsBanned, &createdAt); err != nil {
+			continue
+		}
+		u.Level = getLevelInfo(u.XP).Level
+		if createdAt.Valid {
+			u.CreatedAt = createdAt.Time.Format("02.01.2006")
+		}
+		users = append(users, u)
+	}
+
+	totalPages := (total + adminUsersPageSize - 1) / adminUsersPageSize
+	if totalPages < 1 {
+		totalPages = 1
+	}
+
+	username := currentUsername(r)
+	initial := "?"
+	if runes := []rune(username); len(runes) > 0 {
+		initial = strings.ToUpper(string(runes[:1]))
+	}
+
+	data := struct {
+		Username     string
+		AdminInitial string
+		Users        []adminUserRow
+		Query        string
+		Page         int
+		TotalPages   int
+		Total        int
+	}{
+		Username:     username,
+		AdminInitial: initial,
+		Users:        users,
+		Query:        q,
+		Page:         page,
+		TotalPages:   totalPages,
+		Total:        total,
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := templates.ExecuteTemplate(w, "admin_users.html", data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// apiAdminUserToggle переключает одну из ролевых меток пользователя
+// (is_premium/is_admin/is_banned) из /admin/users. Список полей захардкожен —
+// принимать произвольное имя колонки от клиента небезопасно (SQL injection
+// через идентификатор, не через значение).
+func apiAdminUserToggle(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	adminID, err := getUserIDFromSession(r)
+	if err != nil || !isUserAdmin(adminID) {
+		http.Error(w, `{"error":"Доступ запрещён"}`, http.StatusForbidden)
+		return
+	}
+	var body struct {
+		UserID int    `json:"user_id"`
+		Field  string `json:"field"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.UserID == 0 {
+		http.Error(w, `{"error":"user_id required"}`, http.StatusBadRequest)
+		return
+	}
+
+	column, ok := map[string]string{
+		"is_premium": "is_premium",
+		"is_admin":   "is_admin",
+		"is_banned":  "is_banned",
+	}[body.Field]
+	if !ok {
+		http.Error(w, `{"error":"unknown field"}`, http.StatusBadRequest)
+		return
+	}
+	if column == "is_admin" && body.UserID == adminID {
+		http.Error(w, `{"error":"нельзя снять права администратора с самого себя"}`, http.StatusBadRequest)
+		return
+	}
+
+	var current bool
+	if err := db.QueryRow("SELECT "+column+" FROM users WHERE id = ?", body.UserID).Scan(&current); err != nil {
+		http.Error(w, `{"error":"пользователь не найден"}`, http.StatusNotFound)
+		return
+	}
+	newValue := !current
+	if _, err := db.Exec("UPDATE users SET "+column+" = ? WHERE id = ?", newValue, body.UserID); err != nil {
+		http.Error(w, `{"error":"ошибка сохранения"}`, http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]bool{"value": newValue})
+}
+
+// adminAnimeRow — строка списка на /admin/catalog.
+type adminAnimeRow struct {
+	ID            int
+	Title         string
+	Year          string
+	Poster        string
+	EpisodesCount int
+}
+
+const adminCatalogPageSize = 20
+
+// requireAdminPage — общая проверка сессии+роли для GET-страниц админки.
+// Возвращает 0 и уже отправленный редирект/ошибку, если доступа нет.
+func requireAdminPage(w http.ResponseWriter, r *http.Request) int {
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return 0
+	}
+	if !isUserAdmin(userID) {
+		http.Error(w, "Доступ запрещён", http.StatusForbidden)
+		return 0
+	}
+	return userID
+}
+
+// adminInitial — первая буква имени залогиненного администратора, для
+// аватара-заглушки в шапке /admin/*.
+func adminInitial(r *http.Request) (string, string) {
+	username := currentUsername(r)
+	initial := "?"
+	if runes := []rune(username); len(runes) > 0 {
+		initial = strings.ToUpper(string(runes[:1]))
+	}
+	return username, initial
+}
+
+// adminCatalogHandler — GET /admin/catalog. Список аниме с поиском по
+// названию, числом эпизодов и постером; добавление/редактирование/удаление —
+// через apiAdminAnimeUpsert/apiAdminAnimeDelete.
+func adminCatalogHandler(w http.ResponseWriter, r *http.Request) {
+	if requireAdminPage(w, r) == 0 {
+		return
+	}
+
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	offset := (page - 1) * adminCatalogPageSize
+
+	where := ""
+	args := []interface{}{}
+	if q != "" {
+		where = "WHERE a.title LIKE ?"
+		args = append(args, "%"+q+"%")
+	}
+
+	var total int
+	db.QueryRow("SELECT COUNT(*) FROM anime a "+where, args...).Scan(&total)
+
+	rowsArgs := append(append([]interface{}{}, args...), adminCatalogPageSize, offset)
+	rows, err := db.Query(`
+		SELECT a.id, a.title, a.year, a.poster_url, COUNT(e.id)
+		FROM anime a
+		LEFT JOIN episodes e ON e.anime_id = a.id
+		`+where+`
+		GROUP BY a.id
+		ORDER BY a.id DESC
+		LIMIT ? OFFSET ?
+	`, rowsArgs...)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var list []adminAnimeRow
+	for rows.Next() {
+		var a adminAnimeRow
+		if rows.Scan(&a.ID, &a.Title, &a.Year, &a.Poster, &a.EpisodesCount) == nil {
+			list = append(list, a)
+		}
+	}
+
+	totalPages := (total + adminCatalogPageSize - 1) / adminCatalogPageSize
+	if totalPages < 1 {
+		totalPages = 1
+	}
+
+	username, initial := adminInitial(r)
+	data := struct {
+		Username     string
+		AdminInitial string
+		Anime        []adminAnimeRow
+		Query        string
+		Page         int
+		TotalPages   int
+		Total        int
+	}{
+		Username: username, AdminInitial: initial,
+		Anime: list, Query: q, Page: page, TotalPages: totalPages, Total: total,
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := templates.ExecuteTemplate(w, "admin_catalog.html", data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// adminEpisodeRow — строка таблицы эпизодов на /admin/catalog/anime.
+type adminEpisodeRow struct {
+	ID         int
+	EpisodeNum int
+	Season     int
+	Title      string
+	HasVideo   bool
+}
+
+// adminAnimeDetailHandler — GET /admin/catalog/anime?id=. Метаданные аниме
+// (форма редактирования) + список его эпизодов с удалением/добавлением.
+func adminAnimeDetailHandler(w http.ResponseWriter, r *http.Request) {
+	if requireAdminPage(w, r) == 0 {
+		return
+	}
+
+	animeID, err := strconv.Atoi(r.URL.Query().Get("id"))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	type animeDetail struct {
+		ID          int
+		Title       string
+		Description string
+		Poster      string
+		Genres      string
+		Year        string
+		Country     string
+		SourceType  string
+		Studio      string
+		Author      string
+		Director    string
+	}
+	var a animeDetail
+	err = db.QueryRow(`
+		SELECT id, title, description, poster_url, genres, year, country, source_type, studio, author, director
+		FROM anime WHERE id = ?
+	`, animeID).Scan(&a.ID, &a.Title, &a.Description, &a.Poster, &a.Genres, &a.Year, &a.Country, &a.SourceType, &a.Studio, &a.Author, &a.Director)
+	if err == sql.ErrNoRows {
+		http.NotFound(w, r)
+		return
+	} else if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var episodes []adminEpisodeRow
+	rows, err := db.Query(`
+		SELECT id, episode_num, season, title, video_url
+		FROM episodes WHERE anime_id = ? ORDER BY season, episode_num
+	`, animeID)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var e adminEpisodeRow
+			var videoURL string
+			if rows.Scan(&e.ID, &e.EpisodeNum, &e.Season, &e.Title, &videoURL) == nil {
+				e.HasVideo = videoURL != ""
+				episodes = append(episodes, e)
+			}
+		}
+	}
+
+	username, initial := adminInitial(r)
+	data := struct {
+		Username     string
+		AdminInitial string
+		Anime        animeDetail
+		Episodes     []adminEpisodeRow
+	}{Username: username, AdminInitial: initial, Anime: a, Episodes: episodes}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := templates.ExecuteTemplate(w, "admin_catalog_anime.html", data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// animeUpsertBody — общее тело для создания и редактирования аниме.
+type animeUpsertBody struct {
+	ID          int    `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Poster      string `json:"poster_url"`
+	Genres      string `json:"genres"`
+	Year        string `json:"year"`
+	Country     string `json:"country"`
+	SourceType  string `json:"source_type"`
+	Studio      string `json:"studio"`
+	Author      string `json:"author"`
+	Director    string `json:"director"`
+}
+
+// apiAdminAnimeUpsert — POST /api/admin/anime/save. body.ID == 0 создаёт
+// новую запись, иначе обновляет существующую.
+func apiAdminAnimeUpsert(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	adminID, err := getUserIDFromSession(r)
+	if err != nil || !isUserAdmin(adminID) {
+		http.Error(w, `{"error":"Доступ запрещён"}`, http.StatusForbidden)
+		return
+	}
+	var b animeUpsertBody
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil || strings.TrimSpace(b.Title) == "" {
+		http.Error(w, `{"error":"title обязателен"}`, http.StatusBadRequest)
+		return
+	}
+
+	if b.ID == 0 {
+		res, err := db.Exec(`
+			INSERT INTO anime (title, description, poster_url, genres, year, country, source_type, studio, author, director)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, b.Title, b.Description, b.Poster, b.Genres, b.Year, b.Country, b.SourceType, b.Studio, b.Author, b.Director)
+		if err != nil {
+			http.Error(w, `{"error":"ошибка сохранения"}`, http.StatusInternalServerError)
+			return
+		}
+		id, _ := res.LastInsertId()
+		json.NewEncoder(w).Encode(map[string]int{"id": int(id)})
+		return
+	}
+
+	_, err = db.Exec(`
+		UPDATE anime SET title=?, description=?, poster_url=?, genres=?, year=?, country=?, source_type=?, studio=?, author=?, director=?
+		WHERE id = ?
+	`, b.Title, b.Description, b.Poster, b.Genres, b.Year, b.Country, b.SourceType, b.Studio, b.Author, b.Director, b.ID)
+	if err != nil {
+		http.Error(w, `{"error":"ошибка сохранения"}`, http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]int{"id": b.ID})
+}
+
+// apiAdminAnimeDelete — POST /api/admin/anime/delete. Удаляет аниме и
+// каскадом все его эпизоды (FK ON DELETE CASCADE, см. deploy/mysql/schema.sql).
+func apiAdminAnimeDelete(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	adminID, err := getUserIDFromSession(r)
+	if err != nil || !isUserAdmin(adminID) {
+		http.Error(w, `{"error":"Доступ запрещён"}`, http.StatusForbidden)
+		return
+	}
+	var body struct {
+		ID int `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ID == 0 {
+		http.Error(w, `{"error":"id обязателен"}`, http.StatusBadRequest)
+		return
+	}
+	if _, err := db.Exec("DELETE FROM anime WHERE id = ?", body.ID); err != nil {
+		http.Error(w, `{"error":"ошибка удаления"}`, http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// apiAdminEpisodeUpsert — POST /api/admin/episode/save. Метаданные эпизода
+// без видео (video_url трогает только adminUploadVideoHandler — там же
+// транскодирование и заливка в MinIO). body.ID == 0 создаёт новый эпизод.
+func apiAdminEpisodeUpsert(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	adminID, err := getUserIDFromSession(r)
+	if err != nil || !isUserAdmin(adminID) {
+		http.Error(w, `{"error":"Доступ запрещён"}`, http.StatusForbidden)
+		return
+	}
+	var b struct {
+		ID         int    `json:"id"`
+		AnimeID    int    `json:"anime_id"`
+		EpisodeNum int    `json:"episode_num"`
+		Season     int    `json:"season"`
+		Title      string `json:"title"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil || b.AnimeID == 0 || b.EpisodeNum == 0 || strings.TrimSpace(b.Title) == "" {
+		http.Error(w, `{"error":"anime_id, episode_num и title обязательны"}`, http.StatusBadRequest)
+		return
+	}
+	if b.Season == 0 {
+		b.Season = 1
+	}
+
+	if b.ID == 0 {
+		res, err := db.Exec("INSERT INTO episodes (anime_id, episode_num, season, title) VALUES (?, ?, ?, ?)",
+			b.AnimeID, b.EpisodeNum, b.Season, b.Title)
+		if err != nil {
+			http.Error(w, `{"error":"эпизод с таким номером уже существует"}`, http.StatusBadRequest)
+			return
+		}
+		id, _ := res.LastInsertId()
+		json.NewEncoder(w).Encode(map[string]int{"id": int(id)})
+		return
+	}
+
+	if _, err := db.Exec("UPDATE episodes SET episode_num=?, season=?, title=? WHERE id = ? AND anime_id = ?",
+		b.EpisodeNum, b.Season, b.Title, b.ID, b.AnimeID); err != nil {
+		http.Error(w, `{"error":"ошибка сохранения"}`, http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]int{"id": b.ID})
+}
+
+// apiAdminEpisodeDelete — POST /api/admin/episode/delete.
+func apiAdminEpisodeDelete(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	adminID, err := getUserIDFromSession(r)
+	if err != nil || !isUserAdmin(adminID) {
+		http.Error(w, `{"error":"Доступ запрещён"}`, http.StatusForbidden)
+		return
+	}
+	var body struct {
+		ID int `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ID == 0 {
+		http.Error(w, `{"error":"id обязателен"}`, http.StatusBadRequest)
+		return
+	}
+	if _, err := db.Exec("DELETE FROM episodes WHERE id = ?", body.ID); err != nil {
+		http.Error(w, `{"error":"ошибка удаления"}`, http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// adminAchievementStat — процент разблокировки одной ачивки из статического
+// каталога achievements (см. выше) среди всех пользователей.
+type adminAchievementStat struct {
+	Achievement
+	UnlockedCount int
+	Percent       int
+}
+
+// adminFriendshipRow — одна принятая дружба на /admin/community.
+type adminFriendshipRow struct {
+	RequesterUsername string
+	AddresseeUsername string
+	CreatedAt         string
+}
+
+const adminCommunityPageSize = 25
+
+// adminCommunityHandler — GET /admin/community. Процент разблокировки каждой
+// ачивки из каталога + список принятых дружб с поиском по имени и пагинацией.
+func adminCommunityHandler(w http.ResponseWriter, r *http.Request) {
+	if requireAdminPage(w, r) == 0 {
+		return
+	}
+
+	var totalUsers int
+	db.QueryRow("SELECT COUNT(*) FROM users").Scan(&totalUsers)
+
+	achievementStats := make([]adminAchievementStat, len(achievements))
+	for i, a := range achievements {
+		var count int
+		db.QueryRow("SELECT COUNT(*) FROM user_achievements WHERE achievement_id = ?", a.ID).Scan(&count)
+		percent := 0
+		if totalUsers > 0 {
+			percent = count * 100 / totalUsers
+		}
+		achievementStats[i] = adminAchievementStat{Achievement: a, UnlockedCount: count, Percent: percent}
+	}
+	sort.Slice(achievementStats, func(i, j int) bool { return achievementStats[i].UnlockedCount > achievementStats[j].UnlockedCount })
+
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	offset := (page - 1) * adminCommunityPageSize
+
+	where := "WHERE f.status = 'accepted'"
+	args := []interface{}{}
+	if q != "" {
+		where += " AND (ur.username LIKE ? OR ua.username LIKE ?)"
+		args = append(args, "%"+q+"%", "%"+q+"%")
+	}
+
+	var totalFriendships int
+	db.QueryRow(`
+		SELECT COUNT(*) FROM friendships f
+		JOIN users ur ON ur.id = f.requester_id
+		JOIN users ua ON ua.id = f.addressee_id
+		`+where, args...).Scan(&totalFriendships)
+
+	rowsArgs := append(append([]interface{}{}, args...), adminCommunityPageSize, offset)
+	rows, err := db.Query(`
+		SELECT ur.username, ua.username, f.created_at
+		FROM friendships f
+		JOIN users ur ON ur.id = f.requester_id
+		JOIN users ua ON ua.id = f.addressee_id
+		`+where+`
+		ORDER BY f.created_at DESC
+		LIMIT ? OFFSET ?
+	`, rowsArgs...)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var friendships []adminFriendshipRow
+	for rows.Next() {
+		var f adminFriendshipRow
+		var createdAt sql.NullTime
+		if rows.Scan(&f.RequesterUsername, &f.AddresseeUsername, &createdAt) == nil {
+			if createdAt.Valid {
+				f.CreatedAt = createdAt.Time.Format("02.01.2006")
+			}
+			friendships = append(friendships, f)
+		}
+	}
+
+	totalPages := (totalFriendships + adminCommunityPageSize - 1) / adminCommunityPageSize
+	if totalPages < 1 {
+		totalPages = 1
+	}
+
+	username, initial := adminInitial(r)
+	data := struct {
+		Username          string
+		AdminInitial      string
+		AchievementStats  []adminAchievementStat
+		Friendships       []adminFriendshipRow
+		TotalFriendships  int
+		Query             string
+		Page              int
+		TotalPages        int
+	}{
+		Username: username, AdminInitial: initial,
+		AchievementStats: achievementStats, Friendships: friendships,
+		TotalFriendships: totalFriendships, Query: q, Page: page, TotalPages: totalPages,
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := templates.ExecuteTemplate(w, "admin_community.html", data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
 // adminUploadVideoHandler принимает сырой видеофайл, транскодирует его в adaptive
 // HLS (ffmpeg) и заливает в MinIO. Требует авторизованного пользователя с
 // is_admin=1 (роль назначается вручную через SQL, пока нет админ-панели —
@@ -3307,6 +4165,81 @@ func generateResetToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+// sendPasswordResetEmail генерирует токен сброса пароля для userID/email и
+// отправляет письмо со ссылкой на /new-password. Используется и восстановлением
+// пароля (forgotPasswordHandler), и сменой пароля из личного кабинета.
+func sendPasswordResetEmail(userID int, email string) error {
+	token, err := generateResetToken()
+	if err != nil {
+		return err
+	}
+
+	expiresAt := time.Now().Add(1 * time.Hour)
+	if _, err := db.Exec(
+		"INSERT INTO password_resets (user_id, token, expires_at) VALUES (?, ?, ?)",
+		userID, token, expiresAt,
+	); err != nil {
+		return err
+	}
+
+	from := os.Getenv("SMTP_FROM")
+	password := os.Getenv("SMTP_PASS")
+	smtpHost := os.Getenv("SMTP_HOST")
+	smtpPort := os.Getenv("SMTP_PORT")
+
+	resetLink := fmt.Sprintf("http://localhost:8080/new-password?token=%s", token)
+	subject := "Subject: Смена пароля на AniMemory\r\n"
+	mime := "MIME-version: 1.0;\r\nContent-Type: text/html; charset=\"UTF-8\";\r\n\r\n"
+	body := fmt.Sprintf(`
+		<h2>Смена пароля</h2>
+		<p>Перейдите по ссылке ниже, чтобы задать новый пароль:</p>
+		<p><a href="%s">%s</a></p>
+		<p>Ссылка действительна 1 час.</p>
+		<p>Если вы не запрашивали смену пароля, проигнорируйте это письмо.</p>
+	`, resetLink, resetLink)
+	headers := fmt.Sprintf("From: %s\r\nTo: %s\r\n", from, email)
+	headers += "X-Priority: 1\r\nX-Mailer: AniMemory\r\n"
+	fullMsg := []byte(headers + subject + mime + body)
+
+	auth := smtp.PlainAuth("", from, password, smtpHost)
+	return smtp.SendMail(smtpHost+":"+smtpPort, auth, from, []string{email}, fullMsg)
+}
+
+// apiRequestPasswordChangeHandler — POST /api/profile/request-password-change.
+// Требует авторизации: отправляет на привязанную почту ссылку для смены пароля,
+// без необходимости помнить старый пароль ("забыли пароль" — тот же токен-флоу,
+// но инициированный самим пользователем из профиля).
+func apiRequestPasswordChangeHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var email string
+	if err := db.QueryRow("SELECT username FROM users WHERE id = ?", userID).Scan(&email); err != nil {
+		http.Error(w, "Пользователь не найден", http.StatusNotFound)
+		return
+	}
+
+	if !actionLimiter.allow("forgot:"+clientIP(r), forgotPasswordRateLimit, forgotPasswordRateWindow) ||
+		!actionLimiter.allow("forgot:"+strings.ToLower(email), forgotPasswordRateLimit, forgotPasswordRateWindow) {
+		http.Error(w, "Слишком много запросов, попробуйте позже", http.StatusTooManyRequests)
+		return
+	}
+
+	if err := sendPasswordResetEmail(userID, email); err != nil {
+		log.Printf("change-password email error: %v", err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"ok":true,"message":"Ссылка для смены пароля отправлена на вашу почту"}`))
+}
+
 // forgotPasswordHandler — GET/POST /forgot-password
 func forgotPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
@@ -3537,10 +4470,21 @@ func main() {
 	secureHandle("/api/achievements", apiAchievementsGet)
 	secureHandle("/api/level", apiLevelGet)
 	secureHandle("/api/achievements/all", apiAllAchievementsGet)
+	secureHandle("/admin", adminDashboardHandler)
+	secureHandle("/admin/users", adminUsersHandler)
+	secureHandle("/api/admin/users/toggle", apiAdminUserToggle)
+	secureHandle("/admin/catalog", adminCatalogHandler)
+	secureHandle("/admin/catalog/anime", adminAnimeDetailHandler)
+	secureHandle("/admin/community", adminCommunityHandler)
+	secureHandle("/api/admin/anime/save", apiAdminAnimeUpsert)
+	secureHandle("/api/admin/anime/delete", apiAdminAnimeDelete)
+	secureHandle("/api/admin/episode/save", apiAdminEpisodeUpsert)
+	secureHandle("/api/admin/episode/delete", apiAdminEpisodeDelete)
 	secureHandle("/api/admin/upload-video", adminUploadVideoHandler)
 	secureHandle("/api/profile/avatar", apiAvatarUploadHandler)
 	secureHandle("/api/profile/background", apiBackgroundUploadHandler)
 	secureHandle("/api/profile/avatar-frame", apiAvatarFrameHandler)
+	secureHandle("/api/profile/request-password-change", apiRequestPasswordChangeHandler)
 	secureHandle("/api/change-password", apiChangePasswordHandler)
 	secureHandle("/api/auth/refresh", apiAuthRefreshHandler)
 	secureHandle("/api/auth/logout", apiAuthLogoutHandler)

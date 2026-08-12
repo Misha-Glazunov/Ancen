@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Пользователи — AniMemory Admin</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;700&family=Manrope:wght@400;500;600;800&family=MuseoModerno:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#000000;
+    --card:#161616;
+    --card2:#1a1a1a;
+    --text:#ffffff;
+    --muted:#8b8b8b;
+    --accent:#d82d7e;
+    --accent-gradient: linear-gradient(135deg, #5E0135, #331C76);
+    --green:#3ddc84;
+    --red:#ff4d4d;
+
+    --font-display:'MuseoModerno', sans-serif;
+    --font-base:'Jost', sans-serif;
+    --font-secondary:'Manrope', sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-family:var(--font-base);padding:20px;}
+
+  /* ===== Navbar (общий со /admin) ===== */
+  .navbar{display:flex;align-items:center;justify-content:space-between;background:var(--card);border-radius:20px;padding:12px 24px;margin-bottom:20px;flex-wrap:wrap;gap:16px;}
+  .nav-left{display:flex;align-items:center;gap:20px;}
+  .brand{display:flex;align-items:center;gap:10px;text-decoration:none;}
+  .brand img{height:34px;width:auto;display:block;}
+  .brand span{font-family:var(--font-display);font-weight:700;font-size:14px;color:var(--muted);white-space:nowrap;}
+  .pill-group{display:flex;background:var(--card2);border-radius:999px;padding:4px;gap:4px;}
+  .pill{border:none;background:transparent;color:var(--text);padding:8px 16px;border-radius:999px;font-size:13px;font-weight:600;font-family:var(--font-secondary);cursor:pointer;transition:background .15s,color .15s,opacity .15s;white-space:nowrap;text-decoration:none;display:inline-flex;align-items:center;}
+  .pill.active{background:#fff;color:#000;}
+  .pill:not(.active):not(.disabled):hover{background:rgba(255,255,255,.08);}
+  .pill.disabled{opacity:.35;pointer-events:none;}
+  .nav-right{display:flex;align-items:center;gap:14px;}
+  .avatar{width:36px;height:36px;border-radius:10px;background:var(--accent-gradient);display:flex;align-items:center;justify-content:center;font-weight:700;font-family:var(--font-display);cursor:default;text-decoration:none;color:var(--text);}
+
+  /* ===== Search ===== */
+  .toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:20px;flex-wrap:wrap;}
+  .toolbar h1{font-family:var(--font-display);font-size:22px;font-weight:700;}
+  .toolbar .count{color:var(--muted);font-size:13px;font-family:var(--font-secondary);margin-left:8px;}
+  .search-form{display:flex;gap:8px;}
+  .search-form input{
+    background:var(--card2);border:1px solid rgba(255,255,255,.08);border-radius:999px;
+    padding:10px 16px;color:var(--text);font-family:var(--font-secondary);font-size:13px;min-width:220px;
+  }
+  .search-form input:focus{outline:1px solid var(--accent);}
+  .search-form button{
+    background:var(--accent);border:none;border-radius:999px;padding:10px 18px;color:#fff;
+    font-family:var(--font-secondary);font-weight:600;font-size:13px;cursor:pointer;
+  }
+
+  /* ===== Table ===== */
+  .table-card{background:var(--card);border-radius:20px;padding:8px;overflow-x:auto;}
+  table{width:100%;border-collapse:collapse;min-width:720px;}
+  th{text-align:left;font-family:var(--font-secondary);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700;padding:14px 16px;}
+  td{padding:14px 16px;font-family:var(--font-secondary);font-size:14px;border-top:1px solid rgba(255,255,255,.06);}
+  tr:hover td{background:rgba(255,255,255,.02);}
+  .u-name{font-weight:600;}
+  .u-id{color:var(--muted);font-size:12px;}
+  .badge{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;font-size:12px;font-weight:600;background:var(--card2);color:var(--muted);}
+  .badge.on{color:#fff;}
+  .badge.premium.on{background:linear-gradient(135deg,#5E0135,#331C76);}
+  .badge.admin.on{background:var(--accent);}
+  .badge.banned.on{background:var(--red);}
+  .toggle-cell{display:flex;gap:8px;flex-wrap:wrap;}
+  .toggle-btn{
+    border:1px solid rgba(255,255,255,.12);background:transparent;color:var(--muted);
+    border-radius:999px;padding:6px 12px;font-size:12px;font-family:var(--font-secondary);
+    cursor:pointer;transition:opacity .15s;
+  }
+  .toggle-btn:hover{opacity:.8;}
+  .toggle-btn.on{color:#fff;border-color:transparent;}
+  .toggle-btn.premium.on{background:linear-gradient(135deg,#5E0135,#331C76);}
+  .toggle-btn.admin.on{background:var(--accent);}
+  .toggle-btn.banned.on{background:var(--red);}
+  .empty-row td{text-align:center;color:var(--muted);padding:40px;}
+
+  /* ===== Pagination ===== */
+  .pagination{display:flex;justify-content:center;align-items:center;gap:10px;margin-top:20px;font-family:var(--font-secondary);font-size:13px;}
+  .pagination a, .pagination span{
+    display:inline-flex;align-items:center;justify-content:center;min-width:32px;height:32px;
+    border-radius:8px;color:var(--text);text-decoration:none;background:var(--card2);
+  }
+  .pagination a:hover{background:rgba(255,255,255,.1);}
+  .pagination .current{background:#fff;color:#000;font-weight:700;}
+  .pagination .disabled{opacity:.3;pointer-events:none;}
+
+  @media (max-width: 1024px){
+    .nav-center{display:none;}
+  }
+  @media (max-width: 640px){
+    body{padding:12px;}
+    .navbar{flex-direction:column;align-items:stretch;padding:12px 14px;border-radius:16px;gap:10px;}
+    .nav-left{flex-direction:column;align-items:stretch;width:100%;min-width:0;gap:10px;}
+    .brand span{display:none;}
+    .nav-right{width:100%;justify-content:space-between;}
+    .pill-group{display:grid;grid-template-columns:repeat(2,1fr);width:100%;min-width:0;background:transparent;padding:0;gap:6px;}
+    .pill{padding:8px 6px;font-size:12px;background:var(--card2);text-align:center;justify-content:center;}
+    .pill.active{background:#fff;}
+    .toolbar{flex-direction:column;align-items:stretch;}
+    .search-form input{min-width:0;flex:1;}
+  }
+</style>
+</head>
+<body>
+
+  <!-- ===== NAVBAR ===== -->
+  <div class="navbar">
+    <div class="nav-left">
+      <a href="/" class="brand">
+        <img src="/static/img/header/logo_header.png" alt="AniMemory">
+        <span>Admin</span>
+      </a>
+      <div class="pill-group">
+        <a href="/admin" class="pill">Overview</a>
+        <a href="/admin/users" class="pill active">Users</a>
+        <a href="/admin/catalog" class="pill">Catalog</a>
+        <a href="/admin/community" class="pill">Community</a>
+      </div>
+    </div>
+    <div class="nav-right">
+      <a href="/" class="avatar" title="{{.Username}}">{{.AdminInitial}}</a>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <div><h1 style="display:inline;">Пользователи</h1><span class="count">{{.Total}} всего</span></div>
+    <form class="search-form" method="GET" action="/admin/users">
+      <input type="text" name="q" placeholder="Поиск по имени" value="{{.Query}}" autocomplete="off">
+      <button type="submit">Найти</button>
+    </form>
+  </div>
+
+  <div class="table-card">
+    <table>
+      <thead>
+        <tr>
+          <th>Пользователь</th>
+          <th>Уровень / XP</th>
+          <th>Регистрация</th>
+          <th>Роли</th>
+        </tr>
+      </thead>
+      <tbody id="usersBody">
+        {{if .Users}}
+          {{range .Users}}
+          <tr data-user-id="{{.ID}}">
+            <td><div class="u-name">{{.Username}}</div><div class="u-id">ID {{.ID}}</div></td>
+            <td>Ур. {{.Level}} · {{.XP}} XP</td>
+            <td>{{.CreatedAt}}</td>
+            <td>
+              <div class="toggle-cell">
+                <button class="toggle-btn premium{{if .IsPremium}} on{{end}}" data-field="is_premium">Premium</button>
+                <button class="toggle-btn admin{{if .IsAdmin}} on{{end}}" data-field="is_admin">Admin</button>
+                <button class="toggle-btn banned{{if .IsBanned}} on{{end}}" data-field="is_banned">Бан</button>
+              </div>
+            </td>
+          </tr>
+          {{end}}
+        {{else}}
+          <tr class="empty-row"><td colspan="4">Никого не найдено</td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+
+  {{if gt .TotalPages 1}}
+  <div class="pagination">
+    {{if gt .Page 1}}<a href="/admin/users?q={{.Query}}&page={{subtract .Page 1}}">←</a>{{else}}<span class="disabled">←</span>{{end}}
+    <span class="current">{{.Page}} / {{.TotalPages}}</span>
+    {{if lt .Page .TotalPages}}<a href="/admin/users?q={{.Query}}&page={{add .Page 1}}">→</a>{{else}}<span class="disabled">→</span>{{end}}
+  </div>
+  {{end}}
+
+<script>
+  document.getElementById('usersBody').addEventListener('click', async (e) => {
+    const btn = e.target.closest('.toggle-btn');
+    if (!btn) return;
+    const row = btn.closest('tr');
+    const userID = parseInt(row.dataset.userId, 10);
+    const field = btn.dataset.field;
+    btn.disabled = true;
+    try {
+      const res = await fetch('/api/admin/users/toggle', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({user_id: userID, field: field})
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Ошибка');
+        return;
+      }
+      btn.classList.toggle('on', data.value);
+    } catch (err) {
+      alert('Ошибка сети');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>

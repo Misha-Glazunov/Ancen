@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Dashboard — AniMemory</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;700&family=Manrope:wght@400;500;600;800&family=MuseoModerno:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    /* Токены из web/static/css/tokens.css — тот же бренд, что и на публичных страницах */
+    --bg:#000000;
+    --card:#161616;
+    --card2:#1a1a1a;
+    --text:#ffffff;
+    --muted:#8b8b8b;
+    --accent:#d82d7e;
+    --accent-gradient: linear-gradient(135deg, #5E0135, #331C76);
+    --purple:#933799;
+    --orange:#ff4400;
+    --amber:#ffa600;
+    --green:#3ddc84;
+    --blue:#4c9bff;
+
+    --font-display:'MuseoModerno', sans-serif;
+    --font-base:'Jost', sans-serif;
+    --font-secondary:'Manrope', sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--font-base);
+    padding:20px;
+  }
+
+  /* ===== Navbar ===== */
+  .navbar{
+    display:flex;align-items:center;justify-content:space-between;
+    background:var(--card);
+    border-radius:20px;
+    padding:12px 24px;
+    margin-bottom:20px;
+    flex-wrap:wrap;
+    gap:16px;
+  }
+  .nav-left{display:flex;align-items:center;gap:20px;}
+  .brand{display:flex;align-items:center;gap:10px;text-decoration:none;}
+  .brand img{height:34px;width:auto;display:block;}
+  .brand span{font-family:var(--font-display);font-weight:700;font-size:14px;color:var(--muted);white-space:nowrap;}
+  .pill-group{display:flex;background:var(--card2);border-radius:999px;padding:4px;gap:4px;}
+  .pill{
+    border:none;background:transparent;color:var(--text);
+    padding:8px 16px;border-radius:999px;font-size:13px;font-weight:600;
+    font-family:var(--font-secondary);text-decoration:none;
+    cursor:pointer;transition:background .15s,color .15s,opacity .15s;white-space:nowrap;
+    display:inline-flex;align-items:center;
+  }
+  .pill.active{background:#fff;color:#000;}
+  .pill:not(.active):not(.disabled):hover{background:rgba(255,255,255,.08);}
+  .pill.disabled{opacity:.35;pointer-events:none;}
+
+  .nav-center{display:flex;align-items:center;gap:14px;font-size:14px;font-weight:600;color:var(--muted);font-family:var(--font-secondary);}
+  .nav-center span.active{color:var(--text);}
+  .nav-center .dot{width:4px;height:4px;border-radius:50%;background:var(--muted);}
+
+  .nav-right{display:flex;align-items:center;gap:14px;}
+  .status-pill{
+    background:var(--card2);border-radius:999px;padding:8px 16px;
+    font-size:13px;font-weight:600;white-space:nowrap;font-family:var(--font-secondary);
+    display:flex;align-items:center;gap:8px;
+  }
+  .status-dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);}
+  .bell{
+    width:36px;height:36px;border-radius:50%;background:var(--card2);
+    display:flex;align-items:center;justify-content:center;position:relative;cursor:pointer;
+  }
+  .bell::after{
+    content:"";position:absolute;top:7px;right:7px;width:8px;height:8px;
+    border-radius:50%;background:var(--accent);
+  }
+  .avatar{
+    width:36px;height:36px;border-radius:10px;background:var(--accent-gradient);
+    display:flex;align-items:center;justify-content:center;font-weight:700;
+    font-family:var(--font-display);cursor:default;text-decoration:none;color:var(--text);
+  }
+
+  /* ===== Grid ===== */
+  .grid{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:20px;
+  }
+  .card{
+    background:var(--card);
+    border-radius:20px;
+    padding:22px;
+    transition:box-shadow .15s,transform .15s;
+    display:flex;flex-direction:column;
+    min-height:220px;
+    position:relative;
+    overflow:hidden;
+  }
+  .card:hover{box-shadow:0 0 0 1px rgba(216,45,126,.25),0 8px 24px rgba(0,0,0,.4);}
+  .card-title{
+    display:flex;align-items:center;gap:8px;
+    font-size:12px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--muted);font-weight:700;margin-bottom:16px;font-family:var(--font-secondary);
+  }
+  .big-number{font-family:var(--font-display);font-size:52px;font-weight:800;line-height:1;}
+  .sub-text{color:var(--muted);font-size:13px;margin-top:8px;font-family:var(--font-secondary);}
+  .empty-text{color:var(--muted);font-size:13px;font-family:var(--font-secondary);}
+  .card-spacer{flex:1;}
+
+  .metric-row{display:flex;flex-direction:column;justify-content:space-between;height:100%;}
+
+  /* row 2 lists */
+  .reaction-row{display:flex;align-items:center;gap:10px;margin-bottom:10px;font-size:14px;font-family:var(--font-secondary);}
+  .reaction-emoji{width:22px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .reaction-count{width:26px;text-align:right;color:var(--muted);}
+  .bar-track{flex:1;background:var(--card2);border-radius:6px;height:8px;overflow:hidden;}
+  .bar-fill{height:100%;border-radius:6px;}
+
+  .community-top{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:14px;}
+  .community-col h4{font-size:12px;color:var(--muted);margin-bottom:10px;font-weight:700;font-family:var(--font-secondary);}
+  .community-item{display:flex;justify-content:space-between;font-size:13px;margin-bottom:8px;gap:8px;font-family:var(--font-secondary);}
+  .community-item span:first-child{color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .community-item span:last-child{color:var(--muted);font-weight:700;flex-shrink:0;}
+
+  .chart-x-labels{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:4px;font-family:var(--font-secondary);}
+
+  /* ===== Адаптив ===== */
+  @media (max-width: 1024px){
+    .grid{grid-template-columns:repeat(2,1fr);}
+    .nav-center{order:3;width:100%;justify-content:center;}
+  }
+  @media (max-width: 640px){
+    body{padding:12px;}
+
+    /* Header на мобилке: логотип+аватар в одну строку, фильтры — сеткой 2×2
+       на всю ширину (все 4 пункта видны сразу, без скролла), второстепенное
+       меню Dashboard/Analytics/Settings скрыто (дублирует пилюли). */
+    .navbar{flex-direction:column;align-items:stretch;padding:12px 14px;border-radius:16px;gap:10px;}
+    .nav-left{order:1;flex-direction:column;align-items:stretch;width:100%;min-width:0;gap:10px;}
+    .brand span{display:none;}
+    .nav-right{order:2;width:100%;justify-content:space-between;}
+    .status-label{display:none;}
+    .status-pill{padding:8px;}
+    .nav-center{display:none;}
+    .pill-group{display:grid;grid-template-columns:repeat(2,1fr);width:100%;min-width:0;background:transparent;padding:0;gap:6px;}
+    .pill{padding:8px 6px;font-size:12px;background:var(--card2);text-align:center;}
+    .pill.active{background:#fff;}
+
+    .grid{grid-template-columns:1fr;gap:14px;}
+    .card{padding:18px;min-height:auto;}
+    .big-number{font-size:40px;}
+    .community-top{grid-template-columns:1fr;gap:20px;}
+  }
+</style>
+</head>
+<body>
+
+  <!-- ===== NAVBAR ===== -->
+  <div class="navbar">
+    <div class="nav-left">
+      <a href="/" class="brand">
+        <img src="/static/img/header/logo_header.png" alt="AniMemory">
+        <span>Admin</span>
+      </a>
+      <div class="pill-group">
+        <a href="/admin" class="pill active">Overview</a>
+        <a href="/admin/users" class="pill">Users</a>
+        <a href="/admin/catalog" class="pill">Catalog</a>
+        <a href="/admin/community" class="pill">Community</a>
+      </div>
+    </div>
+    <div class="nav-center">
+      <span class="active">Dashboard</span>
+      <span class="dot"></span>
+      <span>Analytics</span>
+      <span class="dot"></span>
+      <span>Settings</span>
+    </div>
+    <div class="nav-right">
+      <div class="status-pill"><span class="status-dot"></span><span class="status-label">Online</span></div>
+      <div class="bell" title="Уведомления"></div>
+      <a href="/" class="avatar" title="{{.Username}}">{{.AdminInitial}}</a>
+    </div>
+  </div>
+
+  <!-- ===== GRID ===== -->
+  <div class="grid" id="dashboardGrid"></div>
+
+<script>
+  // Данные приходят с сервера (adminDashboardHandler, cmd/server/main.go) —
+  // единая точка расширения: новая метрика = новый ключ здесь + новая карточка ниже.
+  const dashboardData = {{.DashboardDataJSON}};
+
+  // ===== SVG helpers (без сторонних библиотек) =====
+  const svgns = "http://www.w3.org/2000/svg";
+  function svgEl(tag, attrs){
+    const el = document.createElementNS(svgns, tag);
+    for(const k in attrs) el.setAttribute(k, attrs[k]);
+    return el;
+  }
+
+  function sparkline(data, width, height, color){
+    const svg = svgEl('svg', {viewBox:`0 0 ${width} ${height}`, width:'100%', height});
+    if(!data || !data.length) return svg;
+    const max = Math.max(...data);
+    const min = Math.min(...data);
+    const step = width / Math.max(data.length - 1, 1);
+    const points = data.map((v,i) => {
+      const x = i * step;
+      const y = height - ((v - min) / (max - min || 1)) * (height - 6) - 3;
+      return [x,y];
+    });
+    const path = points.map((p,i) => (i===0?'M':'L') + p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ');
+    svg.appendChild(svgEl('path', {d:path, fill:'none', stroke:color, 'stroke-width':2, 'stroke-linejoin':'round', 'stroke-linecap':'round'}));
+    const last = points[points.length-1];
+    svg.appendChild(svgEl('circle', {cx:last[0], cy:last[1], r:4, fill:color}));
+    return svg;
+  }
+
+  function donutChart(segments, size){
+    const total = segments.reduce((s,x)=>s+x.value,0) || 1;
+    const r = size/2 - 8;
+    const cx = size/2, cy = size/2;
+    const circumference = 2 * Math.PI * r;
+    const svg = svgEl('svg', {viewBox:`0 0 ${size} ${size}`, width:size, height:size});
+    let offset = 0;
+    segments.forEach(seg => {
+      const frac = seg.value / total;
+      const len = frac * circumference;
+      svg.appendChild(svgEl('circle', {
+        cx, cy, r, fill:'none', stroke:seg.color, 'stroke-width':14,
+        'stroke-dasharray': `${len} ${circumference - len}`,
+        'stroke-dashoffset': -offset,
+        transform: `rotate(-90 ${cx} ${cy})`,
+        'stroke-linecap':'butt'
+      }));
+      offset += len;
+    });
+    return svg;
+  }
+
+  function barChart(data, width, height, color){
+    const svg = svgEl('svg', {viewBox:`0 0 ${width} ${height}`, width:'100%', height});
+    if(!data || !data.length) return svg;
+    const max = Math.max(...data, 1);
+    const gap = 3;
+    const barW = (width - gap*(data.length-1)) / data.length;
+    for(let i=1;i<=3;i++){
+      const y = height - (height/3)*i;
+      svg.appendChild(svgEl('line', {x1:0,y1:y,x2:width,y2:y,stroke:'rgba(255,255,255,0.06)','stroke-width':1}));
+    }
+    data.forEach((v,i)=>{
+      const h = (v / max) * (height - 4);
+      const x = i * (barW + gap);
+      const y = height - h;
+      svg.appendChild(svgEl('rect', {x, y, width:barW, height:h, rx:2, fill:color}));
+    });
+    return svg;
+  }
+
+  function makeCard(innerHTML){
+    const div = document.createElement('div');
+    div.className = 'card';
+    div.innerHTML = innerHTML;
+    return div;
+  }
+
+  const REACTION_COLORS = ['var(--accent)','var(--orange)','var(--amber)','var(--blue)','var(--purple)'];
+  const grid = document.getElementById('dashboardGrid');
+
+  // --- Карточка 1: Пользователи ---
+  const usersCard = makeCard(`
+    <div class="card-title">👥 Пользователи</div>
+    <div class="metric-row">
+      <div>
+        <div class="big-number">${dashboardData.users.total}</div>
+        <div class="sub-text">Premium: ${dashboardData.users.premium} · новых за 7 дней: ${dashboardData.users.newLast7Days}</div>
+      </div>
+      <div class="card-spacer"></div>
+      <div id="usersSparkline"></div>
+    </div>
+  `);
+  grid.appendChild(usersCard);
+  document.getElementById('usersSparkline').appendChild(sparkline(dashboardData.users.sparkline, 260, 50, 'var(--accent)'));
+
+  // --- Карточка 2: Каталог ---
+  grid.appendChild(makeCard(`
+    <div class="card-title">🎬 Каталог</div>
+    <div class="big-number">${dashboardData.catalog.animeCount}</div>
+    <div class="sub-text">Аниме · эпизодов: ${dashboardData.catalog.episodes}</div>
+  `));
+
+  // --- Карточка 3: Активность (donut) ---
+  const activityCard = makeCard(`
+    <div class="card-title">💬 Активность</div>
+    <div class="metric-row" style="flex-direction:row;align-items:center;">
+      <div>
+        <div class="big-number">${dashboardData.activity.reactions}</div>
+        <div class="sub-text">Реакций · комментариев: ${dashboardData.activity.comments}</div>
+      </div>
+      <div class="card-spacer"></div>
+      <div id="activityDonut"></div>
+    </div>
+  `);
+  grid.appendChild(activityCard);
+  document.getElementById('activityDonut').appendChild(donutChart([
+    {value: dashboardData.activity.reactions, color:'var(--purple)'},
+    {value: dashboardData.activity.comments, color:'var(--blue)'}
+  ], 90));
+
+  // --- Карточка 4: Реакции по типам ---
+  const reactions = dashboardData.reactionsByType || [];
+  const maxReaction = Math.max(...reactions.map(r=>r.Value), 1);
+  const reactionRows = reactions.length ? reactions.map((r,i) => `
+    <div class="reaction-row">
+      <div class="reaction-emoji">${r.Label}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${(r.Value/maxReaction*100).toFixed(0)}%;background:${REACTION_COLORS[i % REACTION_COLORS.length]};"></div></div>
+      <div class="reaction-count">${r.Value}</div>
+    </div>
+  `).join('') : `<div class="empty-text">Пока нет данных</div>`;
+  grid.appendChild(makeCard(`<div class="card-title">🥰 Реакции по типам</div>${reactionRows}`));
+
+  // --- Карточка 5: Комментарии за 14 дней ---
+  const commentsCard = makeCard(`
+    <div class="card-title">📈 Комментарии за 14 дней</div>
+    <div id="commentsChart"></div>
+    <div class="chart-x-labels" id="commentsXLabels"></div>
+  `);
+  grid.appendChild(commentsCard);
+  document.getElementById('commentsChart').appendChild(barChart(dashboardData.commentsLast14Days, 300, 110, 'var(--blue)'));
+  document.getElementById('commentsXLabels').innerHTML =
+    (dashboardData.commentsLast14Days || []).map((_,i)=>`<span>${i+1}</span>`).join('');
+
+  // --- Карточка 6: Сообщество и топы ---
+  const topAnime = dashboardData.topAnime || [];
+  const topXP = dashboardData.topXP || [];
+  const topAnimeRows = topAnime.length
+    ? topAnime.map(a => `<div class="community-item"><span>${a.Label}</span><span>${a.Value}</span></div>`).join('')
+    : `<div class="empty-text">Пока нет данных</div>`;
+  const topXPRows = topXP.length
+    ? topXP.map(u => `<div class="community-item"><span>${u.Label}</span><span>${u.Value}</span></div>`).join('')
+    : `<div class="empty-text">Пока нет данных</div>`;
+  grid.appendChild(makeCard(`
+    <div class="card-title">🏆 Сообщество</div>
+    <div class="sub-text" style="font-size:14px;color:var(--text);">
+      <span class="big-number" style="font-size:32px;">${dashboardData.community.friendships}</span>
+      <span style="color:var(--muted);font-size:13px;"> дружб · ачивок разблокировано: ${dashboardData.community.achievements}</span>
+    </div>
+    <div class="community-top">
+      <div class="community-col">
+        <h4>⭐ ТОП АНИМЕ</h4>
+        ${topAnimeRows}
+      </div>
+      <div class="community-col">
+        <h4>🔥 ТОП ПО XP</h4>
+        ${topXPRows}
+      </div>
+    </div>
+  `));
+</script>
+</body>
+</html>

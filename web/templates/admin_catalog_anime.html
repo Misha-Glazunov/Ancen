@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{.Anime.Title}} — AniMemory Admin</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;700&family=Manrope:wght@400;500;600;800&family=MuseoModerno:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#000000; --card:#161616; --card2:#1a1a1a; --text:#ffffff; --muted:#8b8b8b;
+    --accent:#d82d7e; --accent-gradient: linear-gradient(135deg, #5E0135, #331C76);
+    --red:#ff4d4d; --green:#3ddc84;
+    --font-display:'MuseoModerno', sans-serif; --font-base:'Jost', sans-serif; --font-secondary:'Manrope', sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-family:var(--font-base);padding:20px;}
+
+  .navbar{display:flex;align-items:center;justify-content:space-between;background:var(--card);border-radius:20px;padding:12px 24px;margin-bottom:20px;flex-wrap:wrap;gap:16px;}
+  .nav-left{display:flex;align-items:center;gap:20px;}
+  .brand{display:flex;align-items:center;gap:10px;text-decoration:none;}
+  .brand img{height:34px;width:auto;display:block;}
+  .brand span{font-family:var(--font-display);font-weight:700;font-size:14px;color:var(--muted);white-space:nowrap;}
+  .pill-group{display:flex;background:var(--card2);border-radius:999px;padding:4px;gap:4px;}
+  .pill{border:none;background:transparent;color:var(--text);padding:8px 16px;border-radius:999px;font-size:13px;font-weight:600;font-family:var(--font-secondary);text-decoration:none;cursor:pointer;transition:background .15s,color .15s,opacity .15s;white-space:nowrap;display:inline-flex;align-items:center;}
+  .pill.active{background:#fff;color:#000;}
+  .pill:not(.active):not(.disabled):hover{background:rgba(255,255,255,.08);}
+  .pill.disabled{opacity:.35;pointer-events:none;}
+  .nav-right{display:flex;align-items:center;gap:14px;}
+  .avatar{width:36px;height:36px;border-radius:10px;background:var(--accent-gradient);display:flex;align-items:center;justify-content:center;font-weight:700;font-family:var(--font-display);cursor:default;text-decoration:none;color:var(--text);}
+
+  .back-link{display:inline-flex;align-items:center;gap:6px;color:var(--muted);text-decoration:none;font-family:var(--font-secondary);font-size:13px;margin-bottom:16px;}
+  .back-link:hover{color:var(--text);}
+
+  .layout{display:grid;grid-template-columns:360px 1fr;gap:20px;align-items:start;}
+  .card{background:var(--card);border-radius:20px;padding:22px;}
+  .card h2{font-family:var(--font-display);font-size:16px;margin-bottom:16px;}
+
+  .field{display:flex;flex-direction:column;gap:4px;margin-bottom:12px;}
+  .field label{font-size:11px;color:var(--muted);font-family:var(--font-secondary);text-transform:uppercase;letter-spacing:.05em;}
+  .field input, .field textarea{background:var(--card2);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:9px 12px;color:var(--text);font-family:var(--font-secondary);font-size:13px;resize:vertical;width:100%;}
+  .field input:focus, .field textarea:focus{outline:1px solid var(--accent);}
+  .btn-pink{background:var(--accent);border:none;border-radius:999px;padding:10px 18px;color:#fff;font-family:var(--font-secondary);font-weight:600;font-size:13px;cursor:pointer;}
+  .btn-ghost-sm{background:var(--card2);border:1px solid rgba(255,255,255,.1);border-radius:999px;padding:6px 12px;color:var(--text);font-family:var(--font-secondary);font-size:12px;cursor:pointer;}
+  .btn-danger-sm{background:transparent;border:1px solid var(--red);color:var(--red);border-radius:999px;padding:6px 12px;font-family:var(--font-secondary);font-size:12px;cursor:pointer;}
+
+  table{width:100%;border-collapse:collapse;}
+  th{text-align:left;font-family:var(--font-secondary);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700;padding:10px 12px;}
+  td{padding:10px 12px;font-family:var(--font-secondary);font-size:13px;border-top:1px solid rgba(255,255,255,.06);}
+  .ep-video-badge{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);}
+  .ep-video-badge.on{color:var(--green);}
+  .ep-upload-progress{width:120px;height:4px;background:var(--card2);border-radius:2px;margin-top:6px;overflow:hidden;}
+  .ep-upload-progress-bar{height:100%;width:0%;background:var(--accent);transition:width .2s;}
+  .ep-actions{display:flex;gap:8px;white-space:nowrap;}
+  .ep-upload-btn{margin:0;}
+  .ep-upload-btn.is-disabled{opacity:.4;pointer-events:none;}
+  .empty-row td{text-align:center;color:var(--muted);padding:30px;}
+
+  .add-episode-form{display:grid;grid-template-columns:90px 90px 1fr auto;gap:8px;margin-top:16px;align-items:end;}
+  .add-episode-form .field{margin-bottom:0;}
+
+  @media (max-width: 1024px){ .layout{grid-template-columns:1fr;} }
+  @media (max-width: 640px){
+    body{padding:12px;}
+    .navbar{flex-direction:column;align-items:stretch;padding:12px 14px;border-radius:16px;gap:10px;}
+    .nav-left{flex-direction:column;align-items:stretch;width:100%;min-width:0;gap:10px;}
+    .brand span{display:none;}
+    .nav-right{width:100%;justify-content:space-between;}
+    .pill-group{display:grid;grid-template-columns:repeat(2,1fr);width:100%;min-width:0;background:transparent;padding:0;gap:6px;}
+    .pill{padding:8px 6px;font-size:12px;background:var(--card2);text-align:center;justify-content:center;}
+    .pill.active{background:#fff;}
+    .add-episode-form{grid-template-columns:1fr 1fr;}
+    .card{padding:16px;}
+    table{display:block;overflow-x:auto;}
+  }
+</style>
+</head>
+<body>
+
+  <div class="navbar">
+    <div class="nav-left">
+      <a href="/" class="brand">
+        <img src="/static/img/header/logo_header.png" alt="AniMemory">
+        <span>Admin</span>
+      </a>
+      <div class="pill-group">
+        <a href="/admin" class="pill">Overview</a>
+        <a href="/admin/users" class="pill">Users</a>
+        <a href="/admin/catalog" class="pill active">Catalog</a>
+        <a href="/admin/community" class="pill">Community</a>
+      </div>
+    </div>
+    <div class="nav-right">
+      <a href="/" class="avatar" title="{{.Username}}">{{.AdminInitial}}</a>
+    </div>
+  </div>
+
+  <a href="/admin/catalog" class="back-link">← К каталогу</a>
+
+  <div class="layout">
+    <div class="card">
+      <h2>Метаданные</h2>
+      <form id="anime-form">
+        <input type="hidden" name="id" value="{{.Anime.ID}}">
+        <div class="field"><label>Название *</label><input type="text" name="title" value="{{.Anime.Title}}" required></div>
+        <div class="field"><label>Описание</label><textarea name="description" rows="4">{{.Anime.Description}}</textarea></div>
+        <div class="field"><label>URL постера</label><input type="text" name="poster_url" value="{{.Anime.Poster}}"></div>
+        <div class="field"><label>Жанры</label><input type="text" name="genres" value="{{.Anime.Genres}}"></div>
+        <div class="field"><label>Год</label><input type="text" name="year" value="{{.Anime.Year}}"></div>
+        <div class="field"><label>Страна</label><input type="text" name="country" value="{{.Anime.Country}}"></div>
+        <div class="field"><label>Первоисточник</label><input type="text" name="source_type" value="{{.Anime.SourceType}}"></div>
+        <div class="field"><label>Студия</label><input type="text" name="studio" value="{{.Anime.Studio}}"></div>
+        <div class="field"><label>Автор</label><input type="text" name="author" value="{{.Anime.Author}}"></div>
+        <div class="field"><label>Режиссёр</label><input type="text" name="director" value="{{.Anime.Director}}"></div>
+        <button type="submit" class="btn-pink" style="width:100%;margin-top:8px;">Сохранить</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Эпизоды ({{len .Episodes}})</h2>
+      <table>
+        <thead>
+          <tr><th>#</th><th>Сезон</th><th>Название</th><th>Видео</th><th></th></tr>
+        </thead>
+        <tbody id="episodesBody">
+          {{if .Episodes}}
+            {{range .Episodes}}
+            <tr data-episode-id="{{.ID}}" data-episode-num="{{.EpisodeNum}}" data-episode-title="{{.Title}}">
+              <td>{{.EpisodeNum}}</td>
+              <td>{{.Season}}</td>
+              <td>{{.Title}}</td>
+              <td>
+                <span class="ep-video-badge{{if .HasVideo}} on{{end}}">{{if .HasVideo}}● загружено{{else}}○ нет видео{{end}}</span>
+                <div class="ep-upload-progress" hidden><div class="ep-upload-progress-bar"></div></div>
+              </td>
+              <td class="ep-actions">
+                <label class="btn-ghost-sm ep-upload-btn">
+                  {{if .HasVideo}}Заменить видео{{else}}Загрузить видео{{end}}
+                  <input type="file" accept="video/*" class="ep-upload-input" hidden>
+                </label>
+                <button type="button" class="btn-danger-sm" data-delete-episode="{{.ID}}">Удалить</button>
+              </td>
+            </tr>
+            {{end}}
+          {{else}}
+            <tr class="empty-row"><td colspan="5">Пока нет эпизодов</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+
+      <form class="add-episode-form" id="add-episode-form">
+        <div class="field"><label>№</label><input type="number" name="episode_num" min="1" required></div>
+        <div class="field"><label>Сезон</label><input type="number" name="season" min="1" value="1" required></div>
+        <div class="field"><label>Название</label><input type="text" name="title" required></div>
+        <button type="submit" class="btn-ghost-sm">+ Добавить</button>
+      </form>
+      <p style="color:var(--muted);font-size:12px;font-family:var(--font-secondary);margin-top:10px;">
+        Видео транскодируется в HLS и заливается в MinIO на сервере (лимит файла — 2 ГБ) — при
+        больших файлах загрузка может занять несколько минут, не закрывайте вкладку.
+      </p>
+    </div>
+  </div>
+
+<script>
+  const animeID = {{.Anime.ID}};
+
+  document.getElementById('anime-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const body = Object.fromEntries(new FormData(e.target).entries());
+    body.id = parseInt(body.id, 10);
+    const res = await fetch('/api/admin/anime/save', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (!res.ok) { alert(data.error || 'Ошибка'); return; }
+    alert('Сохранено');
+  });
+
+  document.getElementById('add-episode-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const fd = new FormData(form);
+    const body = {
+      anime_id: animeID,
+      episode_num: parseInt(fd.get('episode_num'), 10),
+      season: parseInt(fd.get('season'), 10),
+      title: fd.get('title')
+    };
+    const res = await fetch('/api/admin/episode/save', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (!res.ok) { alert(data.error || 'Ошибка'); return; }
+    window.location.reload();
+  });
+
+  document.getElementById('episodesBody').addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-delete-episode]');
+    if (!btn) return;
+    if (!confirm('Удалить эпизод?')) return;
+    const id = parseInt(btn.dataset.deleteEpisode, 10);
+    const res = await fetch('/api/admin/episode/delete', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id})
+    });
+    if (!res.ok) { const data = await res.json(); alert(data.error || 'Ошибка'); return; }
+    btn.closest('tr').remove();
+  });
+
+  // Загрузка видео эпизода: транскодирование в HLS + заливка в MinIO идут на
+  // сервере (POST /api/admin/upload-video), поэтому используем XHR — только
+  // так можно показать прогресс именно отправки файла с браузера.
+  document.getElementById('episodesBody').addEventListener('change', (e) => {
+    const input = e.target.closest('.ep-upload-input');
+    if (!input || !input.files.length) return;
+    const file = input.files[0];
+    const row = input.closest('tr');
+    const episodeNum = row.dataset.episodeNum;
+    const title = row.dataset.episodeTitle;
+    const badge = row.querySelector('.ep-video-badge');
+    const progressWrap = row.querySelector('.ep-upload-progress');
+    const progressBar = row.querySelector('.ep-upload-progress-bar');
+    const uploadLabel = row.querySelector('.ep-upload-btn');
+
+    const fd = new FormData();
+    fd.append('anime_id', String(animeID));
+    fd.append('episode_num', episodeNum);
+    fd.append('title', title);
+    fd.append('video', file);
+
+    uploadLabel.classList.add('is-disabled');
+    progressWrap.hidden = false;
+    badge.textContent = '⏳ загрузка…';
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/admin/upload-video');
+    xhr.upload.addEventListener('progress', (ev) => {
+      if (!ev.lengthComputable) return;
+      progressBar.style.width = Math.round((ev.loaded / ev.total) * 100) + '%';
+    });
+    xhr.onload = () => {
+      progressWrap.hidden = true;
+      uploadLabel.classList.remove('is-disabled');
+      input.value = '';
+      let data = {};
+      try { data = JSON.parse(xhr.responseText); } catch (_) {}
+      if (xhr.status < 200 || xhr.status >= 300) {
+        badge.textContent = '○ нет видео';
+        alert(data.error || 'Ошибка загрузки видео');
+        return;
+      }
+      badge.textContent = '● загружено';
+      badge.classList.add('on');
+      uploadLabel.childNodes[0].textContent = 'Заменить видео';
+    };
+    xhr.onerror = () => {
+      progressWrap.hidden = true;
+      uploadLabel.classList.remove('is-disabled');
+      badge.textContent = '○ нет видео';
+      alert('Ошибка сети при загрузке видео');
+    };
+    xhr.send(fd);
+  });
+</script>
+</body>
+</html>

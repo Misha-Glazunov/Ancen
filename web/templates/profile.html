@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;700&family=Manrope:wght@400;500;600&family=MuseoModerno:wght@400;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/tokens.css">
+    <link rel="stylesheet" href="/static/css/tokens.css?v=2">
     <style>
         * { box-sizing: border-box; }
         body {
@@ -20,11 +20,17 @@
         }
 
         .profile-card {
+            position: relative;
             max-width: 1160px;
             margin: 40px auto;
             padding: 30px;
             background: rgba(0, 0, 0, 0.55);
             border-radius: var(--radius-lg);
+        }
+        .change-password-corner {
+            position: absolute;
+            top: 30px;
+            right: 30px;
         }
 
         /* ===== Шапка профиля ===== */
@@ -124,10 +130,10 @@
         /* Достижения */
         .achievements-grid {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
+            grid-template-columns: repeat(4, minmax(0, 1fr));
             gap: 20px;
         }
-        .achievement-slot { text-align: center; }
+        .achievement-slot { text-align: center; min-width: 0; }
         .achievement-icon {
             width: 60px;
             height: 60px;
@@ -141,7 +147,7 @@
         }
         .achievement-slot.locked .achievement-icon { background: var(--color-gray-900); opacity: 0.6; }
         .achievement-slot.locked .achievement-name { color: var(--color-gray-500); }
-        .achievement-name { font-size: var(--fs-body); font-weight: 700; }
+        .achievement-name { font-size: var(--fs-body); font-weight: 700; overflow-wrap: break-word; }
 
         /* Плашка с описанием ачивки при наведении */
         .achievement-slot { position: relative; cursor: default; }
@@ -220,6 +226,8 @@
         .btn-ghost { background: transparent; border: 1px solid var(--color-gray-700); color: var(--color-gray-300); }
         .friend-action { margin: -8px 0 20px; }
         .friend-action .btn[disabled] { opacity: 0.5; cursor: default; }
+        .admin-action { margin: -8px 0 20px; }
+        .admin-action .btn { border-color: var(--color-warm-red); color: var(--color-warm-red); }
         .friends-show-more { display: flex; width: 100%; margin-top: 16px; }
 
         /* Буду смотреть серию / аниме */
@@ -294,9 +302,14 @@
             .profile-avatar { width: 160px; height: 160px; font-size: 56px; }
             .profile-info h1 { font-size: 32px; }
             .profile-level-row { justify-content: center; }
-            .achievements-grid { grid-template-columns: repeat(2, 1fr); }
+            .achievements-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
             /* Только на мобильных друзья идут выше достижений — на десктопе/планшете обычный порядок */
             .col-friends { order: -1; }
+            .col-main { min-width: 0; width: 100%; }
+            .customize-panel { max-width: none; width: 100%; }
+            .frame-options { justify-content: center; }
+            .change-password-corner { position: static; display: block; width: fit-content; margin: 16px auto; }
+            .panel h2 { text-align: center; }
         }
     </style>
 </head>
@@ -331,6 +344,14 @@
             </div>
             {{end}}
 
+            {{if .IsViewerAdmin}}
+            <div class="admin-action">
+                <button type="button" class="btn btn-sm btn-ghost" id="admin-ban-btn" data-user-id="{{.ProfileUserID}}" data-banned="{{.IsBanned}}">
+                    {{if .IsBanned}}Разбанить{{else}}Забанить{{end}}
+                </button>
+            </div>
+            {{end}}
+
             {{if .IsOwnProfile}}
             <div class="customize-panel">
                 <div class="avatar-upload-row">
@@ -341,6 +362,7 @@
                     <p class="hint">Загрузка своего аватара — по подписке Premium. Пока доступны рамки за уровень ниже.</p>
                     {{end}}
                 </div>
+                <button type="button" id="change-password-btn" class="btn btn-sm change-password-corner">Изменить пароль</button>
                 <p class="hint" style="margin-top:16px;">Рамка аватара</p>
                 <div class="frame-options" id="frame-options">
                     {{range .FrameOptions}}
@@ -501,6 +523,24 @@
         });
     }
 
+    var changePasswordBtn = document.getElementById('change-password-btn');
+    if (changePasswordBtn) {
+        changePasswordBtn.addEventListener('click', function () {
+            changePasswordBtn.disabled = true;
+            fetch('/api/profile/request-password-change', { method: 'POST' })
+                .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+                .then(function (res) {
+                    if (res.ok) {
+                        showToast({ icon: '📧', title: 'Проверьте почту', body: 'Перейдите по ссылке из письма, чтобы задать новый пароль' });
+                    } else {
+                        showToast({ icon: '⚠️', title: 'Ошибка', body: res.data.error || 'не удалось отправить письмо' });
+                    }
+                })
+                .catch(function () { showToast({ icon: '⚠️', title: 'Ошибка сети', body: '' }); })
+                .finally(function () { changePasswordBtn.disabled = false; });
+        });
+    }
+
     var bgUploadBtn = document.getElementById('background-upload-btn');
     if (bgUploadBtn) {
         bgUploadBtn.addEventListener('click', function () {
@@ -596,6 +636,32 @@
                     }
                 })
                 .catch(function () { showToast({ icon: '⚠️', title: 'Ошибка сети', body: '' }); friendActionBtn.disabled = false; });
+        });
+    }
+
+    var adminBanBtn = document.getElementById('admin-ban-btn');
+    if (adminBanBtn) {
+        adminBanBtn.addEventListener('click', function () {
+            var willBan = adminBanBtn.dataset.banned !== 'true';
+            if (willBan && !confirm('Заблокировать пользователя? Он не сможет войти в аккаунт.')) return;
+            adminBanBtn.disabled = true;
+            fetch('/api/admin/users/toggle', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: parseInt(adminBanBtn.dataset.userId, 10), field: 'is_banned' })
+            })
+                .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+                .then(function (res) {
+                    if (!res.ok) {
+                        showToast({ icon: '⚠️', title: 'Ошибка', body: res.data.error || '' });
+                        adminBanBtn.disabled = false;
+                        return;
+                    }
+                    adminBanBtn.dataset.banned = res.data.value ? 'true' : 'false';
+                    adminBanBtn.textContent = res.data.value ? 'Разбанить' : 'Забанить';
+                    showToast({ icon: res.data.value ? '🚫' : '✅', title: res.data.value ? 'Пользователь забанен' : 'Пользователь разбанен', body: '' });
+                    adminBanBtn.disabled = false;
+                })
+                .catch(function () { showToast({ icon: '⚠️', title: 'Ошибка сети', body: '' }); adminBanBtn.disabled = false; });
         });
     }
 

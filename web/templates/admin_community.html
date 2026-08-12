@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Сообщество — AniMemory Admin</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;700&family=Manrope:wght@400;500;600;800&family=MuseoModerno:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#000000; --card:#161616; --card2:#1a1a1a; --text:#ffffff; --muted:#8b8b8b;
+    --accent:#d82d7e; --accent-gradient: linear-gradient(135deg, #5E0135, #331C76);
+    --green:#3ddc84;
+    --font-display:'MuseoModerno', sans-serif; --font-base:'Jost', sans-serif; --font-secondary:'Manrope', sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-family:var(--font-base);padding:20px;}
+
+  .navbar{display:flex;align-items:center;justify-content:space-between;background:var(--card);border-radius:20px;padding:12px 24px;margin-bottom:20px;flex-wrap:wrap;gap:16px;}
+  .nav-left{display:flex;align-items:center;gap:20px;}
+  .brand{display:flex;align-items:center;gap:10px;text-decoration:none;}
+  .brand img{height:34px;width:auto;display:block;}
+  .brand span{font-family:var(--font-display);font-weight:700;font-size:14px;color:var(--muted);white-space:nowrap;}
+  .pill-group{display:flex;background:var(--card2);border-radius:999px;padding:4px;gap:4px;}
+  .pill{border:none;background:transparent;color:var(--text);padding:8px 16px;border-radius:999px;font-size:13px;font-weight:600;font-family:var(--font-secondary);text-decoration:none;cursor:pointer;transition:background .15s,color .15s,opacity .15s;white-space:nowrap;display:inline-flex;align-items:center;}
+  .pill.active{background:#fff;color:#000;}
+  .pill:not(.active):not(.disabled):hover{background:rgba(255,255,255,.08);}
+  .pill.disabled{opacity:.35;pointer-events:none;}
+  .nav-right{display:flex;align-items:center;gap:14px;}
+  .avatar{width:36px;height:36px;border-radius:10px;background:var(--accent-gradient);display:flex;align-items:center;justify-content:center;font-weight:700;font-family:var(--font-display);cursor:default;text-decoration:none;color:var(--text);}
+
+  h1{font-family:var(--font-display);font-size:22px;font-weight:700;margin-bottom:20px;}
+
+  .layout{display:grid;grid-template-columns:1fr 1.4fr;gap:20px;align-items:start;}
+  .card{background:var(--card);border-radius:20px;padding:22px;}
+  .card h2{font-family:var(--font-display);font-size:16px;margin-bottom:16px;}
+
+  /* ===== Achievements ===== */
+  .ach-row{display:flex;align-items:center;gap:12px;margin-bottom:14px;}
+  .ach-icon{font-size:20px;width:28px;text-align:center;flex-shrink:0;}
+  .ach-info{flex:1;min-width:0;}
+  .ach-name{font-family:var(--font-secondary);font-size:13px;font-weight:600;}
+  .ach-track{background:var(--card2);border-radius:6px;height:6px;overflow:hidden;margin-top:6px;}
+  .ach-fill{height:100%;background:var(--accent);border-radius:6px;}
+  .ach-percent{width:70px;text-align:right;font-family:var(--font-secondary);font-size:12px;color:var(--muted);flex-shrink:0;}
+
+  /* ===== Friendships ===== */
+  .toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px;flex-wrap:wrap;}
+  .toolbar .count{color:var(--muted);font-size:13px;font-family:var(--font-secondary);}
+  .search-form{display:flex;gap:8px;}
+  .search-form input{background:var(--card2);border:1px solid rgba(255,255,255,.08);border-radius:999px;padding:9px 14px;color:var(--text);font-family:var(--font-secondary);font-size:13px;min-width:200px;}
+  .search-form input:focus{outline:1px solid var(--accent);}
+  .search-form button{background:var(--card2);border:1px solid rgba(255,255,255,.1);border-radius:999px;padding:9px 16px;color:var(--text);font-family:var(--font-secondary);font-size:13px;cursor:pointer;}
+
+  table{width:100%;border-collapse:collapse;}
+  th{text-align:left;font-family:var(--font-secondary);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700;padding:10px 12px;}
+  td{padding:10px 12px;font-family:var(--font-secondary);font-size:13px;border-top:1px solid rgba(255,255,255,.06);}
+  .friend-pair{display:flex;align-items:center;gap:8px;}
+  .friend-link{color:var(--text);text-decoration:none;}
+  .friend-link:hover{color:var(--accent);}
+  .empty-row td{text-align:center;color:var(--muted);padding:30px;}
+
+  .pagination{display:flex;justify-content:center;align-items:center;gap:10px;margin-top:20px;font-family:var(--font-secondary);font-size:13px;}
+  .pagination a, .pagination span{display:inline-flex;align-items:center;justify-content:center;min-width:32px;height:32px;border-radius:8px;color:var(--text);text-decoration:none;background:var(--card2);}
+  .pagination a:hover{background:rgba(255,255,255,.1);}
+  .pagination .current{background:#fff;color:#000;font-weight:700;}
+  .pagination .disabled{opacity:.3;pointer-events:none;}
+
+  @media (max-width: 1024px){ .layout{grid-template-columns:1fr;} }
+  @media (max-width: 640px){
+    body{padding:12px;}
+    .navbar{flex-direction:column;align-items:stretch;padding:12px 14px;border-radius:16px;gap:10px;}
+    .nav-left{flex-direction:column;align-items:stretch;width:100%;min-width:0;gap:10px;}
+    .brand span{display:none;}
+    .nav-right{width:100%;justify-content:space-between;}
+    .pill-group{display:grid;grid-template-columns:repeat(2,1fr);width:100%;min-width:0;background:transparent;padding:0;gap:6px;}
+    .pill{padding:8px 6px;font-size:12px;background:var(--card2);text-align:center;justify-content:center;}
+    .pill.active{background:#fff;}
+    .card{padding:16px;}
+    .toolbar{flex-direction:column;align-items:stretch;}
+    .search-form input{min-width:0;flex:1;}
+    table{display:block;overflow-x:auto;}
+  }
+</style>
+</head>
+<body>
+
+  <div class="navbar">
+    <div class="nav-left">
+      <a href="/" class="brand">
+        <img src="/static/img/header/logo_header.png" alt="AniMemory">
+        <span>Admin</span>
+      </a>
+      <div class="pill-group">
+        <a href="/admin" class="pill">Overview</a>
+        <a href="/admin/users" class="pill">Users</a>
+        <a href="/admin/catalog" class="pill">Catalog</a>
+        <a href="/admin/community" class="pill active">Community</a>
+      </div>
+    </div>
+    <div class="nav-right">
+      <a href="/" class="avatar" title="{{.Username}}">{{.AdminInitial}}</a>
+    </div>
+  </div>
+
+  <h1>Сообщество</h1>
+
+  <div class="layout">
+    <div class="card">
+      <h2>🏆 Разблокировка ачивок</h2>
+      {{range .AchievementStats}}
+      <div class="ach-row">
+        <div class="ach-icon">{{.Icon}}</div>
+        <div class="ach-info">
+          <div class="ach-name">{{.Name}}</div>
+          <div class="ach-track"><div class="ach-fill" style="width:{{.Percent}}%"></div></div>
+        </div>
+        <div class="ach-percent">{{.UnlockedCount}} · {{.Percent}}%</div>
+      </div>
+      {{end}}
+    </div>
+
+    <div class="card">
+      <div class="toolbar">
+        <h2 style="margin:0;">🤝 Дружбы <span class="count">{{.TotalFriendships}} всего</span></h2>
+        <form class="search-form" method="GET" action="/admin/community">
+          <input type="text" name="q" placeholder="Поиск по имени" value="{{.Query}}" autocomplete="off">
+          <button type="submit">Найти</button>
+        </form>
+      </div>
+      <table>
+        <thead><tr><th>Пользователь</th><th>Друг</th><th>С какого числа</th></tr></thead>
+        <tbody>
+          {{if .Friendships}}
+            {{range .Friendships}}
+            <tr>
+              <td><a class="friend-link" href="/profile/{{.RequesterUsername}}">{{.RequesterUsername}}</a></td>
+              <td><a class="friend-link" href="/profile/{{.AddresseeUsername}}">{{.AddresseeUsername}}</a></td>
+              <td>{{.CreatedAt}}</td>
+            </tr>
+            {{end}}
+          {{else}}
+            <tr class="empty-row"><td colspan="3">Ничего не найдено</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+      {{if gt .TotalPages 1}}
+      <div class="pagination">
+        {{if gt .Page 1}}<a href="/admin/community?q={{.Query}}&page={{subtract .Page 1}}">←</a>{{else}}<span class="disabled">←</span>{{end}}
+        <span class="current">{{.Page}} / {{.TotalPages}}</span>
+        {{if lt .Page .TotalPages}}<a href="/admin/community?q={{.Query}}&page={{add .Page 1}}">→</a>{{else}}<span class="disabled">→</span>{{end}}
+      </div>
+      {{end}}
+    </div>
+  </div>
+</body>
+</html>

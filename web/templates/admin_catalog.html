@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Каталог — AniMemory Admin</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;700&family=Manrope:wght@400;500;600;800&family=MuseoModerno:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#000000; --card:#161616; --card2:#1a1a1a; --text:#ffffff; --muted:#8b8b8b;
+    --accent:#d82d7e; --accent-gradient: linear-gradient(135deg, #5E0135, #331C76);
+    --red:#ff4d4d;
+    --font-display:'MuseoModerno', sans-serif; --font-base:'Jost', sans-serif; --font-secondary:'Manrope', sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-family:var(--font-base);padding:20px;}
+
+  .navbar{display:flex;align-items:center;justify-content:space-between;background:var(--card);border-radius:20px;padding:12px 24px;margin-bottom:20px;flex-wrap:wrap;gap:16px;}
+  .nav-left{display:flex;align-items:center;gap:20px;}
+  .brand{display:flex;align-items:center;gap:10px;text-decoration:none;}
+  .brand img{height:34px;width:auto;display:block;}
+  .brand span{font-family:var(--font-display);font-weight:700;font-size:14px;color:var(--muted);white-space:nowrap;}
+  .pill-group{display:flex;background:var(--card2);border-radius:999px;padding:4px;gap:4px;}
+  .pill{border:none;background:transparent;color:var(--text);padding:8px 16px;border-radius:999px;font-size:13px;font-weight:600;font-family:var(--font-secondary);text-decoration:none;cursor:pointer;transition:background .15s,color .15s,opacity .15s;white-space:nowrap;display:inline-flex;align-items:center;}
+  .pill.active{background:#fff;color:#000;}
+  .pill:not(.active):not(.disabled):hover{background:rgba(255,255,255,.08);}
+  .pill.disabled{opacity:.35;pointer-events:none;}
+  .nav-right{display:flex;align-items:center;gap:14px;}
+  .avatar{width:36px;height:36px;border-radius:10px;background:var(--accent-gradient);display:flex;align-items:center;justify-content:center;font-weight:700;font-family:var(--font-display);cursor:default;text-decoration:none;color:var(--text);}
+
+  .toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:20px;flex-wrap:wrap;}
+  .toolbar h1{font-family:var(--font-display);font-size:22px;font-weight:700;}
+  .toolbar .count{color:var(--muted);font-size:13px;font-family:var(--font-secondary);margin-left:8px;}
+  .toolbar-actions{display:flex;gap:8px;}
+  .search-form{display:flex;gap:8px;}
+  .search-form input{background:var(--card2);border:1px solid rgba(255,255,255,.08);border-radius:999px;padding:10px 16px;color:var(--text);font-family:var(--font-secondary);font-size:13px;min-width:220px;}
+  .search-form input:focus{outline:1px solid var(--accent);}
+  .btn-pink{background:var(--accent);border:none;border-radius:999px;padding:10px 18px;color:#fff;font-family:var(--font-secondary);font-weight:600;font-size:13px;cursor:pointer;}
+  .btn-ghost-sm{background:var(--card2);border:1px solid rgba(255,255,255,.1);border-radius:999px;padding:6px 12px;color:var(--text);font-family:var(--font-secondary);font-size:12px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;}
+  .btn-danger-sm{background:transparent;border:1px solid var(--red);color:var(--red);border-radius:999px;padding:6px 12px;font-family:var(--font-secondary);font-size:12px;cursor:pointer;}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px;}
+  .anime-card{background:var(--card);border-radius:16px;overflow:hidden;display:flex;flex-direction:column;transition:box-shadow .15s;}
+  .anime-card:hover{box-shadow:0 0 0 1px rgba(216,45,126,.25),0 8px 24px rgba(0,0,0,.4);}
+  .anime-poster{width:100%;aspect-ratio:2/3;background:var(--card2) center/cover no-repeat;}
+  .anime-body{padding:14px;display:flex;flex-direction:column;gap:6px;flex:1;}
+  .anime-title{font-weight:700;font-size:14px;line-height:1.3;}
+  .anime-meta{color:var(--muted);font-size:12px;font-family:var(--font-secondary);}
+  .anime-actions{display:flex;gap:8px;margin-top:auto;padding-top:8px;}
+  .empty-text{color:var(--muted);font-size:14px;font-family:var(--font-secondary);grid-column:1/-1;text-align:center;padding:60px 0;}
+
+  .pagination{display:flex;justify-content:center;align-items:center;gap:10px;margin-top:24px;font-family:var(--font-secondary);font-size:13px;}
+  .pagination a, .pagination span{display:inline-flex;align-items:center;justify-content:center;min-width:32px;height:32px;border-radius:8px;color:var(--text);text-decoration:none;background:var(--card2);}
+  .pagination a:hover{background:rgba(255,255,255,.1);}
+  .pagination .current{background:#fff;color:#000;font-weight:700;}
+  .pagination .disabled{opacity:.3;pointer-events:none;}
+
+  /* ===== Modal (add anime) ===== */
+  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:100;padding:20px;}
+  .modal-overlay.open{display:flex;}
+  .modal{background:var(--card);border-radius:20px;padding:24px;width:100%;max-width:560px;max-height:90vh;overflow-y:auto;}
+  .modal h2{font-family:var(--font-display);font-size:18px;margin-bottom:16px;}
+  .field-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .field{display:flex;flex-direction:column;gap:4px;margin-bottom:12px;}
+  .field.full{grid-column:1/-1;}
+  .field label{font-size:11px;color:var(--muted);font-family:var(--font-secondary);text-transform:uppercase;letter-spacing:.05em;}
+  .field input, .field textarea{background:var(--card2);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:9px 12px;color:var(--text);font-family:var(--font-secondary);font-size:13px;resize:vertical;}
+  .field input:focus, .field textarea:focus{outline:1px solid var(--accent);}
+  .modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:8px;}
+  .btn-secondary{background:transparent;border:1px solid rgba(255,255,255,.15);border-radius:999px;padding:9px 18px;color:var(--text);font-family:var(--font-secondary);font-size:13px;cursor:pointer;}
+
+  @media (max-width: 640px){
+    body{padding:12px;}
+    .navbar{flex-direction:column;align-items:stretch;padding:12px 14px;border-radius:16px;gap:10px;}
+    .nav-left{flex-direction:column;align-items:stretch;width:100%;min-width:0;gap:10px;}
+    .brand span{display:none;}
+    .nav-right{width:100%;justify-content:space-between;}
+    .pill-group{display:grid;grid-template-columns:repeat(2,1fr);width:100%;min-width:0;background:transparent;padding:0;gap:6px;}
+    .pill{padding:8px 6px;font-size:12px;background:var(--card2);text-align:center;justify-content:center;}
+    .pill.active{background:#fff;}
+    .toolbar{flex-direction:column;align-items:stretch;}
+    .search-form{flex-direction:column;}
+    .search-form input{min-width:0;}
+    .field-grid{grid-template-columns:1fr;}
+  }
+</style>
+</head>
+<body>
+
+  <div class="navbar">
+    <div class="nav-left">
+      <a href="/" class="brand">
+        <img src="/static/img/header/logo_header.png" alt="AniMemory">
+        <span>Admin</span>
+      </a>
+      <div class="pill-group">
+        <a href="/admin" class="pill">Overview</a>
+        <a href="/admin/users" class="pill">Users</a>
+        <a href="/admin/catalog" class="pill active">Catalog</a>
+        <a href="/admin/community" class="pill">Community</a>
+      </div>
+    </div>
+    <div class="nav-right">
+      <a href="/" class="avatar" title="{{.Username}}">{{.AdminInitial}}</a>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <div><h1 style="display:inline;">Каталог</h1><span class="count">{{.Total}} аниме</span></div>
+    <div class="toolbar-actions">
+      <form class="search-form" method="GET" action="/admin/catalog">
+        <input type="text" name="q" placeholder="Поиск по названию" value="{{.Query}}" autocomplete="off">
+        <button type="submit" class="btn-ghost-sm">Найти</button>
+      </form>
+      <button type="button" class="btn-pink" id="add-anime-btn">+ Добавить аниме</button>
+    </div>
+  </div>
+
+  <div class="grid" id="animeGrid">
+    {{if .Anime}}
+      {{range .Anime}}
+      <div class="anime-card" data-anime-id="{{.ID}}">
+        <div class="anime-poster" style="{{if .Poster}}background-image:url('{{.Poster}}'){{end}}"></div>
+        <div class="anime-body">
+          <div class="anime-title">{{.Title}}</div>
+          <div class="anime-meta">{{if .Year}}{{.Year}} · {{end}}эпизодов: {{.EpisodesCount}}</div>
+          <div class="anime-actions">
+            <a href="/admin/catalog/anime?id={{.ID}}" class="btn-ghost-sm">Открыть</a>
+            <button type="button" class="btn-danger-sm" data-delete-anime="{{.ID}}">Удалить</button>
+          </div>
+        </div>
+      </div>
+      {{end}}
+    {{else}}
+      <div class="empty-text">Ничего не найдено</div>
+    {{end}}
+  </div>
+
+  {{if gt .TotalPages 1}}
+  <div class="pagination">
+    {{if gt .Page 1}}<a href="/admin/catalog?q={{.Query}}&page={{subtract .Page 1}}">←</a>{{else}}<span class="disabled">←</span>{{end}}
+    <span class="current">{{.Page}} / {{.TotalPages}}</span>
+    {{if lt .Page .TotalPages}}<a href="/admin/catalog?q={{.Query}}&page={{add .Page 1}}">→</a>{{else}}<span class="disabled">→</span>{{end}}
+  </div>
+  {{end}}
+
+  <!-- ===== Модалка добавления аниме ===== -->
+  <div class="modal-overlay" id="add-anime-modal">
+    <div class="modal">
+      <h2>Новое аниме</h2>
+      <form id="add-anime-form">
+        <div class="field-grid">
+          <div class="field full"><label>Название *</label><input type="text" name="title" required></div>
+          <div class="field full"><label>Описание</label><textarea name="description" rows="3"></textarea></div>
+          <div class="field full"><label>URL постера</label><input type="text" name="poster_url" placeholder="/static/img/home/catalog_1_1.png"></div>
+          <div class="field full"><label>Жанры (через запятую)</label><input type="text" name="genres" placeholder="Экшн, Фэнтези"></div>
+          <div class="field"><label>Год</label><input type="text" name="year"></div>
+          <div class="field"><label>Страна</label><input type="text" name="country"></div>
+          <div class="field"><label>Первоисточник</label><input type="text" name="source_type"></div>
+          <div class="field"><label>Студия</label><input type="text" name="studio"></div>
+          <div class="field"><label>Автор</label><input type="text" name="author"></div>
+          <div class="field"><label>Режиссёр</label><input type="text" name="director"></div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" id="add-anime-cancel">Отмена</button>
+          <button type="submit" class="btn-pink">Создать</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+<script>
+  const modal = document.getElementById('add-anime-modal');
+  document.getElementById('add-anime-btn').addEventListener('click', () => modal.classList.add('open'));
+  document.getElementById('add-anime-cancel').addEventListener('click', () => modal.classList.remove('open'));
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('open'); });
+
+  document.getElementById('add-anime-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const body = Object.fromEntries(new FormData(form).entries());
+    const res = await fetch('/api/admin/anime/save', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (!res.ok) { alert(data.error || 'Ошибка'); return; }
+    window.location.href = '/admin/catalog/anime?id=' + data.id;
+  });
+
+  document.getElementById('animeGrid').addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-delete-anime]');
+    if (!btn) return;
+    if (!confirm('Удалить аниме вместе со всеми эпизодами?')) return;
+    const id = parseInt(btn.dataset.deleteAnime, 10);
+    const res = await fetch('/api/admin/anime/delete', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id})
+    });
+    if (!res.ok) { const data = await res.json(); alert(data.error || 'Ошибка'); return; }
+    btn.closest('.anime-card').remove();
+  });
+</script>
+</body>
+</html>
