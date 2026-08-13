@@ -369,7 +369,13 @@
             display: flex;
             justify-content: space-between;
             align-items: stretch;
-            margin: 40px 140px 100px;
+            /* Ширина ограничена высотой вьюпорта (через aspect-ratio) — на
+               широких/невысоких экранах секция раньше держала фиксированные
+               margin: 0 140px и просто росла вниз пропорционально ширине,
+               из-за чего на большом экране могла вылезать за нижний край
+               (и кнопка "Смотреть аниме" внутри неё вместе с ней). */
+            width: min(calc(100% - 280px), calc((100vh - 180px) * 1160 / 650));
+            margin: 40px auto 100px;
             border-radius: var(--radius-lg);
             padding: 20px;
             aspect-ratio: 1160 / 650;
@@ -434,7 +440,7 @@
         .top-card li span:last-child { font-size: 16px; line-height: 23px; color: #fff; }
 
         @media (max-width: 900px) {
-            .about-section { flex-direction: column; align-items: stretch; aspect-ratio: auto; padding: 20px; gap: 20px; }
+            .about-section { flex-direction: column; align-items: stretch; aspect-ratio: auto; width: auto; padding: 20px; gap: 20px; }
             .about-left, .about-right { width: auto; max-width: none; align-items: flex-start; }
             .about-right .cta { width: 100%; }
             .top-card { width: 100%; box-sizing: border-box; }
