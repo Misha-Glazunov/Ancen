@@ -1,0 +1,133 @@
+/* Общие токены + шапка для всех страниц /admin — вынесено из
+   admin_dashboard.html, чтобы не дублировать в 5 шаблонах.
+   Структура — по Figma (Frame 547): три независимых тёмных блока
+   (логотип+Дашборд/Аналитика/Настройки, Показ/Пользователи/Сообщества,
+   Online+аватар), а не один общий pill-ряд. */
+:root{
+  --a-bg:#ffffff;
+  --a-card:#0f0f0f;
+  --a-card2:#101010;
+  --a-text:#ffffff;
+  --a-muted:#adadad;
+  --a-muted2:#9aa1ae;
+  --a-accent:#d82d7e;
+  --a-green:#3ddc84;
+  --a-font:'Manrope', sans-serif;
+}
+body.admin-body{
+  background:var(--a-bg);
+  color:#0f0f0f;
+  font-family:var(--a-font);
+  padding:20px;
+  overflow-x:hidden;
+}
+
+.admin-header{
+  display:flex;align-items:center;flex-wrap:wrap;gap:16px;
+  justify-content:space-between;
+  margin-bottom:20px;
+}
+
+/* ===== Группа 1: логотип + Дашборд/Аналитика/Настройки ===== */
+.nav-group-brand{
+  display:flex;align-items:center;gap:19px;
+  background:var(--a-card2);border-radius:20px;
+  padding:0 18px 0 20px;height:40px;
+  flex-wrap:wrap;
+}
+.admin-brand{display:flex;align-items:center;gap:10px;text-decoration:none;flex-shrink:0;}
+.admin-brand img{height:32px;width:auto;display:block;}
+.admin-brand span{font-weight:800;font-size:14px;line-height:1;color:var(--a-muted);}
+
+/* ===== Общий вид pill-группы (используется в group-brand и group-section) =====
+   Каждый .nav-pill — фиксированная высота 32px с flex-центрированием текста
+   (не полагаемся на line-height — с Manrope он "плавает" и текст съезжает
+   от центра). Горизонтальный отступ между пунктами — только padding пилюль
+   (15+15=30px ≈ 27-28px в Figma), gap группы = 0. */
+.nav-group{position:relative;display:flex;align-items:center;gap:0;flex-wrap:wrap;}
+.nav-liquid{
+  position:absolute;top:0;left:0;height:32px;border-radius:42px;
+  background:#fff;
+  transition:left .35s cubic-bezier(.65,0,.35,1), width .35s cubic-bezier(.65,0,.35,1), opacity .2s;
+  z-index:0;pointer-events:none;opacity:0;
+}
+.nav-pill{
+  position:relative;z-index:1;box-sizing:border-box;
+  display:inline-flex;align-items:center;justify-content:center;
+  height:32px;padding:0 15px;border-radius:42px;
+  font-size:14px;font-weight:700;line-height:1;text-decoration:none;
+  color:var(--a-muted2);white-space:nowrap;
+  transition:color .25s;
+}
+.nav-pill.active,.nav-pill.liquid-hover{color:#0f0f0f;}
+/* Аналитика/Настройки — тот же цвет #9AA1AE, что у обычных неактивных пунктов
+   (Figma: обе группы текста используют один и тот же fill), отличие — только
+   в pointer-events. */
+.nav-pill.disabled{pointer-events:none;}
+
+/* ===== Группа 2: Показ/Пользователи/Сообщества ===== */
+.nav-group-section{
+  background:var(--a-card2);border-radius:20px;
+  padding:4px;height:40px;display:flex;align-items:center;
+}
+
+/* ===== Группа 3: Online + аватар ===== */
+.nav-group-status{
+  background:var(--a-card2);border-radius:20px;
+  padding:4px;height:40px;display:flex;align-items:center;gap:30px;
+}
+.status-pill{
+  display:flex;align-items:center;gap:8px;box-sizing:border-box;
+  background:#1a1a1a;border-radius:42px;height:32px;padding:0 15px;
+  font-size:14px;font-weight:700;line-height:1;color:#fff;white-space:nowrap;
+}
+.status-dot{color:var(--a-green);text-shadow:0 0 4px var(--a-green);font-size:14px;}
+.admin-avatar{
+  width:32px;height:32px;border-radius:50%;
+  background:linear-gradient(135deg,#5E0135,#331C76);
+  display:flex;align-items:center;justify-content:center;
+  font-weight:800;font-size:13px;color:#fff;text-decoration:none;flex-shrink:0;
+}
+
+@media (max-width:900px){
+  .admin-header{gap:10px;}
+}
+@media (max-width:640px){
+  body.admin-body{padding:12px;}
+  /* Две плашки, не три: статус/аватар не отдельный блок, а плавает поверх
+     верхнего правого угла карточки с логотипом (position:absolute внутри
+     relative-контейнера), карточка "Показ/Пользователи/Сообщества" — вторая
+     плашка на всю ширину. */
+  .admin-header{flex-direction:column;align-items:stretch;gap:8px;position:relative;}
+  .nav-group-brand{
+    order:1;width:100%;height:auto;padding:12px 14px;
+    flex-direction:column;align-items:stretch;gap:10px;
+  }
+  /* Правый отступ под аватарку нужен только строке логотипа — она делит
+     верхний край с плавающей аватаркой (top:12/right:14). Ряд пилюль ниже
+     аватарки не пересекается и должен занимать всю ширину карточки, как в
+     .nav-group-section, иначе расстояние между кнопками визуально меньше. */
+  .nav-group-brand .admin-brand{margin-right:56px;}
+  .nav-group-status{
+    position:absolute;top:12px;right:14px;order:2;
+    height:auto;min-height:auto;background:transparent;padding:0;gap:6px;
+  }
+  /* Тёмная "плашка" вокруг точки была лишней рамкой рядом с аватаркой —
+     убираем фон/паддинг, оставляем саму точку вплотную к аватарке. */
+  .status-pill{background:transparent;padding:0;height:auto;gap:0;}
+  .nav-group-section{
+    order:3;width:100%;height:auto;min-height:40px;
+  }
+  .nav-group-brand .admin-brand{align-self:flex-start;}
+  .nav-group-brand .nav-group,.nav-group-section{
+    display:grid;grid-template-columns:repeat(3,1fr);gap:4px;
+    width:100%;height:auto;padding:0;
+  }
+  .nav-group-section{align-items:stretch;padding:4px;}
+  .nav-pill{
+    width:100%;height:auto;min-height:32px;padding:6px 4px;white-space:normal;
+    font-size:11px;line-height:1.2;text-align:center;
+  }
+  .nav-liquid{height:auto;}
+  .status-pill .status-label{display:none;}
+}

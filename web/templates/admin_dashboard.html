@@ -7,363 +7,595 @@
 <meta name="robots" content="noindex, nofollow">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;700&family=Manrope:wght@400;500;600;800&family=MuseoModerno:wght@400;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/admin.css">
 <style>
   :root{
-    /* Токены из web/static/css/tokens.css — тот же бренд, что и на публичных страницах */
-    --bg:#000000;
-    --card:#161616;
-    --card2:#1a1a1a;
-    --text:#ffffff;
-    --muted:#8b8b8b;
+    --card:#0f0f0f;
+    --muted:#adadad;
     --accent:#d82d7e;
-    --accent-gradient: linear-gradient(135deg, #5E0135, #331C76);
-    --purple:#933799;
-    --orange:#ff4400;
-    --amber:#ffa600;
-    --green:#3ddc84;
-    --blue:#4c9bff;
-
-    --font-display:'MuseoModerno', sans-serif;
-    --font-base:'Jost', sans-serif;
-    --font-secondary:'Manrope', sans-serif;
+    --font:'Manrope', sans-serif;
   }
   *{box-sizing:border-box;margin:0;padding:0;}
-  body{
-    background:var(--bg);
-    color:var(--text);
-    font-family:var(--font-base);
-    padding:20px;
-  }
-
-  /* ===== Navbar ===== */
-  .navbar{
-    display:flex;align-items:center;justify-content:space-between;
-    background:var(--card);
-    border-radius:20px;
-    padding:12px 24px;
-    margin-bottom:20px;
-    flex-wrap:wrap;
-    gap:16px;
-  }
-  .nav-left{display:flex;align-items:center;gap:20px;}
-  .brand{display:flex;align-items:center;gap:10px;text-decoration:none;}
-  .brand img{height:34px;width:auto;display:block;}
-  .brand span{font-family:var(--font-display);font-weight:700;font-size:14px;color:var(--muted);white-space:nowrap;}
-  .pill-group{display:flex;background:var(--card2);border-radius:999px;padding:4px;gap:4px;}
-  .pill{
-    border:none;background:transparent;color:var(--text);
-    padding:8px 16px;border-radius:999px;font-size:13px;font-weight:600;
-    font-family:var(--font-secondary);text-decoration:none;
-    cursor:pointer;transition:background .15s,color .15s,opacity .15s;white-space:nowrap;
-    display:inline-flex;align-items:center;
-  }
-  .pill.active{background:#fff;color:#000;}
-  .pill:not(.active):not(.disabled):hover{background:rgba(255,255,255,.08);}
-  .pill.disabled{opacity:.35;pointer-events:none;}
-
-  .nav-center{display:flex;align-items:center;gap:14px;font-size:14px;font-weight:600;color:var(--muted);font-family:var(--font-secondary);}
-  .nav-center span.active{color:var(--text);}
-  .nav-center .dot{width:4px;height:4px;border-radius:50%;background:var(--muted);}
-
-  .nav-right{display:flex;align-items:center;gap:14px;}
-  .status-pill{
-    background:var(--card2);border-radius:999px;padding:8px 16px;
-    font-size:13px;font-weight:600;white-space:nowrap;font-family:var(--font-secondary);
-    display:flex;align-items:center;gap:8px;
-  }
-  .status-dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);}
-  .bell{
-    width:36px;height:36px;border-radius:50%;background:var(--card2);
-    display:flex;align-items:center;justify-content:center;position:relative;cursor:pointer;
-  }
-  .bell::after{
-    content:"";position:absolute;top:7px;right:7px;width:8px;height:8px;
-    border-radius:50%;background:var(--accent);
-  }
-  .avatar{
-    width:36px;height:36px;border-radius:10px;background:var(--accent-gradient);
-    display:flex;align-items:center;justify-content:center;font-weight:700;
-    font-family:var(--font-display);cursor:default;text-decoration:none;color:var(--text);
-  }
 
   /* ===== Grid ===== */
-  .grid{
-    display:grid;
-    grid-template-columns:repeat(3,1fr);
-    gap:20px;
+  .dash-row{display:grid;gap:20px;margin-bottom:20px;}
+  .dash-row-1{grid-template-columns:1fr 1fr 2fr;}
+  .dash-row-2{grid-template-columns:repeat(3,1fr);}
+
+  .dash-card{
+    position:relative;background:var(--card);border-radius:20px;
+    padding:25px;overflow:hidden;
+    opacity:0;transform:translateY(24px);
+    /* Grid-item по умолчанию min-width:auto — это тянет колонку по ширине
+       контента (nowrap-заголовков) шире вьюпорта, несмотря на overflow:hidden
+       на самой карточке. min-width:0 — стандартный фикс "grid blowout". */
+    min-width:0;
   }
-  .card{
-    background:var(--card);
-    border-radius:20px;
-    padding:22px;
-    transition:box-shadow .15s,transform .15s;
-    display:flex;flex-direction:column;
-    min-height:220px;
-    position:relative;
-    overflow:hidden;
+  .card-label{
+    display:flex;align-items:center;gap:10px;
+    font-size:12px;font-weight:700;text-transform:uppercase;color:var(--muted);
+    letter-spacing:.02em;white-space:normal;
   }
-  .card:hover{box-shadow:0 0 0 1px rgba(216,45,126,.25),0 8px 24px rgba(0,0,0,.4);}
-  .card-title{
-    display:flex;align-items:center;gap:8px;
-    font-size:12px;letter-spacing:.06em;text-transform:uppercase;
-    color:var(--muted);font-weight:700;margin-bottom:16px;font-family:var(--font-secondary);
+  .card-label .card-icon{width:15px;height:15px;flex:none;display:block;}
+  .card-label .icon-pie{border-radius:50%;background:conic-gradient(from 180deg,#fff 0deg,var(--accent) 360deg);}
+  /* Иконка+текст держатся вместе отдельной группой — иначе justify-content:
+     space-between у .donut-card .card-label растягивает зазор между ИКОНКОЙ
+     и текстом вместо зазора между текстом и подписью месяца. */
+  .card-label-main{display:flex;align-items:center;gap:10px;}
+
+  /* --- Карточка "I am" --- */
+  .card-me{padding:30px 20px;min-height:452px;display:flex;align-items:flex-end;}
+  .card-me-bg{
+    position:absolute;inset:0;border-radius:20px;
+    background:#0f0f0f;
   }
-  .big-number{font-family:var(--font-display);font-size:52px;font-weight:800;line-height:1;}
-  .sub-text{color:var(--muted);font-size:13px;margin-top:8px;font-family:var(--font-secondary);}
-  .empty-text{color:var(--muted);font-size:13px;font-family:var(--font-secondary);}
-  .card-spacer{flex:1;}
+  .card-me-bg img{width:100%;height:100%;object-fit:cover;display:block;}
+  .card-me-shade{
+    position:absolute;inset:0;
+    background:linear-gradient(180deg, rgba(9,9,9,.5) 0%, rgba(40,40,40,0) 47%, rgba(5,5,5,.5) 85%);
+  }
+  .card-me-content{position:relative;z-index:1;width:100%;}
+  .card-me-title{font-size:24px;line-height:1;}
+  .card-me-title .who{color:var(--muted);font-weight:500;display:block;}
+  .card-me-title .name{color:#fff;font-weight:700;display:block;text-transform:capitalize;}
+  .card-me-tag{margin-top:298px;font-size:15px;font-weight:600;color:#fff;line-height:1.3;}
 
-  .metric-row{display:flex;flex-direction:column;justify-content:space-between;height:100%;}
+  /* --- Карточка "время в разработке" ===== по Frame 493:
+     число+подпись ("Frame 492") стоят НАД дугой ("Group 74111"), не поверх
+     неё — колонка с gap 50px, как в Figma. Дуга — настоящий полукруг: трек и
+     цветная дуга общего центра (r=152 и r=133), а не эллипс с обрезкой. */
+  .card-dev{cursor:pointer;display:flex;flex-direction:column;padding-bottom:0;}
+  .dev-stack{display:flex;flex-direction:column;align-items:center;gap:clamp(20px,4vw,50px);width:100%;margin-top:auto;}
+  .dev-number{text-align:center;}
+  .dev-number .val{font-size:clamp(38px,6vw,58px);font-weight:500;color:var(--muted);text-transform:uppercase;line-height:1;}
+  .dev-number .lbl{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-top:8px;}
+  .dev-gauge{position:relative;width:100%;max-width:304px;aspect-ratio:304/152;}
+  .dev-gauge svg{width:100%;height:100%;display:block;}
+  .dev-dates{
+    position:absolute;left:0;right:0;bottom:6%;
+    display:flex;justify-content:space-between;padding:0 10%;
+    font-size:20px;font-weight:600;color:#fff;text-transform:uppercase;
+  }
 
-  /* row 2 lists */
-  .reaction-row{display:flex;align-items:center;gap:10px;margin-bottom:10px;font-size:14px;font-family:var(--font-secondary);}
-  .reaction-emoji{width:22px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .reaction-count{width:26px;text-align:right;color:var(--muted);}
-  .bar-track{flex:1;background:var(--card2);border-radius:6px;height:8px;overflow:hidden;}
-  .bar-fill{height:100%;border-radius:6px;}
+  /* --- Карточка "статистика пользователей" --- */
+  .card-stats{min-height:452px;}
+  /* Figma: 136×176, flush к правому и нижнему краю карточки (696×452) */
+  .card-stats-decor{
+    position:absolute;right:0;bottom:0;width:136px;height:176px;
+    object-fit:contain;object-position:bottom right;
+    pointer-events:none;
+  }
+  @media (max-width:1300px){ .card-stats-decor{display:none;} }
+  .stats-table{display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:20px 30px;margin-top:24px;}
+  .stats-col h4{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:14px;}
+  .stats-row{display:flex;align-items:center;justify-content:space-between;gap:12px;height:22px;margin-bottom:9px;}
+  .stats-row .k{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}
+  .stats-pill{
+    background:rgba(255,255,255,.1);border-radius:8.5px;padding:4px 9px;
+    font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;white-space:nowrap;flex:none;
+  }
+  .stats-overall{margin-top:22px;}
+  .stats-overall h4{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:8px;}
+  .stats-overall .big{font-size:clamp(52px,9vw,96px);font-weight:800;color:var(--accent);text-transform:uppercase;line-height:1;}
 
-  .community-top{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:14px;}
-  .community-col h4{font-size:12px;color:var(--muted);margin-bottom:10px;font-weight:700;font-family:var(--font-secondary);}
-  .community-item{display:flex;justify-content:space-between;font-size:13px;margin-bottom:8px;gap:8px;font-family:var(--font-secondary);}
-  .community-item span:first-child{color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .community-item span:last-child{color:var(--muted);font-weight:700;flex-shrink:0;}
+  /* --- Линейные графики ===== рамка-оси (Figma Vector111) + отступы:
+     30px от заголовка сверху, 30px до низа карточки, 25px по бокам (=
+     собственный padding карточки, доп. инсета не нужно). Карточка — flex-
+     колонка, .chart-plot растягивается на всё свободное место (flex:1),
+     чтобы график заполнял карточку, а не оставлял пустоту снизу. */
+  .chart-card{display:flex;flex-direction:column;}
+  .chart-plot{
+    position:relative;flex:1;min-height:0;margin-top:30px;margin-bottom:30px;
+    border:1px solid rgba(199,200,201,.35);border-radius:4px;
+  }
+  .chart-plot svg{width:100%;height:100%;display:block;}
+  .chart-axis-label{font-family:var(--font);font-size:9px;font-weight:700;fill:var(--muted);}
+  .chart-hit{cursor:pointer;}
+  .chart-tip{
+    position:absolute;transform:translate(-50%,-135%);
+    background:#fff;color:#0f0f0f;font-size:11px;font-weight:700;
+    padding:3px 8px;border-radius:6px;white-space:nowrap;
+    opacity:0;pointer-events:none;transition:opacity .12s;
+  }
 
-  .chart-x-labels{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:4px;font-family:var(--font-secondary);}
+  /* --- Донат устройств --- */
+  .donut-card .card-label{justify-content:space-between;}
+  .donut-row{display:flex;align-items:center;justify-content:center;gap:36px;margin-top:30px;flex-wrap:wrap;}
+  .donut-wrap{position:relative;width:min(290px,60%);flex:none;aspect-ratio:1;}
+  .donut-wrap svg{width:100%;height:100%;}
+  .donut-center{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:600;color:#fff;text-transform:uppercase;pointer-events:none;}
+  .donut-legend{display:flex;flex-direction:column;gap:12px;flex:none;}
+  .donut-legend-item{display:flex;align-items:center;gap:10px;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;}
+  .donut-legend-dot{width:10px;height:10px;border-radius:50%;flex:none;}
 
   /* ===== Адаптив ===== */
-  @media (max-width: 1024px){
-    .grid{grid-template-columns:repeat(2,1fr);}
-    .nav-center{order:3;width:100%;justify-content:center;}
+  @media (max-width:1100px){
+    .dash-row-1{grid-template-columns:1fr 1fr;}
+    .dash-row-1 .card-stats{grid-column:1/-1;}
   }
-  @media (max-width: 640px){
+  @media (max-width:640px){
     body{padding:12px;}
-
-    /* Header на мобилке: логотип+аватар в одну строку, фильтры — сеткой 2×2
-       на всю ширину (все 4 пункта видны сразу, без скролла), второстепенное
-       меню Dashboard/Analytics/Settings скрыто (дублирует пилюли). */
-    .navbar{flex-direction:column;align-items:stretch;padding:12px 14px;border-radius:16px;gap:10px;}
-    .nav-left{order:1;flex-direction:column;align-items:stretch;width:100%;min-width:0;gap:10px;}
-    .brand span{display:none;}
-    .nav-right{order:2;width:100%;justify-content:space-between;}
-    .status-label{display:none;}
-    .status-pill{padding:8px;}
-    .nav-center{display:none;}
-    .pill-group{display:grid;grid-template-columns:repeat(2,1fr);width:100%;min-width:0;background:transparent;padding:0;gap:6px;}
-    .pill{padding:8px 6px;font-size:12px;background:var(--card2);text-align:center;}
-    .pill.active{background:#fff;}
-
-    .grid{grid-template-columns:1fr;gap:14px;}
-    .card{padding:18px;min-height:auto;}
-    .big-number{font-size:40px;}
-    .community-top{grid-template-columns:1fr;gap:20px;}
+    .dash-row-1,.dash-row-2{grid-template-columns:1fr;}
+    .dash-row-1 .card-stats{grid-column:auto;}
+    /* Все 3 колонки (цели/результаты/% по каждой строке) больше не сжимаются
+       и не прячутся — таблица скроллится вправо внутри своей обёртки, ширина
+       колонок фиксирована, поэтому текст/пилюли не обрезаются. */
+    .stats-table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+    .stats-table{grid-template-columns:repeat(3,160px);width:max-content;}
+    .card-me{min-height:340px;}
+    .card-me-tag{margin-top:180px;}
+    /* Число часов было почти впритык к заголовку карточки — без min-height
+       flex-margin-top:auto у .dev-stack некуда толкать контент. */
+    .card-dev{min-height:280px;gap:24px;}
+    /* Декоративная картинка была скрыта на всех ширинах <1300px — на мобильном
+       возвращаем её, но рядом с "общий % выполнения" вместо угла карточки.
+       card-stats не был flex-колонкой, поэтому под stats-overall оставался
+       пустой хвост карточки (min-height:452px) — margin-top:auto продавливает
+       блок с процентом к самому низу. */
+    .card-stats{display:flex;flex-direction:column;}
+    .stats-overall{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-top:auto;}
+    .card-stats-decor{
+      display:block!important;position:static;width:72px;height:96px;
+      flex:none;object-position:bottom right;
+      /* card-stats имеет padding:25px — гасим его справа/снизу у самой
+         картинки, чтобы она сидела вплотную к настоящему углу карточки
+         (overflow:hidden на .dash-card обрежет ровно по границе). */
+      margin:-25px -25px -25px 0;
+    }
+    /* Длинные подписи карточек ("график посещений за последние 14 дней",
+       "сеансы по устройствам август 2026") были nowrap и вылезали за карточку —
+       на мобильном разрешаем перенос. */
+    .card-label{white-space:normal;align-items:flex-start;}
+    .donut-card .card-label{flex-direction:column;align-items:flex-start;gap:4px;}
   }
 </style>
 </head>
-<body>
+<body class="admin-body">
 
-  <!-- ===== NAVBAR ===== -->
-  <div class="navbar">
-    <div class="nav-left">
-      <a href="/" class="brand">
+  <div class="admin-header">
+    <div class="nav-group-brand">
+      <a href="/" class="admin-brand">
         <img src="/static/img/header/logo_header.png" alt="AniMemory">
-        <span>Admin</span>
+        <span>admin</span>
       </a>
-      <div class="pill-group">
-        <a href="/admin" class="pill active">Overview</a>
-        <a href="/admin/users" class="pill">Users</a>
-        <a href="/admin/catalog" class="pill">Catalog</a>
-        <a href="/admin/community" class="pill">Community</a>
-      </div>
+      <nav class="nav-group">
+        <div class="nav-liquid"></div>
+        <a href="/admin" class="nav-pill active" data-pill>Дашборд</a>
+        <span class="nav-pill disabled" title="Скоро">Аналитика</span>
+        <span class="nav-pill disabled" title="Скоро">Настройки</span>
+      </nav>
     </div>
-    <div class="nav-center">
-      <span class="active">Dashboard</span>
-      <span class="dot"></span>
-      <span>Analytics</span>
-      <span class="dot"></span>
-      <span>Settings</span>
-    </div>
-    <div class="nav-right">
-      <div class="status-pill"><span class="status-dot"></span><span class="status-label">Online</span></div>
-      <div class="bell" title="Уведомления"></div>
-      <a href="/" class="avatar" title="{{.Username}}">{{.AdminInitial}}</a>
+
+    <nav class="nav-group nav-group-section">
+      <div class="nav-liquid"></div>
+      <a href="/admin/catalog" class="nav-pill" data-pill>Показ</a>
+      <a href="/admin/users" class="nav-pill" data-pill>Пользователи</a>
+      <a href="/admin/community" class="nav-pill" data-pill>Сообщества</a>
+    </nav>
+
+    <div class="nav-group-status">
+      <div class="status-pill"><span class="status-dot">●</span> <span class="status-label">Online</span></div>
+      <a href="/" class="admin-avatar" title="{{.Username}}">{{.AdminInitial}}</a>
     </div>
   </div>
 
-  <!-- ===== GRID ===== -->
-  <div class="grid" id="dashboardGrid"></div>
+  <!-- ===== Row 1 ===== -->
+  <div class="dash-row dash-row-1">
+    <div class="dash-card card-me">
+      <div class="card-me-bg"><img src="/static/img/admin/dev-photo.png" alt="" onerror="this.style.display='none'"></div>
+      <div class="card-me-shade"></div>
+      <div class="card-me-content">
+        <div class="card-me-title"><span class="who">I am</span><span class="name">{{.Username}}</span></div>
+        <div class="card-me-tag">Админ-панель AniMemory — вся статистика проекта в реальном времени.</div>
+      </div>
+    </div>
 
+    <div class="dash-card card-dev" id="devCard">
+      <div class="card-label">
+        <svg class="card-icon" width="15" height="15" viewBox="0 0 15 15" fill="none"><circle cx="7.5" cy="7.5" r="7" stroke="#ADADAD"/><path d="M7.5 3v4.5l3 2" stroke="#ADADAD" stroke-linecap="round"/></svg>
+        времени в разработке
+      </div>
+      <div class="dev-stack">
+        <div class="dev-number">
+          <div class="val" id="devHours">0</div>
+          <div class="lbl">кол-во часов</div>
+        </div>
+        <div class="dev-gauge">
+          <svg viewBox="0 0 304 152" preserveAspectRatio="xMidYMid meet">
+            <defs>
+              <linearGradient id="devGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="4%" stop-color="#ffffff"/>
+                <stop offset="96%" stop-color="#d82d7e"/>
+              </linearGradient>
+            </defs>
+            <!-- Трек — тонкий серый полукруг r=152, общий центр (152,152) -->
+            <path id="devTrack" d="M 0 152 A 152 152 0 0 1 304 152" fill="none" stroke="#565656" stroke-width="1"/>
+            <!-- Цветная дуга-значение — концентричный полукруг r=133 -->
+            <path id="devArc" d="M 19 152 A 133 133 0 0 1 285 152" fill="none" stroke="url(#devGradient)" stroke-width="19" stroke-linecap="round"/>
+            <!-- Метки-точки: левый конец / верхняя точка ВНУТРЕННЕЙ дуги (r=133) / правый конец -->
+            <circle cx="19" cy="152" r="4" fill="#1c1c1c"/>
+            <circle cx="152" cy="19" r="6" fill="#1c1c1c"/>
+            <circle cx="285" cy="152" r="4" fill="#1c1c1c"/>
+          </svg>
+          <div class="dev-dates"><span>2020</span><span>2026</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="dash-card card-stats">
+      <div class="card-label">
+        <svg class="card-icon" width="15" height="15" viewBox="0 0 15 15" fill="none"><path d="M2 13V8M7.5 13V2M13 13V5.5" stroke="#ADADAD" stroke-linecap="round"/></svg>
+        статистика пользователей
+      </div>
+      <div class="stats-table-scroll">
+        <div class="stats-table">
+          <div class="stats-col">
+            <h4>цели</h4>
+            {{range .Stats}}<div class="stats-row"><span class="k">{{.Label}}</span><span class="stats-pill">{{.Goal}}</span></div>{{end}}
+          </div>
+          <div class="stats-col">
+            <h4>результаты</h4>
+            {{range .Stats}}<div class="stats-row"><span class="k">{{.Label}}</span><span class="stats-pill" data-count="{{.Result}}">0</span></div>{{end}}
+          </div>
+          <div class="stats-col">
+            <h4>выполнено в %</h4>
+            {{range .Stats}}<div class="stats-row"><span class="k">{{.Label}}</span><span class="stats-pill" data-count="{{.Percent}}%">0</span></div>{{end}}
+          </div>
+        </div>
+      </div>
+      <div class="stats-overall">
+        <div class="stats-overall-text">
+          <h4>общий % выполнения</h4>
+          <div class="big" data-count="{{.OverallPercent}}%">0%</div>
+        </div>
+        <img class="card-stats-decor" src="/static/img/admin/stats-decor.png" alt="" onerror="this.style.display='none'">
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Row 2 ===== -->
+  <div class="dash-row dash-row-2">
+    <div class="dash-card chart-card" id="visitsCard">
+      <div class="card-label">
+        <svg class="card-icon" width="15" height="15" viewBox="0 0 15 15" fill="none"><path d="M1 11l4-4 3 3 6-7" stroke="#ADADAD" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        график посещений за последние 14 дней
+      </div>
+      <div class="chart-plot"><svg id="visitsChart" viewBox="0 0 407 200" preserveAspectRatio="none"></svg></div>
+    </div>
+    <div class="dash-card chart-card" id="sessionsCard">
+      <div class="card-label">
+        <svg class="card-icon" width="15" height="15" viewBox="0 0 15 15" fill="none"><path d="M1 11l4-4 3 3 6-7" stroke="#ADADAD" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        график времени сессии за последние 14 дней
+      </div>
+      <div class="chart-plot"><svg id="sessionsChart" viewBox="0 0 407 200" preserveAspectRatio="none"></svg></div>
+    </div>
+    <div class="dash-card donut-card" id="deviceCard">
+      <div class="card-label">
+        <span class="card-label-main">
+          <span class="card-icon icon-pie"></span>
+          сеансы по устройствам
+        </span>
+        <span id="deviceMonth" style="text-transform:uppercase;"></span>
+      </div>
+      <div class="donut-row">
+        <div class="donut-wrap">
+          <svg viewBox="0 0 200 200">
+            <circle cx="100" cy="100" r="88" fill="none" stroke="#1c1c1c" stroke-width="23"/>
+            <circle id="donutMobile" cx="100" cy="100" r="88" fill="none" stroke="#ffffff" stroke-width="23" stroke-dasharray="0 552" transform="rotate(-90 100 100)"/>
+            <circle id="donutDesktop" cx="100" cy="100" r="88" fill="none" stroke="#d82d7e" stroke-width="23" stroke-dasharray="0 552" transform="rotate(-90 100 100)"/>
+          </svg>
+          <div class="donut-center" id="donutTotal">0</div>
+        </div>
+        <div class="donut-legend">
+          <div class="donut-legend-item"><span class="donut-legend-dot" style="background:#fff;"></span>mobile</div>
+          <div class="donut-legend-item"><span class="donut-legend-dot" style="background:#d82d7e;"></span>desktop</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+<script src="/static/js/admin-nav.js"></script>
 <script>
-  // Данные приходят с сервера (adminDashboardHandler, cmd/server/main.go) —
-  // единая точка расширения: новая метрика = новый ключ здесь + новая карточка ниже.
   const dashboardData = {{.DashboardDataJSON}};
+  gsap.registerPlugin(ScrollTrigger);
 
-  // ===== SVG helpers (без сторонних библиотек) =====
-  const svgns = "http://www.w3.org/2000/svg";
-  function svgEl(tag, attrs){
-    const el = document.createElementNS(svgns, tag);
-    for(const k in attrs) el.setAttribute(k, attrs[k]);
-    return el;
-  }
-
-  function sparkline(data, width, height, color){
-    const svg = svgEl('svg', {viewBox:`0 0 ${width} ${height}`, width:'100%', height});
-    if(!data || !data.length) return svg;
-    const max = Math.max(...data);
-    const min = Math.min(...data);
-    const step = width / Math.max(data.length - 1, 1);
-    const points = data.map((v,i) => {
-      const x = i * step;
-      const y = height - ((v - min) / (max - min || 1)) * (height - 6) - 3;
-      return [x,y];
+  // ===== Числа: "0 → N" с сохранением исходного формата (пробелы/%/мин) =====
+  function formatThousandsJS(n){ return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' '); }
+  function animateCountText(el, finalText, opts){
+    opts = opts || {};
+    const m = String(finalText).match(/^(-?[\d\s]+(?:\.\d+)?)(.*)$/);
+    if(!m){ el.textContent = finalText; return; }
+    const numStr = m[1].replace(/\s/g,'');
+    const suffix = m[2];
+    const target = parseFloat(numStr) || 0;
+    const decimals = numStr.includes('.') ? 1 : 0;
+    const proxy = {v:0};
+    gsap.to(proxy, {
+      v: target, duration: opts.duration || 1.3, ease:'power2.out', delay: opts.delay || 0,
+      onUpdate(){
+        let val = decimals ? proxy.v.toFixed(1) : formatThousandsJS(Math.round(proxy.v));
+        el.textContent = val + suffix;
+      },
+      onComplete(){ el.textContent = finalText; }
     });
-    const path = points.map((p,i) => (i===0?'M':'L') + p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ');
-    svg.appendChild(svgEl('path', {d:path, fill:'none', stroke:color, 'stroke-width':2, 'stroke-linejoin':'round', 'stroke-linecap':'round'}));
-    const last = points[points.length-1];
-    svg.appendChild(svgEl('circle', {cx:last[0], cy:last[1], r:4, fill:color}));
-    return svg;
   }
 
-  function donutChart(segments, size){
-    const total = segments.reduce((s,x)=>s+x.value,0) || 1;
-    const r = size/2 - 8;
-    const cx = size/2, cy = size/2;
-    const circumference = 2 * Math.PI * r;
-    const svg = svgEl('svg', {viewBox:`0 0 ${size} ${size}`, width:size, height:size});
-    let offset = 0;
-    segments.forEach(seg => {
-      const frac = seg.value / total;
-      const len = frac * circumference;
-      svg.appendChild(svgEl('circle', {
-        cx, cy, r, fill:'none', stroke:seg.color, 'stroke-width':14,
-        'stroke-dasharray': `${len} ${circumference - len}`,
-        'stroke-dashoffset': -offset,
-        transform: `rotate(-90 ${cx} ${cy})`,
-        'stroke-linecap':'butt'
-      }));
-      offset += len;
-    });
-    return svg;
-  }
+  // ===== Карточка "время в разработке" — арка + счётчик =====
+  // Подписи "2020"/"2026" декоративные (не реальные даты проекта), поэтому
+  // и число часов — декоративная константа того же порядка, что в дизайне,
+  // а не расчёт от даты старта: иначе получались бы часы за пару недель на
+  // фоне 6-летнего диапазона на шкале, что выглядело как ошибка.
+  (function initDevCard(){
+    const totalHours = 25467;
 
-  function barChart(data, width, height, color){
-    const svg = svgEl('svg', {viewBox:`0 0 ${width} ${height}`, width:'100%', height});
-    if(!data || !data.length) return svg;
-    const max = Math.max(...data, 1);
-    const gap = 3;
-    const barW = (width - gap*(data.length-1)) / data.length;
-    for(let i=1;i<=3;i++){
-      const y = height - (height/3)*i;
-      svg.appendChild(svgEl('line', {x1:0,y1:y,x2:width,y2:y,stroke:'rgba(255,255,255,0.06)','stroke-width':1}));
+    const arc = document.getElementById('devArc');
+    const len = arc.getTotalLength();
+    arc.style.strokeDasharray = len;
+    arc.style.strokeDashoffset = len;
+
+    const numEl = document.getElementById('devHours');
+    const card = document.getElementById('devCard');
+    let hovering = false;
+
+    function setFraction(f, animate){
+      f = Math.max(0, Math.min(1, f));
+      const offset = len * (1 - f);
+      if(animate){ gsap.to(arc, {strokeDashoffset: offset, duration:.15, ease:'none'}); }
+      else { arc.style.strokeDashoffset = offset; }
+      numEl.textContent = formatThousandsJS(Math.round(totalHours * f));
     }
-    data.forEach((v,i)=>{
-      const h = (v / max) * (height - 4);
-      const x = i * (barW + gap);
-      const y = height - h;
-      svg.appendChild(svgEl('rect', {x, y, width:barW, height:h, rx:2, fill:color}));
+    setFraction(0, false);
+
+    ScrollTrigger.create({
+      trigger: card, start: 'top 85%', once: true,
+      onEnter(){
+        gsap.to({}, {duration:1.6, ease:'power2.out', onUpdate(){
+          if(hovering) return;
+          setFraction(this.progress(), false);
+        }});
+      }
     });
-    return svg;
+
+    card.addEventListener('mousemove', (e) => {
+      hovering = true;
+      const rect = card.getBoundingClientRect();
+      setFraction((e.clientX - rect.left) / rect.width, true);
+    });
+    card.addEventListener('mouseleave', () => {
+      hovering = false;
+      gsap.to({}, {duration:.6, ease:'power2.out', onUpdate(){ setFraction(this.progress(), false); }});
+    });
+  })();
+
+  // ===== Карточка "статистика пользователей" =====
+  ScrollTrigger.create({
+    trigger: '.card-stats', start: 'top 85%', once: true,
+    onEnter(){
+      document.querySelectorAll('.card-stats [data-count]').forEach((el, i) => {
+        animateCountText(el, el.dataset.count, {delay: i * 0.03, duration: 1.1});
+      });
+    }
+  });
+
+  // ===== Линейные графики (визиты / сессии) — draw-in =====
+  // Пока в БД нет реальной истории (0 визитов), показываем тестовые
+  // значения — чтобы было видно форму графика; как только появятся
+  // настоящие данные (хотя бы одно ненулевое), реальные данные их заменят.
+  function withTestFallback(data){
+    if(data && data.some(v => v > 0)) return data;
+    return [3,5,4,7,6,9,8,12,10,14,13,17,15,20];
   }
 
-  function makeCard(innerHTML){
-    const div = document.createElement('div');
-    div.className = 'card';
-    div.innerHTML = innerHTML;
-    return div;
+  // Подписи оси X — последние 14 дней (дд.мм), каждая вторая точка, чтобы
+  // не сливались; ось Y — 0 и максимум ряда.
+  function last14DayLabels(){
+    const labels = [];
+    for(let i = 13; i >= 0; i--){
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      labels.push(d.toLocaleDateString('ru-RU', {day:'2-digit', month:'2-digit'}));
+    }
+    return labels;
   }
 
-  const REACTION_COLORS = ['var(--accent)','var(--orange)','var(--amber)','var(--blue)','var(--purple)'];
-  const grid = document.getElementById('dashboardGrid');
+  function buildLineChart(svgEl, rawData, gradientId){
+    const data = withTestFallback(rawData);
+    const dayLabels = last14DayLabels();
+    const w = 407, h = 200;
+    const padL = 26, padR = 6, padT = 12, padB = 20;
+    svgEl.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    const max = Math.max(...data, 1);
+    const plotW = w - padL - padR, plotH = h - padT - padB;
+    const step = plotW / (data.length - 1 || 1);
+    const pts = data.map((v,i) => [padL + i*step, padT + plotH - (v/max)*plotH]);
+    const lineD = pts.map((p,i) => (i===0?'M':'L') + p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ');
+    const areaD = lineD + ` L ${pts[pts.length-1][0]},${padT+plotH} L ${padL},${padT+plotH} Z`;
 
-  // --- Карточка 1: Пользователи ---
-  const usersCard = makeCard(`
-    <div class="card-title">👥 Пользователи</div>
-    <div class="metric-row">
-      <div>
-        <div class="big-number">${dashboardData.users.total}</div>
-        <div class="sub-text">Premium: ${dashboardData.users.premium} · новых за 7 дней: ${dashboardData.users.newLast7Days}</div>
-      </div>
-      <div class="card-spacer"></div>
-      <div id="usersSparkline"></div>
-    </div>
-  `);
-  grid.appendChild(usersCard);
-  document.getElementById('usersSparkline').appendChild(sparkline(dashboardData.users.sparkline, 260, 50, 'var(--accent)'));
+    // Каждый 3-й день + всегда первый и последний, но не рядом друг с
+    // другом (иначе последние две подписи слипаются, как "12.0813.08").
+    const lastIdx = dayLabels.length - 1;
+    const xLabels = dayLabels.map((lbl,i) => {
+      const show = i === 0 || i === lastIdx || (i % 3 === 0 && i < lastIdx - 1);
+      if(!show) return '';
+      const anchor = i===0 ? 'start' : i===lastIdx ? 'end' : 'middle';
+      return `<text class="chart-axis-label" x="${pts[i][0]}" y="${h-4}" text-anchor="${anchor}">${lbl}</text>`;
+    }).join('');
 
-  // --- Карточка 2: Каталог ---
-  grid.appendChild(makeCard(`
-    <div class="card-title">🎬 Каталог</div>
-    <div class="big-number">${dashboardData.catalog.animeCount}</div>
-    <div class="sub-text">Аниме · эпизодов: ${dashboardData.catalog.episodes}</div>
-  `));
+    // Ось Y — 4 деления (0, 1/3, 2/3, максимум), не только края.
+    const yTicks = [0, 1/3, 2/3, 1].map(f => {
+      const val = Math.round(max * f);
+      const y = padT + plotH - f*plotH;
+      return `<text class="chart-axis-label" x="2" y="${(y + 3).toFixed(1)}">${val}</text>`;
+    }).join('');
 
-  // --- Карточка 3: Активность (donut) ---
-  const activityCard = makeCard(`
-    <div class="card-title">💬 Активность</div>
-    <div class="metric-row" style="flex-direction:row;align-items:center;">
-      <div>
-        <div class="big-number">${dashboardData.activity.reactions}</div>
-        <div class="sub-text">Реакций · комментариев: ${dashboardData.activity.comments}</div>
-      </div>
-      <div class="card-spacer"></div>
-      <div id="activityDonut"></div>
-    </div>
-  `);
-  grid.appendChild(activityCard);
-  document.getElementById('activityDonut').appendChild(donutChart([
-    {value: dashboardData.activity.reactions, color:'var(--purple)'},
-    {value: dashboardData.activity.comments, color:'var(--blue)'}
-  ], 90));
+    // Точки-хиты для тултипа — прозрачный увеличенный радиус клика/наведения
+    // поверх видимой маленькой точки.
+    const hitPoints = pts.map((p,i) =>
+      `<circle class="chart-hit" data-i="${i}" cx="${p[0]}" cy="${p[1]}" r="9" fill="transparent"/>`
+    ).join('');
+    const dotPoints = pts.map((p,i) =>
+      `<circle class="chart-dot" data-i="${i}" cx="${p[0]}" cy="${p[1]}" r="3" fill="#fff" opacity="0"/>`
+    ).join('');
 
-  // --- Карточка 4: Реакции по типам ---
-  const reactions = dashboardData.reactionsByType || [];
-  const maxReaction = Math.max(...reactions.map(r=>r.Value), 1);
-  const reactionRows = reactions.length ? reactions.map((r,i) => `
-    <div class="reaction-row">
-      <div class="reaction-emoji">${r.Label}</div>
-      <div class="bar-track"><div class="bar-fill" style="width:${(r.Value/maxReaction*100).toFixed(0)}%;background:${REACTION_COLORS[i % REACTION_COLORS.length]};"></div></div>
-      <div class="reaction-count">${r.Value}</div>
-    </div>
-  `).join('') : `<div class="empty-text">Пока нет данных</div>`;
-  grid.appendChild(makeCard(`<div class="card-title">🥰 Реакции по типам</div>${reactionRows}`));
+    svgEl.innerHTML = `
+      <defs>
+        <linearGradient id="${gradientId}-fill" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="3.97%" stop-color="#ffffff"/>
+          <stop offset="95.69%" stop-color="#d82d7e"/>
+        </linearGradient>
+        <clipPath id="${gradientId}-clip"><rect class="chart-clip-rect" x="${padL}" y="0" width="0" height="${h}"/></clipPath>
+      </defs>
+      ${yTicks}
+      ${xLabels}
+      <g clip-path="url(#${gradientId}-clip)">
+        <path d="${areaD}" fill="url(#${gradientId}-fill)" class="chart-area"></path>
+        <path d="${lineD}" fill="none" stroke="#ffffff" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" class="chart-line"></path>
+      </g>
+      ${dotPoints}
+      ${hitPoints}
+    `;
+    const clipRect = svgEl.querySelector('.chart-clip-rect');
+    const dots = Array.from(svgEl.querySelectorAll('.chart-dot'));
+    const hits = Array.from(svgEl.querySelectorAll('.chart-hit'));
+    return {clipRect, dots, hits, pts, data, plotW: w - padL - padR, padL};
+  }
 
-  // --- Карточка 5: Комментарии за 14 дней ---
-  const commentsCard = makeCard(`
-    <div class="card-title">📈 Комментарии за 14 дней</div>
-    <div id="commentsChart"></div>
-    <div class="chart-x-labels" id="commentsXLabels"></div>
-  `);
-  grid.appendChild(commentsCard);
-  document.getElementById('commentsChart').appendChild(barChart(dashboardData.commentsLast14Days, 300, 110, 'var(--blue)'));
-  document.getElementById('commentsXLabels').innerHTML =
-    (dashboardData.commentsLast14Days || []).map((_,i)=>`<span>${i+1}</span>`).join('');
+  // Тултип со значением — один переиспользуемый div на карточку графика,
+  // позиционируется в пикселях контейнера (SVG растянут на 100%, поэтому
+  // координата точки пересчитывается из viewBox в реальные px контейнера).
+  function attachChartTooltip(plotEl, chart, unit){
+    const tip = document.createElement('div');
+    tip.className = 'chart-tip';
+    plotEl.appendChild(tip);
+    const svgW = 407, svgH = 200;
 
-  // --- Карточка 6: Сообщество и топы ---
-  const topAnime = dashboardData.topAnime || [];
-  const topXP = dashboardData.topXP || [];
-  const topAnimeRows = topAnime.length
-    ? topAnime.map(a => `<div class="community-item"><span>${a.Label}</span><span>${a.Value}</span></div>`).join('')
-    : `<div class="empty-text">Пока нет данных</div>`;
-  const topXPRows = topXP.length
-    ? topXP.map(u => `<div class="community-item"><span>${u.Label}</span><span>${u.Value}</span></div>`).join('')
-    : `<div class="empty-text">Пока нет данных</div>`;
-  grid.appendChild(makeCard(`
-    <div class="card-title">🏆 Сообщество</div>
-    <div class="sub-text" style="font-size:14px;color:var(--text);">
-      <span class="big-number" style="font-size:32px;">${dashboardData.community.friendships}</span>
-      <span style="color:var(--muted);font-size:13px;"> дружб · ачивок разблокировано: ${dashboardData.community.achievements}</span>
-    </div>
-    <div class="community-top">
-      <div class="community-col">
-        <h4>⭐ ТОП АНИМЕ</h4>
-        ${topAnimeRows}
-      </div>
-      <div class="community-col">
-        <h4>🔥 ТОП ПО XP</h4>
-        ${topXPRows}
-      </div>
-    </div>
-  `));
+    chart.hits.forEach((hit, i) => {
+      hit.addEventListener('mouseenter', () => {
+        const rect = plotEl.getBoundingClientRect();
+        const p = chart.pts[i];
+        const px = p[0] / svgW * rect.width;
+        const py = p[1] / svgH * rect.height;
+        chart.dots[i].setAttribute('opacity', '1');
+        tip.textContent = chart.data[i] + (unit || '');
+        tip.style.left = px + 'px';
+        tip.style.top = py + 'px';
+        tip.style.opacity = '1';
+      });
+      hit.addEventListener('mouseleave', () => {
+        chart.dots[i].setAttribute('opacity', '0');
+        tip.style.opacity = '0';
+      });
+    });
+  }
+
+  function revealChart(cardSelector, chart){
+    ScrollTrigger.create({
+      trigger: cardSelector, start: 'top 85%', once: true,
+      onEnter(){
+        // Один общий прогресс — линия дорисовывается и заливка раскрывается
+        // clip-path'ом синхронно, конец белой линии всегда совпадает с
+        // правым краем залитой области.
+        gsap.fromTo(chart.clipRect, {attr:{width:0}}, {
+          attr:{width: chart.plotW},
+          duration:1.4, ease:'power2.out'
+        });
+      }
+    });
+  }
+
+  const visitsChart = buildLineChart(document.getElementById('visitsChart'), dashboardData.visits14, 'visitsGrad');
+  revealChart('#visitsCard', visitsChart);
+  attachChartTooltip(document.querySelector('#visitsCard .chart-plot'), visitsChart, '');
+
+  const sessionsChart = buildLineChart(document.getElementById('sessionsChart'), dashboardData.sessions14, 'sessionsGrad');
+  revealChart('#sessionsCard', sessionsChart);
+  attachChartTooltip(document.querySelector('#sessionsCard .chart-plot'), sessionsChart, ' мин');
+
+  // ===== Донат "сеансы по устройствам" =====
+  (function initDonut(){
+    // Пока реальных визитов почти нет — 10 тестовых сеансов на мобильной
+    // (+ пропорция на десктоп), чтобы было видно, как донат выглядит с
+    // данными; настоящие цифры автоматически заменят тестовые.
+    let mobile = dashboardData.devices.mobile || 0;
+    let desktop = dashboardData.devices.desktop || 0;
+    if(mobile === 0){ mobile = 10; }
+    const total = mobile + desktop;
+    document.getElementById('deviceMonth').textContent = dashboardData.monthLabel || '';
+    document.getElementById('donutTotal').textContent = 0;
+
+    const r = 88, circumference = 2 * Math.PI * r;
+    const mobileFrac = total ? mobile/total : 0;
+    const desktopFrac = total ? desktop/total : 0;
+    const mobileLen = mobileFrac * circumference;
+    const desktopLen = desktopFrac * circumference;
+
+    const mobileEl = document.getElementById('donutMobile');
+    const desktopEl = document.getElementById('donutDesktop');
+    desktopEl.style.transform = `rotate(${-90 + mobileFrac*360}deg)`;
+    desktopEl.setAttribute('transform-origin', '100 100');
+
+    // Тултип с точным числом сеансов при наведении на сегмент — по образцу
+    // attachChartTooltip у линейных графиков выше.
+    const donutWrap = document.querySelector('#deviceCard .donut-wrap');
+    const donutTip = document.createElement('div');
+    donutTip.className = 'chart-tip';
+    donutWrap.appendChild(donutTip);
+    function showDonutTip(e, label, value){
+      const rect = donutWrap.getBoundingClientRect();
+      donutTip.textContent = `${label}: ${formatThousandsJS(value)}`;
+      donutTip.style.left = (e.clientX - rect.left) + 'px';
+      donutTip.style.top = (e.clientY - rect.top) + 'px';
+      donutTip.style.opacity = '1';
+    }
+    function hideDonutTip(){ donutTip.style.opacity = '0'; }
+    mobileEl.addEventListener('mousemove', e => showDonutTip(e, 'Mobile', mobile));
+    mobileEl.addEventListener('mouseleave', hideDonutTip);
+    desktopEl.addEventListener('mousemove', e => showDonutTip(e, 'Desktop', desktop));
+    desktopEl.addEventListener('mouseleave', hideDonutTip);
+
+    ScrollTrigger.create({
+      trigger: '#deviceCard', start: 'top 85%', once: true,
+      onEnter(){
+        gsap.to(mobileEl, {attr:{'stroke-dasharray': `${mobileLen} ${circumference-mobileLen}`}, duration:1.3, ease:'power2.out'});
+        gsap.to(desktopEl, {attr:{'stroke-dasharray': `${desktopLen} ${circumference-desktopLen}`}, duration:1.3, ease:'power2.out', delay:.15});
+        const proxy = {v:0};
+        gsap.to(proxy, {v: total, duration:1.3, ease:'power2.out', onUpdate(){
+          document.getElementById('donutTotal').textContent = formatThousandsJS(Math.round(proxy.v));
+        }});
+      }
+    });
+  })();
+
+  // ===== Появление карточек =====
+  gsap.utils.toArray('.dash-card').forEach((card, i) => {
+    gsap.to(card, {
+      opacity:1, y:0, duration:.6, delay: i*0.05, ease:'power2.out',
+      scrollTrigger: {trigger: card, start: 'top 90%', once: true}
+    });
+  });
 </script>
 </body>
 </html>

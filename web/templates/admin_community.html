@@ -7,35 +7,22 @@
 <meta name="robots" content="noindex, nofollow">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;700&family=Manrope:wght@400;500;600;800&family=MuseoModerno:wght@400;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/admin.css">
 <style>
   :root{
-    --bg:#000000; --card:#161616; --card2:#1a1a1a; --text:#ffffff; --muted:#8b8b8b;
+    --card:#0f0f0f; --card2:#101010; --text:#ffffff; --muted:#adadad;
     --accent:#d82d7e; --accent-gradient: linear-gradient(135deg, #5E0135, #331C76);
     --green:#3ddc84;
-    --font-display:'MuseoModerno', sans-serif; --font-base:'Jost', sans-serif; --font-secondary:'Manrope', sans-serif;
+    --font-secondary:'Manrope', sans-serif;
   }
   *{box-sizing:border-box;margin:0;padding:0;}
-  body{background:var(--bg);color:var(--text);font-family:var(--font-base);padding:20px;}
 
-  .navbar{display:flex;align-items:center;justify-content:space-between;background:var(--card);border-radius:20px;padding:12px 24px;margin-bottom:20px;flex-wrap:wrap;gap:16px;}
-  .nav-left{display:flex;align-items:center;gap:20px;}
-  .brand{display:flex;align-items:center;gap:10px;text-decoration:none;}
-  .brand img{height:34px;width:auto;display:block;}
-  .brand span{font-family:var(--font-display);font-weight:700;font-size:14px;color:var(--muted);white-space:nowrap;}
-  .pill-group{display:flex;background:var(--card2);border-radius:999px;padding:4px;gap:4px;}
-  .pill{border:none;background:transparent;color:var(--text);padding:8px 16px;border-radius:999px;font-size:13px;font-weight:600;font-family:var(--font-secondary);text-decoration:none;cursor:pointer;transition:background .15s,color .15s,opacity .15s;white-space:nowrap;display:inline-flex;align-items:center;}
-  .pill.active{background:#fff;color:#000;}
-  .pill:not(.active):not(.disabled):hover{background:rgba(255,255,255,.08);}
-  .pill.disabled{opacity:.35;pointer-events:none;}
-  .nav-right{display:flex;align-items:center;gap:14px;}
-  .avatar{width:36px;height:36px;border-radius:10px;background:var(--accent-gradient);display:flex;align-items:center;justify-content:center;font-weight:700;font-family:var(--font-display);cursor:default;text-decoration:none;color:var(--text);}
-
-  h1{font-family:var(--font-display);font-size:22px;font-weight:700;margin-bottom:20px;}
+  h1{font-family:var(--font-secondary);font-size:22px;font-weight:800;margin-bottom:20px;}
 
   .layout{display:grid;grid-template-columns:1fr 1.4fr;gap:20px;align-items:start;}
   .card{background:var(--card);border-radius:20px;padding:22px;}
-  .card h2{font-family:var(--font-display);font-size:16px;margin-bottom:16px;}
+  .card h2{font-family:var(--font-secondary);font-size:16px;font-weight:800;margin-bottom:16px;}
 
   /* ===== Achievements ===== */
   .ach-row{display:flex;align-items:center;gap:12px;margin-bottom:14px;}
@@ -70,14 +57,6 @@
 
   @media (max-width: 1024px){ .layout{grid-template-columns:1fr;} }
   @media (max-width: 640px){
-    body{padding:12px;}
-    .navbar{flex-direction:column;align-items:stretch;padding:12px 14px;border-radius:16px;gap:10px;}
-    .nav-left{flex-direction:column;align-items:stretch;width:100%;min-width:0;gap:10px;}
-    .brand span{display:none;}
-    .nav-right{width:100%;justify-content:space-between;}
-    .pill-group{display:grid;grid-template-columns:repeat(2,1fr);width:100%;min-width:0;background:transparent;padding:0;gap:6px;}
-    .pill{padding:8px 6px;font-size:12px;background:var(--card2);text-align:center;justify-content:center;}
-    .pill.active{background:#fff;}
     .card{padding:16px;}
     .toolbar{flex-direction:column;align-items:stretch;}
     .search-form input{min-width:0;flex:1;}
@@ -85,23 +64,32 @@
   }
 </style>
 </head>
-<body>
+<body class="admin-body">
 
-  <div class="navbar">
-    <div class="nav-left">
-      <a href="/" class="brand">
+  <div class="admin-header">
+    <div class="nav-group-brand">
+      <a href="/" class="admin-brand">
         <img src="/static/img/header/logo_header.png" alt="AniMemory">
-        <span>Admin</span>
+        <span>admin</span>
       </a>
-      <div class="pill-group">
-        <a href="/admin" class="pill">Overview</a>
-        <a href="/admin/users" class="pill">Users</a>
-        <a href="/admin/catalog" class="pill">Catalog</a>
-        <a href="/admin/community" class="pill active">Community</a>
-      </div>
+      <nav class="nav-group">
+        <div class="nav-liquid"></div>
+        <a href="/admin" class="nav-pill" data-pill>Дашборд</a>
+        <span class="nav-pill disabled" title="Скоро">Аналитика</span>
+        <span class="nav-pill disabled" title="Скоро">Настройки</span>
+      </nav>
     </div>
-    <div class="nav-right">
-      <a href="/" class="avatar" title="{{.Username}}">{{.AdminInitial}}</a>
+
+    <nav class="nav-group nav-group-section">
+      <div class="nav-liquid"></div>
+      <a href="/admin/catalog" class="nav-pill" data-pill>Показ</a>
+      <a href="/admin/users" class="nav-pill" data-pill>Пользователи</a>
+      <a href="/admin/community" class="nav-pill active" data-pill>Сообщества</a>
+    </nav>
+
+    <div class="nav-group-status">
+      <div class="status-pill"><span class="status-dot">●</span> <span class="status-label">Online</span></div>
+      <a href="/" class="admin-avatar" title="{{.Username}}">{{.AdminInitial}}</a>
     </div>
   </div>
 
@@ -155,5 +143,6 @@
       {{end}}
     </div>
   </div>
+<script src="/static/js/admin-nav.js"></script>
 </body>
 </html>

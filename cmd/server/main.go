@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -10,6 +11,7 @@ import (
 	"html/template"
 	"io"
 	"log"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"net/smtp"
@@ -198,7 +200,7 @@ func securityHeaders(next http.HandlerFunc) http.HandlerFunc {
 		}
 		csp := strings.Join([]string{
 			"default-src 'self'",
-			"script-src 'self' 'unsafe-inline' https://vjs.zencdn.net",
+			"script-src 'self' 'unsafe-inline' https://vjs.zencdn.net https://cdnjs.cloudflare.com",
 			"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://vjs.zencdn.net",
 			"font-src 'self' https://fonts.gstatic.com data:",
 			"img-src 'self' data: https:",
@@ -243,7 +245,65 @@ func csrfProtect(next http.HandlerFunc) http.HandlerFunc {
 // secureHandle регистрирует хендлер с обеими мидлварами безопасности — все
 // маршруты в main() должны идти через неё вместо голого http.HandleFunc.
 func secureHandle(pattern string, h http.HandlerFunc) {
-	http.HandleFunc(pattern, securityHeaders(csrfProtect(h)))
+	handler := securityHeaders(csrfProtect(h))
+	if shouldTrackVisit(pattern) {
+		handler = trackVisit(handler)
+	}
+	http.HandleFunc(pattern, handler)
+}
+
+// shouldTrackVisit исключает API/WS/служебные маршруты из лога визитов
+// (admin_visits) — там считаем только реальные переходы по страницам.
+func shouldTrackVisit(pattern string) bool {
+	switch pattern {
+	case "/ws", "/robots.txt", "/sitemap.xml":
+		return false
+	}
+	return !strings.HasPrefix(pattern, "/api/")
+}
+
+// trackVisit пишет строку в admin_visits для графиков /admin (визиты,
+// сессии, устройства). Запись — в фоне, не блокирует ответ.
+func trackVisit(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			// getUserIDFromSession трогает gorilla/sessions, которое хранит
+			// служебные данные по ключу *http.Request — читать это из отдельной
+			// горутины, пока тот же r обрабатывается хендлером next(), приводило
+			// к concurrent map writes и падению сервера. Читаем синхронно здесь,
+			// в горутину уходят только простые значения.
+			var userID interface{}
+			if uid, err := getUserIDFromSession(r); err == nil && uid != 0 {
+				userID = uid
+			}
+			cookie, cookieErr := r.Cookie("ancen-session")
+			path, ua := r.URL.Path, r.UserAgent()
+			if cookieErr == nil && cookie.Value != "" {
+				go logVisit(userID, cookie.Value, path, ua)
+			}
+		}
+		next(w, r)
+	}
+}
+
+// logVisit требует cookie сессии — гость без ранее выданной cookie (первый
+// запрос до session.Save()) в текущей итерации не логируется.
+// ponytail: не 100% охват гостевого трафика, добавить принудительный
+// session.Save() на первом запросе, если это станет важно.
+func logVisit(userID interface{}, cookieValue, path, userAgent string) {
+	if db == nil {
+		return
+	}
+	sum := sha256.Sum256([]byte(cookieValue))
+	sessionID := hex.EncodeToString(sum[:])
+
+	device := "desktop"
+	if strings.Contains(userAgent, "Mobi") {
+		device = "mobile"
+	}
+
+	db.Exec("INSERT INTO admin_visits (user_id, session_id, path, device) VALUES (?,?,?,?)",
+		userID, sessionID, path, device)
 }
 
 // PageData используется для передачи данных в шаблоны
@@ -1007,6 +1067,19 @@ func createTables() {
 			PRIMARY KEY (user_id, episode_id),
 			FOREIGN KEY (user_id) REFERENCES users(id),
 			FOREIGN KEY (episode_id) REFERENCES episodes(id)
+		)`,
+		// Лог визитов страниц — источник для графиков /admin (посещения,
+		// длительность сессии, устройства). Пишется middleware'ом logVisit
+		// в main(). session_id — sha256 от cookie сессии, не сырое значение.
+		`CREATE TABLE IF NOT EXISTS admin_visits (
+			id BIGINT AUTO_INCREMENT PRIMARY KEY,
+			user_id INT DEFAULT NULL,
+			session_id CHAR(64) NOT NULL,
+			path VARCHAR(255) NOT NULL,
+			device VARCHAR(16) NOT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			INDEX idx_created_at (created_at),
+			INDEX idx_session (session_id, created_at)
 		)`,
 	}
 	for _, q := range tables {
@@ -2860,8 +2933,60 @@ func buildBarItems(labels []string, values []int) []adminBarItem {
 	return items
 }
 
+// adminStatRow — одна строка таблицы "статистика пользователей" на /admin
+// (цель / результат / % выполнения).
+type adminStatRow struct {
+	Label   string
+	Goal    string
+	Result  string
+	Percent int
+}
+
+// formatThousands форматирует число с пробелом-разделителем разрядов
+// ("25467" → "25 467"), как в дизайне Figma.
+func formatThousands(n int) string {
+	s := strconv.Itoa(n)
+	neg := strings.HasPrefix(s, "-")
+	if neg {
+		s = s[1:]
+	}
+	var out []byte
+	for i, c := range []byte(s) {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			out = append(out, ' ')
+		}
+		out = append(out, c)
+	}
+	if neg {
+		return "-" + string(out)
+	}
+	return string(out)
+}
+
+// goalPercent — % выполнения результата от цели, ограниченный [0,100].
+func goalPercent(result, goal float64) int {
+	if goal <= 0 {
+		return 0
+	}
+	p := int(result / goal * 100)
+	if p > 100 {
+		p = 100
+	}
+	if p < 0 {
+		p = 0
+	}
+	return p
+}
+
+// countSince — COUNT(*) из table.column за последние since (INTERVAL в SQL
+// собирается через плейсхолдер нельзя, поэтому since передаётся строкой дней).
+func countSince(query string, args ...interface{}) int {
+	var c int
+	db.QueryRow(query, args...).Scan(&c)
+	return c
+}
+
 // adminDashboardHandler — GET /admin. Требует is_admin=1 (см. adminUploadVideoHandler).
-// Первая итерация Stage 3: только страница метрик, без управления пользователями/аниме.
 func adminDashboardHandler(w http.ResponseWriter, r *http.Request) {
 	userID, err := getUserIDFromSession(r)
 	if err != nil {
@@ -2873,145 +2998,112 @@ func adminDashboardHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var totalUsers, premiumUsers, newUsers7d int
-	db.QueryRow("SELECT COUNT(*) FROM users").Scan(&totalUsers)
-	db.QueryRow("SELECT COUNT(*) FROM users WHERE is_premium = 1").Scan(&premiumUsers)
-	db.QueryRow("SELECT COUNT(*) FROM users WHERE created_at >= NOW() - INTERVAL 7 DAY").Scan(&newUsers7d)
+	totalUsers := countSince("SELECT COUNT(*) FROM users")
 
-	var totalAnime, totalEpisodes int
-	db.QueryRow("SELECT COUNT(*) FROM anime").Scan(&totalAnime)
-	db.QueryRow("SELECT COUNT(*) FROM episodes").Scan(&totalEpisodes)
-
-	var totalReactions, totalComments, totalAchievements, totalFriendships int
-	db.QueryRow("SELECT COUNT(*) FROM emotions").Scan(&totalReactions)
-	db.QueryRow("SELECT COUNT(*) FROM comments").Scan(&totalComments)
-	db.QueryRow("SELECT COUNT(*) FROM user_achievements").Scan(&totalAchievements)
-	db.QueryRow("SELECT COUNT(*) FROM friendships WHERE status = 'accepted'").Scan(&totalFriendships)
-
-	// Реакции по типам — полоса-метрика
-	var reactionLabels []string
-	var reactionValues []int
-	if rows, err := db.Query("SELECT emotion_type, COUNT(*) c FROM emotions GROUP BY emotion_type ORDER BY c DESC"); err == nil {
-		for rows.Next() {
-			var t string
-			var c int
-			if rows.Scan(&t, &c) == nil {
-				reactionLabels = append(reactionLabels, t)
-				reactionValues = append(reactionValues, c)
-			}
-		}
-		rows.Close()
+	// MAU — доля пользователей с визитом за последние 30 дней от общего числа.
+	activeUsers30d := countSince(`SELECT COUNT(DISTINCT user_id) FROM admin_visits
+		WHERE user_id IS NOT NULL AND created_at >= NOW() - INTERVAL 30 DAY`)
+	mauPercent := 0.0
+	if totalUsers > 0 {
+		mauPercent = float64(activeUsers30d) / float64(totalUsers) * 100
 	}
 
-	// Топ-5 аниме по избранному
-	var topAnimeLabels []string
-	var topAnimeValues []int
-	if rows, err := db.Query(`
-		SELECT a.title, COUNT(*) c FROM favorites f
-		JOIN anime a ON a.id = f.anime_id
-		GROUP BY a.id ORDER BY c DESC LIMIT 5
-	`); err == nil {
-		for rows.Next() {
-			var title string
-			var c int
-			if rows.Scan(&title, &c) == nil {
-				topAnimeLabels = append(topAnimeLabels, title)
-				topAnimeValues = append(topAnimeValues, c)
-			}
-		}
-		rows.Close()
+	// Средняя длительность сессии (мин) — по группам (session_id, день) с
+	// более чем одним визитом за последние 30 дней.
+	var avgSessionSec sql.NullFloat64
+	db.QueryRow(`SELECT AVG(dur) FROM (
+		SELECT TIMESTAMPDIFF(SECOND, MIN(created_at), MAX(created_at)) dur
+		FROM admin_visits WHERE created_at >= NOW() - INTERVAL 30 DAY
+		GROUP BY session_id, DATE(created_at) HAVING COUNT(*) > 1
+	) t`).Scan(&avgSessionSec)
+	avgSessionMin := avgSessionSec.Float64 / 60
+
+	// Средние посещения в неделю на пользователя — за последние 28 дней (4 недели).
+	visits28d := countSince(`SELECT COUNT(*) FROM admin_visits
+		WHERE user_id IS NOT NULL AND created_at >= NOW() - INTERVAL 28 DAY`)
+	users28d := countSince(`SELECT COUNT(DISTINCT user_id) FROM admin_visits
+		WHERE user_id IS NOT NULL AND created_at >= NOW() - INTERVAL 28 DAY`)
+	avgVisitsPerWeek := 0.0
+	if users28d > 0 {
+		avgVisitsPerWeek = float64(visits28d) / float64(users28d) / 4
 	}
 
-	// Топ-5 пользователей по XP
-	var topXPLabels []string
-	var topXPValues []int
-	if rows, err := db.Query(`
-		SELECT u.username, x.xp FROM user_xp x
-		JOIN users u ON u.id = x.user_id
-		ORDER BY x.xp DESC LIMIT 5
-	`); err == nil {
-		for rows.Next() {
-			var username string
-			var xp int
-			if rows.Scan(&username, &xp) == nil {
-				topXPLabels = append(topXPLabels, username)
-				topXPValues = append(topXPValues, xp)
-			}
-		}
-		rows.Close()
-	}
+	reactionsPerDay := countSince("SELECT COUNT(*) FROM emotions WHERE created_at >= NOW() - INTERVAL 1 DAY")
+	commentsPerDay := countSince("SELECT COUNT(*) FROM comments WHERE created_at >= NOW() - INTERVAL 1 DAY")
+	friendReqPerWeek := countSince("SELECT COUNT(*) FROM friendships WHERE created_at >= NOW() - INTERVAL 7 DAY")
 
-	// Комментарии по дням за последние 14 дней — точки для SVG-графика
-	dayCounts := make(map[string]int)
-	if rows, err := db.Query(`
-		SELECT DATE(created_at) d, COUNT(*) c FROM comments
-		WHERE created_at >= NOW() - INTERVAL 14 DAY
-		GROUP BY d
-	`); err == nil {
+	stats := []adminStatRow{
+		{"кол-во авторизаций", "2 000", formatThousands(totalUsers), goalPercent(float64(totalUsers), 2000)},
+		{"MAU", "60–70%", fmt.Sprintf("%.0f%%", mauPercent), goalPercent(mauPercent, 65)},
+		{"средняя сессия", "15 мин", fmt.Sprintf("%.0f мин", avgSessionMin), goalPercent(avgSessionMin, 15)},
+		{"Ср. посещений в неделю", "2-3", fmt.Sprintf("%.1f", avgVisitsPerWeek), goalPercent(avgVisitsPerWeek, 2.5)},
+		{"Реакций/день", "1 500", formatThousands(reactionsPerDay), goalPercent(float64(reactionsPerDay), 1500)},
+		{"Комментариев/день", "150", strconv.Itoa(commentsPerDay), goalPercent(float64(commentsPerDay), 150)},
+		{"Заявок в друзья/неделю", "200", strconv.Itoa(friendReqPerWeek), goalPercent(float64(friendReqPerWeek), 200)},
+	}
+	overallPercent := 0
+	for _, s := range stats {
+		overallPercent += s.Percent
+	}
+	overallPercent /= len(stats)
+
+	// Визиты и средняя сессия по дням за последние 14 дней — для линейных графиков.
+	visitsByDay := make(map[string]int)
+	if rows, err := db.Query(`SELECT DATE(created_at) d, COUNT(*) c FROM admin_visits
+		WHERE created_at >= NOW() - INTERVAL 14 DAY GROUP BY d`); err == nil {
 		for rows.Next() {
 			var d string
 			var c int
 			if rows.Scan(&d, &c) == nil {
-				dayCounts[d] = c
+				visitsByDay[d] = c
 			}
 		}
 		rows.Close()
 	}
-	maxDayCount := 1
-	dayValues := make([]int, 14)
+	sessionByDay := make(map[string]float64)
+	if rows, err := db.Query(`SELECT d, AVG(dur)/60 FROM (
+		SELECT session_id, DATE(created_at) d, TIMESTAMPDIFF(SECOND, MIN(created_at), MAX(created_at)) dur
+		FROM admin_visits WHERE created_at >= NOW() - INTERVAL 14 DAY
+		GROUP BY session_id, d HAVING COUNT(*) > 1
+	) t GROUP BY d`); err == nil {
+		for rows.Next() {
+			var d string
+			var m float64
+			if rows.Scan(&d, &m) == nil {
+				sessionByDay[d] = m
+			}
+		}
+		rows.Close()
+	}
+	visits14 := make([]int, 14)
+	sessions14 := make([]float64, 14)
 	for i := 0; i < 14; i++ {
 		day := time.Now().AddDate(0, 0, -13+i).Format("2006-01-02")
-		dayValues[i] = dayCounts[day]
-		if dayValues[i] > maxDayCount {
-			maxDayCount = dayValues[i]
-		}
-	}
-	points := ""
-	for i, v := range dayValues {
-		x := i * 100 / 13
-		y := 100 - v*100/maxDayCount
-		if i > 0 {
-			points += " "
-		}
-		points += fmt.Sprintf("%d,%d", x, y)
+		visits14[i] = visitsByDay[day]
+		sessions14[i] = math.Round(sessionByDay[day]*10) / 10
 	}
 
-	// Спарклайн новых пользователей за 7 дней — для карточки "Пользователи"
-	newUsersDaily := make([]int, 7)
-	if rows, err := db.Query(`
-		SELECT DATE(created_at) d, COUNT(*) c FROM users
-		WHERE created_at >= NOW() - INTERVAL 7 DAY
-		GROUP BY d
-	`); err == nil {
-		byDay := make(map[string]int)
-		for rows.Next() {
-			var d string
-			var c int
-			if rows.Scan(&d, &c) == nil {
-				byDay[d] = c
-			}
-		}
-		rows.Close()
-		for i := 0; i < 7; i++ {
-			day := time.Now().AddDate(0, 0, -6+i).Format("2006-01-02")
-			newUsersDaily[i] = byDay[day]
-		}
-	}
+	// Разбивка визитов по устройствам за текущий месяц — для доната.
+	var mobileCount, desktopCount int
+	db.QueryRow(`SELECT COUNT(*) FROM admin_visits WHERE device = 'mobile'
+		AND created_at >= DATE_FORMAT(NOW(), '%Y-%m-01')`).Scan(&mobileCount)
+	db.QueryRow(`SELECT COUNT(*) FROM admin_visits WHERE device = 'desktop'
+		AND created_at >= DATE_FORMAT(NOW(), '%Y-%m-01')`).Scan(&desktopCount)
 
-	// JSON-снимок для JS-рендера карточек (dashboard.js) — единая точка,
-	// куда в будущем добавляются новые метрики без правки шаблона.
+	monthNames := []string{"", "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+		"Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"}
+	now := time.Now()
+	monthLabel := fmt.Sprintf("%s %d", monthNames[now.Month()], now.Year())
+
+	// JSON-снимок для JS-рендера карточек (admin_dashboard.html) — единая
+	// точка, куда в будущем добавляются новые метрики без правки шаблона.
 	dashboardJSON, err := json.Marshal(map[string]interface{}{
-		"users": map[string]interface{}{
-			"total": totalUsers, "premium": premiumUsers, "newLast7Days": newUsers7d,
-			"sparkline": newUsersDaily,
-		},
-		"catalog":            map[string]int{"animeCount": totalAnime, "episodes": totalEpisodes},
-		"activity":           map[string]int{"reactions": totalReactions, "comments": totalComments},
-		"reactionsByType":    buildBarItems(reactionLabels, reactionValues),
-		"commentsLast14Days": dayValues,
-		"community":          map[string]int{"friendships": totalFriendships, "achievements": totalAchievements},
-		"topAnime":           buildBarItems(topAnimeLabels, topAnimeValues),
-		"topXP":              buildBarItems(topXPLabels, topXPValues),
+		"stats":          stats,
+		"overallPercent": overallPercent,
+		"visits14":       visits14,
+		"sessions14":     sessions14,
+		"devices":        map[string]int{"mobile": mobileCount, "desktop": desktopCount},
+		"monthLabel":     monthLabel,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -3027,10 +3119,14 @@ func adminDashboardHandler(w http.ResponseWriter, r *http.Request) {
 	data := struct {
 		Username          string
 		AdminInitial      string
+		Stats             []adminStatRow
+		OverallPercent    int
 		DashboardDataJSON template.JS
 	}{
 		Username:          username,
 		AdminInitial:      initial,
+		Stats:             stats,
+		OverallPercent:    overallPercent,
 		DashboardDataJSON: template.JS(dashboardJSON),
 	}
 
