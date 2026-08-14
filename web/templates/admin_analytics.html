@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Аналитика — AniMemory Admin</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/admin.css">
+<style>
+  :root{
+    --card:#0f0f0f;
+    --card2:#101010;
+    --text:#ffffff;
+    --muted:#adadad;
+    --accent:#d82d7e;
+    --font-secondary:'Manrope', sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+
+  .toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:20px;flex-wrap:wrap;}
+  .toolbar h1{font-family:var(--font-secondary);font-size:22px;font-weight:800;}
+
+  .section-title{font-family:var(--font-secondary);font-size:14px;font-weight:700;color:var(--muted);text-transform:uppercase;margin:0 0 10px;}
+
+  .table-card{background:var(--card);border-radius:20px;padding:8px;overflow-x:auto;margin-bottom:24px;}
+  table{width:100%;border-collapse:collapse;min-width:600px;}
+  th{text-align:left;font-family:var(--font-secondary);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700;padding:14px 16px;}
+  th.num,td.num{text-align:right;}
+  td{padding:14px 16px;font-family:var(--font-secondary);font-size:14px;border-top:1px solid rgba(255,255,255,.06);color:var(--text);}
+  tr:hover td{background:rgba(255,255,255,.02);}
+  .t-name{font-weight:600;}
+  .t-sub{color:var(--muted);font-size:12px;}
+  .t-total{color:var(--accent);font-weight:700;}
+  .empty-row td{text-align:center;color:var(--muted);padding:40px;}
+
+  @media (max-width: 640px){
+    body.admin-body{padding:12px;}
+    .table-card{padding:6px;border-radius:14px;}
+  }
+</style>
+</head>
+<body class="admin-body">
+
+  <div class="admin-header">
+    <div class="nav-group-brand">
+      <a href="/" class="admin-brand">
+        <img src="/static/img/header/logo_header.png" alt="AniMemory">
+        <span>admin</span>
+      </a>
+      <nav class="nav-group">
+        <div class="nav-liquid"></div>
+        <a href="/admin" class="nav-pill" data-pill>Дашборд</a>
+        <a href="/admin/analytics" class="nav-pill active" data-pill>Аналитика</a>
+        <a href="/admin/settings" class="nav-pill" data-pill>Настройки</a>
+      </nav>
+    </div>
+
+    <nav class="nav-group nav-group-section">
+      <div class="nav-liquid"></div>
+      <a href="/admin/catalog" class="nav-pill" data-pill>Показ</a>
+      <a href="/admin/users" class="nav-pill" data-pill>Пользователи</a>
+      <a href="/admin/community" class="nav-pill" data-pill>Сообщества</a>
+    </nav>
+
+    <div class="nav-group-status">
+      <div class="status-pill"><span class="status-dot">●</span> <span class="status-label">Online</span></div>
+      <a href="/" class="admin-avatar" title="{{.Username}}">{{.AdminInitial}}</a>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <h1>Аналитика</h1>
+  </div>
+
+  <h2 class="section-title">Топ аниме по вовлечённости</h2>
+  <div class="table-card">
+    <table>
+      <thead>
+        <tr>
+          <th>Аниме</th>
+          <th class="num">Просмотры</th>
+          <th class="num">Реакции</th>
+          <th class="num">Комментарии</th>
+          <th class="num">Всего</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{if .Anime}}
+          {{range .Anime}}
+          <tr>
+            <td class="t-name">{{.Title}}</td>
+            <td class="num">{{.Views}}</td>
+            <td class="num">{{.Reactions}}</td>
+            <td class="num">{{.Comments}}</td>
+            <td class="num t-total">{{add (add .Views .Reactions) .Comments}}</td>
+          </tr>
+          {{end}}
+        {{else}}
+          <tr class="empty-row"><td colspan="5">Пока нет данных</td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+
+  <h2 class="section-title">Топ эпизодов по вовлечённости</h2>
+  <div class="table-card">
+    <table>
+      <thead>
+        <tr>
+          <th>Эпизод</th>
+          <th class="num">Просмотры</th>
+          <th class="num">Реакции</th>
+          <th class="num">Комментарии</th>
+          <th class="num">Всего</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{if .Episodes}}
+          {{range .Episodes}}
+          <tr>
+            <td><div class="t-name">{{.Title}}</div><div class="t-sub">{{.Sub}}</div></td>
+            <td class="num">{{.Views}}</td>
+            <td class="num">{{.Reactions}}</td>
+            <td class="num">{{.Comments}}</td>
+            <td class="num t-total">{{add (add .Views .Reactions) .Comments}}</td>
+          </tr>
+          {{end}}
+        {{else}}
+          <tr class="empty-row"><td colspan="5">Пока нет данных</td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+
+<script src="/static/js/admin-nav.js"></script>
+</body>
+</html>

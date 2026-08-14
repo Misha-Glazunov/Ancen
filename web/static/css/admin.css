@@ -32,7 +32,9 @@ body.admin-body{
 .nav-group-brand{
   display:flex;align-items:center;gap:19px;
   background:var(--a-card2);border-radius:20px;
-  padding:0 18px 0 20px;height:40px;
+  /* Отступ справа от последней пилюли = вертикальному ((40-32)/2=4px) — раньше
+     было 18px, из-за чего плашка выглядела перекошенной вправо. */
+  padding:0 4px 0 20px;height:40px;
   flex-wrap:wrap;
 }
 .admin-brand{display:flex;align-items:center;gap:10px;text-decoration:none;flex-shrink:0;}
@@ -84,7 +86,7 @@ body.admin-body{
 .status-dot{color:var(--a-green);text-shadow:0 0 4px var(--a-green);font-size:14px;}
 .admin-avatar{
   width:32px;height:32px;border-radius:50%;
-  background:linear-gradient(135deg,#5E0135,#331C76);
+  background:#d82d7e;
   display:flex;align-items:center;justify-content:center;
   font-weight:800;font-size:13px;color:#fff;text-decoration:none;flex-shrink:0;
 }

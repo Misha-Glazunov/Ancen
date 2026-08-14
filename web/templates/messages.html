@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Сообщения | AniMemory</title>
+    <meta name="robots" content="noindex, nofollow">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;700&family=Manrope:wght@400;500;600&family=MuseoModerno:wght@400;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/tokens.css?v=2">
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; background: var(--color-bg); color: var(--color-text); font-family: var(--font-base); }
+        .messages-layout {
+            max-width: 1100px;
+            margin: 30px auto;
+            padding: 0 20px;
+            display: flex;
+            gap: 20px;
+            height: calc(100vh - 200px);
+            min-height: 500px;
+        }
+        .conv-list {
+            width: 300px;
+            flex-shrink: 0;
+            background: rgba(15, 15, 15, 0.6);
+            border-radius: var(--radius-lg);
+            overflow-y: auto;
+            padding: 10px;
+        }
+        .conv-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px;
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            text-decoration: none;
+            color: inherit;
+        }
+        .conv-item:hover, .conv-item.active { background: rgba(255,255,255,0.06); }
+        .conv-item img, .conv-item .initial {
+            width: 40px; height: 40px; border-radius: 50%; object-fit: cover; flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center;
+            background: var(--color-accent-gradient); font-family: var(--font-display); text-transform: uppercase;
+        }
+        .conv-item .meta { min-width: 0; flex: 1; }
+        .conv-item .name { font-weight: 500; display: flex; justify-content: space-between; gap: 8px; }
+        .conv-item .last { font-size: var(--fs-small); color: var(--color-gray-500); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .conv-item .unread-badge {
+            background: var(--color-accent); color: #fff; border-radius: 999px;
+            font-size: 11px; min-width: 18px; height: 18px; display: inline-flex;
+            align-items: center; justify-content: center; padding: 0 5px; flex-shrink: 0;
+        }
+        .empty-hint { color: var(--color-gray-500); padding: 20px; text-align: center; }
+
+        .thread-panel { flex: 1; display: flex; flex-direction: column; background: rgba(15,15,15,0.6); border-radius: var(--radius-lg); overflow: hidden; }
+        .thread-header { padding: 16px 20px; border-bottom: 1px solid var(--color-gray-800); font-weight: 700; }
+        .thread-messages { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; }
+        .msg-row { max-width: 70%; padding: 8px 14px; border-radius: var(--radius-lg); background: rgba(255,255,255,0.06); }
+        .msg-row.mine { align-self: flex-end; background: var(--color-accent); }
+        .msg-row .time { display: block; font-size: 11px; color: var(--color-gray-500); margin-top: 4px; }
+        .thread-compose { display: flex; gap: 10px; padding: 16px 20px; border-top: 1px solid var(--color-gray-800); }
+        .thread-compose input { flex: 1; background: var(--color-gray-950); border: 1px solid var(--color-gray-800); border-radius: var(--radius-lg); padding: 10px 14px; color: inherit; font-family: inherit; }
+        .no-thread { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--color-gray-500); }
+
+        @media (max-width: 800px) {
+            .messages-layout { flex-direction: column; height: auto; }
+            .conv-list { width: 100%; max-height: 240px; }
+            .thread-panel { min-height: 400px; }
+        }
+    </style>
+</head>
+<body>
+{{template "header" .}}
+<div class="messages-layout">
+    <div class="conv-list" id="convList">
+        <div class="empty-hint">Загрузка...</div>
+    </div>
+    <div class="thread-panel" id="threadPanel">
+        <div class="no-thread">Выберите диалог слева</div>
+    </div>
+</div>
+
+<script>
+    const currentWithID = {{.WithUserID}};
+    const currentWithUsername = {{.WithUsername}};
+    let activeWithID = currentWithID || null;
+
+    function escapeHtml(text) {
+        return String(text).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]);
+    }
+
+    function formatTime(dateStr) {
+        if (!dateStr) return '';
+        const d = new Date(dateStr.replace(' ', 'T'));
+        return d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    }
+
+    async function loadConversations() {
+        const list = document.getElementById('convList');
+        try {
+            const res = await fetch('/api/conversations');
+            const conversations = await res.json();
+            if (!conversations || conversations.length === 0) {
+                if (!activeWithID) {
+                    list.innerHTML = '<div class="empty-hint">Пока нет диалогов</div>';
+                    return;
+                }
+            }
+            let html = (conversations || []).map(c => `
+                <div class="conv-item${c.user_id === activeWithID ? ' active' : ''}" data-user-id="${c.user_id}" data-username="${escapeHtml(c.username)}">
+                    ${c.avatar_url ? `<img src="${c.avatar_url}" alt="">` : `<span class="initial">${escapeHtml((c.username||'?')[0])}</span>`}
+                    <div class="meta">
+                        <div class="name"><span>${escapeHtml(c.username)}</span>${c.unread_count ? `<span class="unread-badge">${c.unread_count > 9 ? '9+' : c.unread_count}</span>` : ''}</div>
+                        <div class="last">${escapeHtml(c.last_text || '')}</div>
+                    </div>
+                </div>
+            `).join('');
+            // Если открыли диалог по ссылке (?with=), а его ещё нет в списке (первое сообщение не отправлено) — добавим вручную
+            if (activeWithID && !(conversations || []).some(c => c.user_id === activeWithID)) {
+                html = `<div class="conv-item active" data-user-id="${activeWithID}" data-username="${escapeHtml(currentWithUsername)}">
+                    <span class="initial">${escapeHtml((currentWithUsername||'?')[0])}</span>
+                    <div class="meta"><div class="name"><span>${escapeHtml(currentWithUsername)}</span></div><div class="last">Новый диалог</div></div>
+                </div>` + html;
+            }
+            list.innerHTML = html || '<div class="empty-hint">Пока нет диалогов</div>';
+            list.querySelectorAll('.conv-item').forEach(el => {
+                el.addEventListener('click', () => openThread(parseInt(el.dataset.userId, 10), el.dataset.username));
+            });
+        } catch (err) {
+            list.innerHTML = '<div class="empty-hint">Ошибка загрузки</div>';
+        }
+    }
+
+    async function openThread(withID, withUsername) {
+        activeWithID = withID;
+        history.replaceState(null, '', `/messages?with=${withID}`);
+        document.querySelectorAll('.conv-item').forEach(el => el.classList.toggle('active', parseInt(el.dataset.userId, 10) === withID));
+
+        const panel = document.getElementById('threadPanel');
+        panel.innerHTML = `
+            <div class="thread-header">${escapeHtml(withUsername)}</div>
+            <div class="thread-messages" id="threadMessages"><div class="empty-hint">Загрузка...</div></div>
+            <div class="thread-compose">
+                <input type="text" id="composeInput" placeholder="Написать сообщение..." maxlength="1000">
+                <button type="button" class="btn btn-sm" id="composeSendBtn">Отправить</button>
+            </div>
+        `;
+
+        try {
+            const res = await fetch(`/api/messages?with=${withID}&pageSize=50`);
+            const messages = await res.json();
+            renderMessages(messages.slice().reverse());
+            fetch('/api/messages/read', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({with: withID}) })
+                .then(loadConversations);
+        } catch (err) {
+            document.getElementById('threadMessages').innerHTML = '<div class="empty-hint">Ошибка загрузки</div>';
+        }
+
+        const input = document.getElementById('composeInput');
+        const sendBtn = document.getElementById('composeSendBtn');
+        async function send() {
+            const text = input.value.trim();
+            if (!text) return;
+            sendBtn.disabled = true;
+            try {
+                const res = await fetch('/api/messages/send', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({recipient_id: withID, text: text})
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    appendMessage(data);
+                    input.value = '';
+                    loadConversations();
+                } else if (typeof showToast === 'function') {
+                    showToast({ icon: '⚠️', title: 'Ошибка', body: data.error || '' });
+                }
+            } catch (err) {
+                if (typeof showToast === 'function') showToast({ icon: '⚠️', title: 'Ошибка сети', body: '' });
+            } finally {
+                sendBtn.disabled = false;
+            }
+        }
+        sendBtn.addEventListener('click', send);
+        input.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+    }
+
+    function renderMessages(messages) {
+        const box = document.getElementById('threadMessages');
+        if (!box) return;
+        if (messages.length === 0) {
+            box.innerHTML = '<div class="empty-hint">Пока нет сообщений — напишите первым</div>';
+            return;
+        }
+        box.innerHTML = messages.map(m => `
+            <div class="msg-row${m.sender_id === activeWithID ? '' : ' mine'}">
+                ${escapeHtml(m.text)}
+                <span class="time">${formatTime(m.created_at)}</span>
+            </div>
+        `).join('');
+        box.scrollTop = box.scrollHeight;
+    }
+
+    function appendMessage(m) {
+        const box = document.getElementById('threadMessages');
+        if (!box) return;
+        if (box.querySelector('.empty-hint')) box.innerHTML = '';
+        box.insertAdjacentHTML('beforeend', `
+            <div class="msg-row${m.sender_id === activeWithID ? '' : ' mine'}">
+                ${escapeHtml(m.text)}
+                <span class="time">${formatTime(m.created_at)}</span>
+            </div>
+        `);
+        box.scrollTop = box.scrollHeight;
+    }
+
+    // --- Живые сообщения через отдельный WS-хаб по user_id (не по эпизоду) ---
+    function connectDM() {
+        const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const ws = new WebSocket(`${proto}//${window.location.host}/ws/dm`);
+        ws.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                if (data.type === 'dm') {
+                    const m = data.message;
+                    if (activeWithID && m.sender_id === activeWithID) {
+                        appendMessage(m);
+                        fetch('/api/messages/read', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({with: activeWithID}) });
+                    }
+                    loadConversations();
+                }
+            } catch (e) {}
+        };
+        ws.onclose = () => setTimeout(connectDM, 3000);
+    }
+
+    loadConversations().then(() => {
+        if (activeWithID) openThread(activeWithID, currentWithUsername);
+    });
+    connectDM();
+</script>
+<script src="/static/js/toast.js"></script>
+{{template "footer" .}}
+</body>
+</html>

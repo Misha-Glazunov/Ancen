@@ -36,6 +36,24 @@
         return { frag: frag, slots: slots };
     }
 
+    // Как buildLetters, но всё слово — один slot: уезжает вверх целиком,
+    // а не по буквам (для header, где нужна более сдержанная анимация).
+    function buildWord(text) {
+        var frag = document.createDocumentFragment();
+        var slot = document.createElement('span');
+        slot.className = 'letter-slot letter-slot-word';
+        var primary = document.createElement('span');
+        primary.className = 'letter letter-primary';
+        primary.textContent = text;
+        var secondary = document.createElement('span');
+        secondary.className = 'letter letter-secondary';
+        secondary.textContent = text;
+        slot.appendChild(primary);
+        slot.appendChild(secondary);
+        frag.appendChild(slot);
+        return { frag: frag, slots: [slot] };
+    }
+
     function initLetterSwap(el) {
         if (el.dataset.letterSwapInit) return;
         var text = el.textContent.trim();
@@ -44,7 +62,7 @@
         el.textContent = '';
         var wrap = document.createElement('span');
         wrap.className = 'letter-swap';
-        var built = buildLetters(text);
+        var built = el.hasAttribute('data-swap-word') ? buildWord(text) : buildLetters(text);
         wrap.appendChild(built.frag);
         el.appendChild(wrap);
 
@@ -52,7 +70,13 @@
 
         function play(toActive) {
             shuffle(slots).forEach(function (slot, i) {
-                slot.style.transitionDelay = i * STAGGER_MS + 'ms';
+                var delay = i * STAGGER_MS + 'ms';
+                // transition-delay не наследуется — ставим на сами буквы
+                // (у slot анимируемых свойств нет), иначе все буквы слова
+                // переключаются разом, без раскадровки по буквам.
+                slot.querySelectorAll('.letter').forEach(function (letter) {
+                    letter.style.transitionDelay = delay;
+                });
                 slot.classList.toggle('is-active', toActive);
             });
         }

@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Настройки — AniMemory Admin</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/admin.css">
+<style>
+  :root{
+    --card:#0f0f0f;
+    --text:#ffffff;
+    --muted:#adadad;
+    --accent:#d82d7e;
+    --red:#ff4d4d;
+    --font-secondary:'Manrope', sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+
+  .toolbar{margin-bottom:20px;}
+  .toolbar h1{font-family:var(--font-secondary);font-size:22px;font-weight:800;}
+
+  .panel{
+    background:var(--card);border-radius:20px;padding:25px;max-width:520px;
+    display:flex;flex-direction:column;gap:16px;
+  }
+  .panel-row{display:flex;align-items:center;justify-content:space-between;gap:20px;}
+  .panel-row h2{font-family:var(--font-secondary);font-size:15px;font-weight:700;color:#fff;}
+  .panel-row p{font-family:var(--font-secondary);font-size:13px;color:var(--muted);margin-top:4px;}
+
+  .switch{position:relative;width:46px;height:26px;flex:none;}
+  .switch input{opacity:0;width:0;height:0;}
+  .switch-track{
+    position:absolute;inset:0;background:#2a2a2a;border-radius:999px;cursor:pointer;transition:background .15s;
+  }
+  .switch-track::before{
+    content:"";position:absolute;width:20px;height:20px;left:3px;top:3px;background:#fff;border-radius:50%;transition:transform .15s;
+  }
+  .switch input:checked + .switch-track{background:var(--red);}
+  .switch input:checked + .switch-track::before{transform:translateX(20px);}
+
+  .status-note{font-family:var(--font-secondary);font-size:12px;color:var(--muted);}
+  .status-note.active{color:var(--red);}
+
+  @media (max-width: 640px){
+    body.admin-body{padding:12px;}
+    .panel{padding:18px;max-width:none;}
+  }
+</style>
+</head>
+<body class="admin-body">
+
+  <div class="admin-header">
+    <div class="nav-group-brand">
+      <a href="/" class="admin-brand">
+        <img src="/static/img/header/logo_header.png" alt="AniMemory">
+        <span>admin</span>
+      </a>
+      <nav class="nav-group">
+        <div class="nav-liquid"></div>
+        <a href="/admin" class="nav-pill" data-pill>Дашборд</a>
+        <a href="/admin/analytics" class="nav-pill" data-pill>Аналитика</a>
+        <a href="/admin/settings" class="nav-pill active" data-pill>Настройки</a>
+      </nav>
+    </div>
+
+    <nav class="nav-group nav-group-section">
+      <div class="nav-liquid"></div>
+      <a href="/admin/catalog" class="nav-pill" data-pill>Показ</a>
+      <a href="/admin/users" class="nav-pill" data-pill>Пользователи</a>
+      <a href="/admin/community" class="nav-pill" data-pill>Сообщества</a>
+    </nav>
+
+    <div class="nav-group-status">
+      <div class="status-pill"><span class="status-dot">●</span> <span class="status-label">Online</span></div>
+      <a href="/" class="admin-avatar" title="{{.Username}}">{{.AdminInitial}}</a>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <h1>Настройки</h1>
+  </div>
+
+  <div class="panel">
+    <div class="panel-row">
+      <div>
+        <h2>Технические работы</h2>
+        <p>Закрывает сайт для всех, кроме администраторов, показывая страницу «на обслуживании».</p>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="maintenanceToggle" {{if .MaintenanceMode}}checked{{end}}>
+        <span class="switch-track"></span>
+      </label>
+    </div>
+    <div class="status-note{{if .MaintenanceMode}} active{{end}}" id="maintenanceStatus">
+      {{if .MaintenanceMode}}Сайт сейчас закрыт для обычных пользователей.{{else}}Сайт работает в обычном режиме.{{end}}
+    </div>
+  </div>
+
+<script src="/static/js/admin-nav.js"></script>
+<script>
+  const toggle = document.getElementById('maintenanceToggle');
+  const status = document.getElementById('maintenanceStatus');
+  toggle.addEventListener('change', async () => {
+    toggle.disabled = true;
+    try {
+      const res = await fetch('/api/admin/settings/maintenance', {method: 'POST'});
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Ошибка');
+        toggle.checked = !toggle.checked;
+        return;
+      }
+      toggle.checked = data.value;
+      status.classList.toggle('active', data.value);
+      status.textContent = data.value
+        ? 'Сайт сейчас закрыт для обычных пользователей.'
+        : 'Сайт работает в обычном режиме.';
+    } catch (err) {
+      alert('Ошибка сети');
+      toggle.checked = !toggle.checked;
+    } finally {
+      toggle.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>

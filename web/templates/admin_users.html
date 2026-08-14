@@ -16,7 +16,7 @@
     --text:#ffffff;
     --muted:#adadad;
     --accent:#d82d7e;
-    --accent-gradient: linear-gradient(135deg, #5E0135, #331C76);
+    --accent-gradient: #d82d7e;
     --green:#3ddc84;
     --red:#ff4d4d;
     --font-secondary:'Manrope', sans-serif;
@@ -38,31 +38,54 @@
     font-family:var(--font-secondary);font-weight:600;font-size:13px;cursor:pointer;
   }
 
-  /* ===== Table ===== */
-  .table-card{background:var(--card);border-radius:20px;padding:8px;overflow-x:auto;}
+  /* ===== Общая таблица всех пользователей ===== */
+  .table-card{background:var(--card);border-radius:20px;padding:8px;overflow-x:auto;margin-bottom:20px;}
   table{width:100%;border-collapse:collapse;min-width:720px;}
   th{text-align:left;font-family:var(--font-secondary);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700;padding:14px 16px;}
-  td{padding:14px 16px;font-family:var(--font-secondary);font-size:14px;border-top:1px solid rgba(255,255,255,.06);}
+  td{padding:14px 16px;font-family:var(--font-secondary);font-size:14px;border-top:1px solid rgba(255,255,255,.06);color:var(--text);}
   tr:hover td{background:rgba(255,255,255,.02);}
+  tr.highlight td{background:rgba(216,45,126,.18);}
   .u-name{font-weight:600;}
   .u-id{color:var(--muted);font-size:12px;}
-  .badge{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;font-size:12px;font-weight:600;background:var(--card2);color:var(--muted);}
-  .badge.on{color:#fff;}
-  .badge.premium.on{background:linear-gradient(135deg,#5E0135,#331C76);}
-  .badge.admin.on{background:var(--accent);}
-  .badge.banned.on{background:var(--red);}
   .toggle-cell{display:flex;gap:8px;flex-wrap:wrap;}
-  .toggle-btn{
+  .table-toggle-btn{
     border:1px solid rgba(255,255,255,.12);background:transparent;color:var(--muted);
     border-radius:999px;padding:6px 12px;font-size:12px;font-family:var(--font-secondary);
     cursor:pointer;transition:opacity .15s;
   }
-  .toggle-btn:hover{opacity:.8;}
-  .toggle-btn.on{color:#fff;border-color:transparent;}
-  .toggle-btn.premium.on{background:linear-gradient(135deg,#5E0135,#331C76);}
-  .toggle-btn.admin.on{background:var(--accent);}
-  .toggle-btn.banned.on{background:var(--red);}
+  .table-toggle-btn:hover{opacity:.8;}
+  .table-toggle-btn.on{color:#fff;border-color:transparent;}
+  .table-toggle-btn.premium.on{background:#d82d7e;}
+  .table-toggle-btn.admin.on{background:var(--accent);}
+  .table-toggle-btn.banned.on{background:var(--red);}
   .empty-row td{text-align:center;color:var(--muted);padding:40px;}
+  .load-more-wrap{display:flex;justify-content:center;margin:-8px 0 20px;}
+  .load-more-btn{
+    background:var(--card2);border:1px solid rgba(255,255,255,.1);border-radius:999px;
+    padding:10px 20px;color:var(--text);font-family:var(--font-secondary);font-weight:600;font-size:13px;cursor:pointer;
+  }
+  .load-more-btn:hover{opacity:.85;}
+  .load-more-btn:disabled{opacity:.5;cursor:default;}
+
+  /* ===== Панели (Figma: Frame 553 — два тёмных блока 457x452) ===== */
+  .panels{display:flex;gap:20px;flex-wrap:wrap;}
+  .panel{
+    flex:1 1 420px;background:var(--card);border-radius:20px;padding:25px;
+    display:flex;flex-direction:column;gap:17px;min-width:0;
+  }
+  .panel-head{display:flex;align-items:center;gap:10px;}
+  .panel-head .ico{font-size:12px;}
+  .panel-head h2{font-family:var(--font-secondary);font-size:12px;font-weight:700;text-transform:uppercase;color:var(--muted);letter-spacing:.02em;}
+  .panel-cols{display:flex;font-family:var(--font-secondary);font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);}
+  .panel-cols span:nth-child(1),.panel-row span:nth-child(1){flex:1 1 40%;}
+  .panel-cols span:nth-child(2),.panel-row span:nth-child(2){flex:1 1 30%;}
+  .panel-cols span:nth-child(3),.panel-row span:nth-child(3){flex:1 1 30%;text-align:right;}
+  .panel-list{display:flex;flex-direction:column;gap:14px;overflow-y:auto;max-height:290px;}
+  .panel-row{display:flex;align-items:center;font-family:var(--font-secondary);font-size:12px;color:#fff;}
+  .panel-row .u-id{display:block;color:var(--muted);font-size:10px;font-weight:700;text-transform:uppercase;margin-top:2px;}
+  .panel-row .jump-btn{background:none;border:none;color:inherit;font:inherit;text-align:left;cursor:pointer;padding:0;}
+  .panel-row .jump-btn:hover .u-name{text-decoration:underline;}
+  .panel-empty{font-family:var(--font-secondary);font-size:12px;color:var(--muted);}
 
   /* ===== Pagination ===== */
   .pagination{display:flex;justify-content:center;align-items:center;gap:10px;margin-top:20px;font-family:var(--font-secondary);font-size:13px;}
@@ -74,9 +97,27 @@
   .pagination .current{background:#fff;color:#000;font-weight:700;}
   .pagination .disabled{opacity:.3;pointer-events:none;}
 
+  @media (max-width: 900px){
+    .panel{flex-basis:100%;}
+  }
+
   @media (max-width: 640px){
+    body.admin-body{padding:12px;}
     .toolbar{flex-direction:column;align-items:stretch;}
     .search-form input{min-width:0;flex:1;}
+    .table-card{padding:6px;border-radius:14px;}
+    table{min-width:600px;}
+    .panel{padding:16px;border-radius:14px;}
+    .panels{gap:12px;}
+  }
+
+  @media (max-width: 480px){
+    .toolbar h1{font-size:18px;}
+    .panel-cols{display:none;}
+    .panel-row{flex-direction:column;align-items:flex-start;gap:2px;}
+    .panel-row span{flex:none !important;text-align:left !important;}
+    .panel-row span:nth-child(2),.panel-row span:nth-child(3){font-size:11px;color:var(--muted);}
+    .panel-list{gap:16px;}
   }
 </style>
 </head>
@@ -91,8 +132,8 @@
       <nav class="nav-group">
         <div class="nav-liquid"></div>
         <a href="/admin" class="nav-pill" data-pill>Дашборд</a>
-        <span class="nav-pill disabled" title="Скоро">Аналитика</span>
-        <span class="nav-pill disabled" title="Скоро">Настройки</span>
+        <a href="/admin/analytics" class="nav-pill" data-pill>Аналитика</a>
+        <a href="/admin/settings" class="nav-pill" data-pill>Настройки</a>
       </nav>
     </div>
 
@@ -113,6 +154,14 @@
     <div><h1 style="display:inline;">Пользователи</h1><span class="count">{{.Total}} всего</span></div>
     <form class="search-form" method="GET" action="/admin/users">
       <input type="text" name="q" placeholder="Поиск по имени" value="{{.Query}}" autocomplete="off">
+      <select name="level">
+        <option value="">Любой уровень</option>
+        {{range .Levels}}
+        <option value="{{.}}"{{if eq $.Level (printf "%d" .)}} selected{{end}}>Уровень {{.}}</option>
+        {{end}}
+      </select>
+      <input type="date" name="date_from" value="{{.DateFrom}}" title="Регистрация с">
+      <input type="date" name="date_to" value="{{.DateTo}}" title="Регистрация по">
       <button type="submit">Найти</button>
     </form>
   </div>
@@ -129,20 +178,7 @@
       </thead>
       <tbody id="usersBody">
         {{if .Users}}
-          {{range .Users}}
-          <tr data-user-id="{{.ID}}">
-            <td><div class="u-name">{{.Username}}</div><div class="u-id">ID {{.ID}}</div></td>
-            <td>Ур. {{.Level}} · {{.XP}} XP</td>
-            <td>{{.CreatedAt}}</td>
-            <td>
-              <div class="toggle-cell">
-                <button class="toggle-btn premium{{if .IsPremium}} on{{end}}" data-field="is_premium">Premium</button>
-                <button class="toggle-btn admin{{if .IsAdmin}} on{{end}}" data-field="is_admin">Admin</button>
-                <button class="toggle-btn banned{{if .IsBanned}} on{{end}}" data-field="is_banned">Бан</button>
-              </div>
-            </td>
-          </tr>
-          {{end}}
+          {{range .Users}}{{template "userTableRow" .}}{{end}}
         {{else}}
           <tr class="empty-row"><td colspan="4">Никого не найдено</td></tr>
         {{end}}
@@ -150,40 +186,151 @@
     </table>
   </div>
 
-  {{if gt .TotalPages 1}}
-  <div class="pagination">
-    {{if gt .Page 1}}<a href="/admin/users?q={{.Query}}&page={{subtract .Page 1}}">←</a>{{else}}<span class="disabled">←</span>{{end}}
-    <span class="current">{{.Page}} / {{.TotalPages}}</span>
-    {{if lt .Page .TotalPages}}<a href="/admin/users?q={{.Query}}&page={{add .Page 1}}">→</a>{{else}}<span class="disabled">→</span>{{end}}
+  {{if .HasMore}}
+  <div class="load-more-wrap">
+    <button class="load-more-btn" id="loadMoreBtn" data-offset="{{.NextOffset}}" data-q="{{.Query}}" data-level="{{.Level}}" data-date-from="{{.DateFrom}}" data-date-to="{{.DateTo}}">Показать ещё</button>
+  </div>
+  {{end}}
+
+  <div class="panels" id="usersPanels">
+    <div class="panel">
+      <div class="panel-head"><span class="ico">✨</span><h2>Премиум пользователи</h2></div>
+      <div class="panel-cols"><span>Пользователь</span><span>Уровень / XP</span><span>Регистрация</span></div>
+      <div class="panel-list">
+        {{if .PremiumUsers}}
+          {{range .PremiumUsers}}{{template "userPanelRow" .}}{{end}}
+        {{else}}
+          <div class="panel-empty">Никого не найдено</div>
+        {{end}}
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><span class="ico">👤</span><h2>Админы</h2></div>
+      <div class="panel-cols"><span>Пользователь</span><span>Уровень / XP</span><span>Регистрация</span></div>
+      <div class="panel-list">
+        {{if .AdminUsers}}
+          {{range .AdminUsers}}{{template "userPanelRow" .}}{{end}}
+        {{else}}
+          <div class="panel-empty">Никого не найдено</div>
+        {{end}}
+      </div>
+    </div>
+  </div>
+
+  {{define "userTableRow"}}
+  <tr data-user-id="{{.ID}}">
+    <td><div class="u-name">{{.Username}}</div><div class="u-id">ID {{.ID}}</div></td>
+    <td>Ур. {{.Level}} · {{.XP}} XP</td>
+    <td>{{.CreatedAt}}</td>
+    <td>
+      <div class="toggle-cell">
+        <button class="table-toggle-btn premium{{if .IsPremium}} on{{end}}" data-field="is_premium">Premium</button>
+        <button class="table-toggle-btn admin{{if .IsAdmin}} on{{end}}" data-field="is_admin">Admin</button>
+        <button class="table-toggle-btn banned{{if .IsBanned}} on{{end}}" data-field="is_banned">Бан</button>
+      </div>
+    </td>
+  </tr>
+  {{end}}
+
+  {{define "userPanelRow"}}
+  <div data-user-id="{{.ID}}">
+    <div class="panel-row">
+      <span><button type="button" class="jump-btn" data-jump="{{.ID}}"><span class="u-name">{{.Username}}</span><span class="u-id">ID {{.ID}}</span></button></span>
+      <span>Ур. {{.Level}} · {{.XP}} XP</span>
+      <span>{{.CreatedAt}}</span>
+    </div>
   </div>
   {{end}}
 
 <script src="/static/js/admin-nav.js"></script>
 <script>
-  document.getElementById('usersBody').addEventListener('click', async (e) => {
-    const btn = e.target.closest('.toggle-btn');
-    if (!btn) return;
-    const row = btn.closest('tr');
-    const userID = parseInt(row.dataset.userId, 10);
-    const field = btn.dataset.field;
-    btn.disabled = true;
-    try {
-      const res = await fetch('/api/admin/users/toggle', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({user_id: userID, field: field})
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.error || 'Ошибка');
-        return;
+  const usersBody = document.getElementById('usersBody');
+
+  function bindToggle(container, btnClass) {
+    container.addEventListener('click', async (e) => {
+      const btn = e.target.closest('.' + btnClass);
+      if (!btn) return;
+      const row = btn.closest('[data-user-id]');
+      const userID = parseInt(row.dataset.userId, 10);
+      const field = btn.dataset.field;
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/admin/users/toggle', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({user_id: userID, field: field})
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          alert(data.error || 'Ошибка');
+          return;
+        }
+        document.querySelectorAll(`[data-user-id="${userID}"] .${btnClass}[data-field="${field}"]`)
+          .forEach(b => b.classList.toggle('on', data.value));
+      } catch (err) {
+        alert('Ошибка сети');
+      } finally {
+        btn.disabled = false;
       }
-      btn.classList.toggle('on', data.value);
-    } catch (err) {
-      alert('Ошибка сети');
+    });
+  }
+  bindToggle(usersBody, 'table-toggle-btn');
+
+  function tableRowHTML(u) {
+    return `<tr data-user-id="${u.ID}">
+      <td><div class="u-name"></div><div class="u-id">ID ${u.ID}</div></td>
+      <td>Ур. ${u.Level} · ${u.XP} XP</td>
+      <td>${u.CreatedAt || ''}</td>
+      <td><div class="toggle-cell">
+        <button class="table-toggle-btn premium${u.IsPremium ? ' on' : ''}" data-field="is_premium">Premium</button>
+        <button class="table-toggle-btn admin${u.IsAdmin ? ' on' : ''}" data-field="is_admin">Admin</button>
+        <button class="table-toggle-btn banned${u.IsBanned ? ' on' : ''}" data-field="is_banned">Бан</button>
+      </div></td>
+    </tr>`;
+  }
+
+  const loadMoreBtn = document.getElementById('loadMoreBtn');
+  async function loadMore() {
+    if (!loadMoreBtn) return null;
+    loadMoreBtn.disabled = true;
+    try {
+      const params = new URLSearchParams({
+        q: loadMoreBtn.dataset.q || '',
+        level: loadMoreBtn.dataset.level || '',
+        date_from: loadMoreBtn.dataset.dateFrom || '',
+        date_to: loadMoreBtn.dataset.dateTo || '',
+        offset: loadMoreBtn.dataset.offset
+      });
+      const res = await fetch(`/api/admin/users?${params}`);
+      const data = await res.json();
+      (data.users || []).forEach(u => {
+        usersBody.insertAdjacentHTML('beforeend', tableRowHTML(u));
+        usersBody.lastElementChild.querySelector('.u-name').textContent = u.Username;
+      });
+      loadMoreBtn.dataset.offset = data.next_offset;
+      if (!data.has_more) loadMoreBtn.remove();
+      return data.users || [];
     } finally {
-      btn.disabled = false;
+      if (loadMoreBtn.isConnected) loadMoreBtn.disabled = false;
     }
+  }
+  if (loadMoreBtn) loadMoreBtn.addEventListener('click', loadMore);
+
+  document.getElementById('usersPanels').addEventListener('click', async (e) => {
+    const jumpBtn = e.target.closest('.jump-btn');
+    if (!jumpBtn) return;
+    const userID = jumpBtn.dataset.jump;
+    let target = usersBody.querySelector(`[data-user-id="${userID}"]`);
+    while (!target && document.getElementById('loadMoreBtn')) {
+      const loaded = await loadMore();
+      if (!loaded || loaded.length === 0) break;
+      target = usersBody.querySelector(`[data-user-id="${userID}"]`);
+    }
+    if (!target) return;
+    target.scrollIntoView({behavior: 'smooth', block: 'center'});
+    document.querySelectorAll('#usersBody tr.highlight').forEach(t => t.classList.remove('highlight'));
+    target.classList.add('highlight');
+    setTimeout(() => target.classList.remove('highlight'), 2500);
   });
 </script>
 </body>

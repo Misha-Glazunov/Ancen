@@ -57,6 +57,13 @@
             position: absolute;
             inset: 0;
         }
+        .skip-btn {
+            position: absolute;
+            right: 16px;
+            bottom: 64px;
+            z-index: 10;
+            background: var(--color-gray-950);
+        }
 
         /* ===== Кнопки эмоций ===== */
         .emotion-buttons {
@@ -77,6 +84,14 @@
             transition: transform 0.1s, background 0.2s;
         }
         .emotion-buttons button:hover { transform: scale(1.1); background: var(--color-gray-900); }
+        .emotion-btn-locked { opacity: 0.3; cursor: not-allowed; }
+        .emotion-btn-locked:hover { transform: none; background: var(--color-gray-950); }
+        @keyframes emotionPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.15); }
+        }
+        .emotion-btn-animated { animation: emotionPulse 1.4s ease-in-out infinite; }
+        .emotion-btn-animated:hover { animation-play-state: paused; }
 
         /* ===== График эмоций ===== */
         .chart-wrapper {
@@ -104,6 +119,17 @@
             transition: color 0.15s;
         }
         #emotion-list li:hover, #comments-list li:hover { color: var(--color-accent); }
+        .like-btn {
+            background: none;
+            border: 1px solid var(--color-gray-700);
+            border-radius: var(--radius-lg);
+            color: inherit;
+            font-size: 0.85rem;
+            padding: 2px 8px;
+            margin-left: 8px;
+            cursor: pointer;
+        }
+        .like-btn.liked { border-color: var(--color-accent); color: var(--color-accent); }
         #emotion-list li.friend-emotion { background: rgba(216, 45, 126, 0.08); border-left: 2px solid var(--color-accent); padding-left: 8px; }
 
         .comment-form {
@@ -233,6 +259,7 @@
             <source src="{{.VideoURL}}" type="{{videoMimeType .VideoURL}}">
             <p class="vjs-no-js">Для просмотра видео включите JavaScript</p>
         </video>
+        <button type="button" id="skipBtn" class="btn btn-sm skip-btn" hidden></button>
     </div>
 
     <!-- Навигация между сериями -->
@@ -252,14 +279,13 @@
 
     <!-- Кнопки эмоций -->
     <div class="emotion-buttons">
-        <button class="emotion-btn" data-emotion="❤️">❤️</button>
-        <button class="emotion-btn" data-emotion="😭">😭</button>
-        <button class="emotion-btn" data-emotion="🔥">🔥</button>
-        <button class="emotion-btn" data-emotion="🤯">🤯</button>
-        <button class="emotion-btn" data-emotion="🥰">🥰</button>
-        <button class="emotion-btn" data-emotion="😂">😂</button>
-        <button class="emotion-btn" data-emotion="👍">👍</button>
-        <button class="emotion-btn" data-emotion="💢">💢</button>
+        {{range .EmotionOptions}}
+        {{if .Unlocked}}
+        <button class="emotion-btn{{if .Animated}} emotion-btn-animated{{end}}" data-emotion="{{.Emoji}}">{{.Emoji}}</button>
+        {{else}}
+        <button class="emotion-btn emotion-btn-locked" disabled title="Разблокируется на уровне {{.MinLevel}}">{{.Emoji}}</button>
+        {{end}}
+        {{end}}
     </div>
 
     <div class="chart-wrapper">
@@ -324,6 +350,8 @@
     let episodeId = parseInt(urlParams.get('episode'));
     if (isNaN(episodeId)) episodeId = 1;
     const isPremium = {{.IsPremium}};
+    const chartColor = {{.ChartColor}};
+    const chartColorHover = {{.ChartColorHover}};
 
     let ws;
 
@@ -337,7 +365,7 @@
         ws.onmessage = function(event) {
             const msg = JSON.parse(event.data);
             if (msg.type === 'emotion') {
-                addEmotionToList(msg.username, msg.emotion_type, msg.timestamp_sec, msg.is_friend);
+                addEmotionToList(msg.username, msg.emotion_type, msg.timestamp_sec, msg.is_friend, msg.badge);
                 loadStats();   // обновить график
                 if (msg.is_friend && typeof showToast === 'function') {
                     showToast({ icon: msg.emotion_type, title: msg.username + ' смотрит вместе с вами', body: 'Поставил(а) реакцию на ' + formatTime(msg.timestamp_sec) });
@@ -391,7 +419,7 @@
             list.innerHTML = '<li>Пока нет эмоций. Будьте первым!</li>';
         } else {
             list.innerHTML = allEmotions.map(e =>
-                `<li data-timestamp="${e.timestamp_sec}"${e.is_friend ? ' class="friend-emotion" title="Ваш друг"' : ''}><strong>${e.is_friend ? '🤝 ' : ''}${escapeHtml(e.username)}</strong> ${e.emotion_type} на ${formatTime(e.timestamp_sec)}</li>`
+                `<li data-timestamp="${e.timestamp_sec}"${e.is_friend ? ' class="friend-emotion" title="Ваш друг"' : ''}><strong>${e.is_friend ? '🤝 ' : ''}${escapeHtml(e.username)}${e.badge ? ' ' + e.badge : ''}</strong> ${e.emotion_type} на ${formatTime(e.timestamp_sec)}</li>`
             ).join('');
             list.querySelectorAll('li[data-timestamp]').forEach(li => {
                 li.addEventListener('click', () => seekTo(parseInt(li.dataset.timestamp, 10)));
@@ -403,9 +431,9 @@
     // Новая реакция (по WS) добавляется в общий массив и переиспользует ту же отрисовку.
     // Без Premium не показываем реакции впереди своего прогресса даже из live-пуша —
     // сервер их всё равно не отдаст при следующей перезагрузке страницы/страницы списка
-    function addEmotionToList(username, emotionType, timestampSec, isFriend) {
+    function addEmotionToList(username, emotionType, timestampSec, isFriend, badge) {
         if (!isPremium && timestampSec > Math.floor(player.currentTime() || 0)) return;
-        allEmotions.push({ username, emotion_type: emotionType, timestamp_sec: timestampSec, is_friend: !!isFriend });
+        allEmotions.push({ username, emotion_type: emotionType, timestamp_sec: timestampSec, is_friend: !!isFriend, badge: badge || '' });
         allEmotions.sort((a, b) => a.timestamp_sec - b.timestamp_sec);
         renderEmotionsList();
     }
@@ -576,7 +604,7 @@
         // Линия
         ctx.beginPath();
         points.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
-        ctx.strokeStyle = '#d82d7e';
+        ctx.strokeStyle = chartColor;
         ctx.lineWidth = 2;
         ctx.stroke();
 
@@ -584,7 +612,7 @@
         points.forEach((p, i) => {
             ctx.beginPath();
             ctx.arc(p.x, p.y, i === hoverIndex ? 5 : 3, 0, Math.PI * 2);
-            ctx.fillStyle = i === hoverIndex ? '#ff5fa8' : '#d82d7e';
+            ctx.fillStyle = i === hoverIndex ? chartColorHover : chartColor;
             ctx.fill();
         });
 
@@ -661,13 +689,40 @@
             list.innerHTML = '<li>Пока нет комментариев. Будьте первым!</li>';
         } else {
             list.innerHTML = allComments.map(c =>
-                `<li data-timestamp="${c.timestamp_sec}"><strong>${escapeHtml(c.username)}</strong> [${formatTime(c.timestamp_sec)}]: ${escapeHtml(c.text)}</li>`
+                `<li data-timestamp="${c.timestamp_sec}"${c.color ? ` style="color:${c.color}"` : ''}><strong>${escapeHtml(c.username)}${c.badge ? ' ' + c.badge : ''}</strong> [${formatTime(c.timestamp_sec)}]: ${escapeHtml(c.text)} ` +
+                `<button type="button" class="like-btn${c.liked_by_me ? ' liked' : ''}" data-comment-id="${c.id}">👍 <span class="like-count">${c.like_count}</span></button></li>`
             ).join('');
             list.querySelectorAll('li[data-timestamp]').forEach(li => {
-                li.addEventListener('click', () => seekTo(parseInt(li.dataset.timestamp, 10)));
+                li.addEventListener('click', (e) => {
+                    if (e.target.closest('.like-btn')) return;
+                    seekTo(parseInt(li.dataset.timestamp, 10));
+                });
+            });
+            list.querySelectorAll('.like-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    toggleCommentLike(parseInt(btn.dataset.commentId, 10), btn);
+                });
             });
         }
         document.getElementById('loadMoreCommentsBtn').hidden = commentsExhausted;
+    }
+
+    async function toggleCommentLike(commentId, btn) {
+        try {
+            const response = await fetch('/api/comments/like', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ comment_id: commentId })
+            });
+            const data = await response.json();
+            btn.classList.toggle('liked', data.active);
+            btn.querySelector('.like-count').textContent = data.like_count;
+            const c = allComments.find(c => c.id === commentId);
+            if (c) { c.liked_by_me = data.active; c.like_count = data.like_count; }
+        } catch (err) {
+            console.error('Ошибка лайка:', err);
+        }
     }
 
     async function loadComments(append) {
@@ -858,6 +913,34 @@
         const display = document.getElementById('currentTimeDisplay');
         if (display) display.innerText = `${minutes}:${seconds.toString().padStart(2,'0')}`;
     }, 500);
+
+    // --- Автоскип интро/outro ---
+    // IntroEnd/OutroEnd == 0 значит "таймкод не задан" (см. комментарий в watchHandler)
+    const introStart = {{.IntroStart}}, introEnd = {{.IntroEnd}};
+    const outroStart = {{.OutroStart}}, outroEnd = {{.OutroEnd}};
+    const skipBtn = document.getElementById('skipBtn');
+    if (skipBtn && (introEnd > 0 || outroEnd > 0)) {
+        skipBtn.addEventListener('click', () => {
+            const t = player.currentTime();
+            if (introEnd > 0 && t >= introStart && t < introEnd) {
+                player.currentTime(introEnd);
+            } else if (outroEnd > 0 && t >= outroStart && t < outroEnd) {
+                player.currentTime(outroEnd);
+            }
+        });
+        setInterval(() => {
+            const t = player.currentTime();
+            if (introEnd > 0 && t >= introStart && t < introEnd) {
+                skipBtn.textContent = 'Пропустить опенинг';
+                skipBtn.hidden = false;
+            } else if (outroEnd > 0 && t >= outroStart && t < outroEnd) {
+                skipBtn.textContent = 'Пропустить эндинг';
+                skipBtn.hidden = false;
+            } else {
+                skipBtn.hidden = true;
+            }
+        }, 500);
+    }
 
     // --- Инициализация ---
     player.ready(() => {

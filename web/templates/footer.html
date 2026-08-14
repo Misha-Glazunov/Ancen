@@ -8,7 +8,7 @@
             </div>
             <div class="footer-copy-row">
                 <span class="footer-copy">© 2026 AniMemory</span>
-                <a href="/privacy-policy" class="policy-button">Политика конфиденциальности</a>
+                <a href="/privacy-policy" class="policy-button" data-swap-word>Политика конфиденциальности</a>
             </div>
             <a href="/premium" class="btn btn-sm footer-premium-btn">✨ Premium</a>
         </div>
@@ -20,9 +20,9 @@
                 <h4>Аниме</h4>
                 <div class="underline"></div>
                 <ul>
-                    <li class="popular"><a href="/#popular-anime">Популярные</a></li>
-                    <li class="new"><a href="/#new-anime">Новинки</a></li>
-                    <li class="favorites"><a href="{{if .Username}}/profile{{else}}/login{{end}}">Избранное</a></li>
+                    <li class="popular"><a href="/#popular-anime" data-swap-word>Популярные</a></li>
+                    <li class="new"><a href="/#new-anime" data-swap-word>Новинки</a></li>
+                    <li class="favorites"><a href="{{if .Username}}/profile{{else}}/login{{end}}" data-swap-word>Избранное</a></li>
                 </ul>
             </div>
 
@@ -31,10 +31,10 @@
                 <h4>Меню</h4>
                 <div class="underline"></div>
                 <ul>
-                    <li class="home"><a href="/">На главную</a></li>
-                    <li class="profile"><a href="{{if .Username}}/profile{{else}}/login{{end}}">Личный кабинет</a></li>
-                    <li class="premium"><a href="/premium">Premium</a></li>
-                    <li class="auth"><a href="{{if .Username}}/logout{{else}}/login{{end}}">{{if .Username}}Выйти{{else}}Вход/Регистрация{{end}}</a></li>
+                    <li class="home"><a href="/" data-swap-word>На главную</a></li>
+                    <li class="profile"><a href="{{if .Username}}/profile{{else}}/login{{end}}" data-swap-word>Личный кабинет</a></li>
+                    <li class="premium"><a href="/premium" data-swap-word>Premium</a></li>
+                    <li class="auth"><a href="{{if .Username}}/logout{{else}}/login{{end}}" data-swap-word>{{if .Username}}Выйти{{else}}Вход/Регистрация{{end}}</a></li>
                 </ul>
             </div>
 

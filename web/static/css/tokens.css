@@ -4,8 +4,8 @@
     --color-bg: #000000;
     --color-text: #ffffff;
     --color-accent: #d82d7e;
-    --color-accent-gradient: linear-gradient(135deg, #5E0135, #331C76);
-    --color-purple: #933799;
+    --color-accent-gradient: #d82d7e;
+    --color-purple: #d82d7e;
 
     --color-gray-100: #eaebeb;
     --color-gray-300: #d9d9d9;
@@ -136,6 +136,13 @@
 }
 .letter-slot.is-active .letter-primary { transform: translateY(-100%); }
 .letter-slot.is-active .letter-secondary { transform: translateY(-100%); }
+
+/* Режим целого слова (data-swap-word): один slot на весь текст, поэтому
+   -100% (высота строки) оставляет снизу/сверху видимый край соседней
+   буквы/слова — уводим чуть дальше, с запасом. */
+.letter-slot-word.is-active .letter-primary { transform: translateY(-130%); }
+.letter-slot-word.is-active .letter-secondary { transform: translateY(-130%); }
+.letter-slot-word .letter-secondary { top: 130%; }
 
 .btn-sm { padding: 5px 12px; font-size: var(--fs-small); }
 

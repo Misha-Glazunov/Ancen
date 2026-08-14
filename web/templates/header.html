@@ -23,14 +23,15 @@
         </div>
     </div>
     <nav class="header-nav">
-        <a href="/#new-anime">Новое</a>
-        <a href="/#popular-anime">Популярное</a>
-        <a href="/profile">Избранное</a>
-        <a href="/premium">Premium</a>
+        <a href="/#new-anime" data-swap-word>Новое</a>
+        <a href="/#popular-anime" data-swap-word>Популярное</a>
+        <a href="/profile" data-swap-word>Избранное</a>
+        <a href="/messages" data-swap-word>Сообщения</a>
+        <a href="/premium" data-swap-word>Premium</a>
     </nav>
     <div class="header-account">
         <a href="/profile" class="header-avatar" title="{{.Username}}">{{initial .Username}}<span class="header-friend-badge" id="header-friend-badge" hidden>0</span></a>
-        <a href="/logout" class="header-logout" title="Выйти">Выход</a>
+        <a href="/logout" class="header-logout" title="Выйти" data-swap-word>Выход</a>
     </div>
 </header>
 {{else}}
@@ -57,9 +58,9 @@
         </div>
     </div>
     <nav class="header-nav">
-        <a href="/#new-anime">Новое</a>
-        <a href="/#popular-anime">Популярное</a>
-        <a href="/login">Избранное</a>
+        <a href="/#new-anime" data-swap-word>Новое</a>
+        <a href="/#popular-anime" data-swap-word>Популярное</a>
+        <a href="/login" data-swap-word>Избранное</a>
     </nav>
     <a href="/login" class="button-login-registry">Вход \ Регистрация</a>
 </header>
@@ -83,11 +84,13 @@
 .header-nav a {
     font-family: var(--font-base);
     font-size: var(--fs-body);
+    /* line-height:1, как у .footer-col ul li — иначе letter-swap.js клипует
+       буквы по завышенной строке (наследуемый line-height шапки выше) и
+       старая буква остаётся видна под новой при анимации hover. */
+    line-height: 1;
     color: var(--color-text);
     text-decoration: none;
-    transition: opacity 0.2s, color 0.2s;
 }
-.header-nav a:hover { color: var(--color-accent); }
 
 /* ===== Header (авторизованный пользователь), из Figma ===== */
 .header-account { display: flex; align-items: center; gap: 14px; flex-shrink: 0; max-width: 200px; white-space: nowrap; }
@@ -132,9 +135,7 @@
     font-size: var(--fs-small);
     color: var(--color-gray-300);
     text-decoration: none;
-    transition: color 0.2s;
 }
-.header-logout:hover { color: var(--color-accent); }
 
 /* ===== Header_Unlogin (гость), 1:1 из Figma ===== */
 
@@ -274,11 +275,11 @@
     box-sizing: border-box;
     text-align: left;
     scrollbar-width: thin;
-    scrollbar-color: #933799 transparent;
+    scrollbar-color: #d82d7e transparent;
 }
 .header-search-results::-webkit-scrollbar { width: 10px; }
 .header-search-results::-webkit-scrollbar-track { background: transparent; }
-.header-search-results::-webkit-scrollbar-thumb { background: #933799; border-radius: 10px; }
+.header-search-results::-webkit-scrollbar-thumb { background: #d82d7e; border-radius: 10px; }
 .header-search-wrap.active .header-search-results { display: block; }
 .header-search-tabs { display: flex; gap: 12px; margin-bottom: 16px; }
 .header-search-tabs button {
@@ -506,17 +507,22 @@
         });
     });
 
+    // Бейдж на аватарке — сумма непрочитанных сообщений и заявок в друзья,
+    // одним числом (решено 2026-08-14), а не раздельными индикаторами.
     var badge = document.getElementById('header-friend-badge');
     if (badge) {
-        fetch('/api/friends/requests')
-            .then(function (r) { return r.ok ? r.json() : []; })
-            .then(function (list) {
-                if (list && list.length) {
-                    badge.textContent = list.length > 9 ? '9+' : String(list.length);
-                    badge.hidden = false;
-                }
-            })
-            .catch(function () {});
+        Promise.all([
+            fetch('/api/friends/requests').then(function (r) { return r.ok ? r.json() : []; }).catch(function () { return []; }),
+            fetch('/api/messages/unread-count').then(function (r) { return r.ok ? r.json() : { count: 0 }; }).catch(function () { return { count: 0 }; })
+        ]).then(function (results) {
+            var friendRequests = (results[0] || []).length;
+            var unreadMessages = (results[1] || {}).count || 0;
+            var total = friendRequests + unreadMessages;
+            if (total > 0) {
+                badge.textContent = total > 9 ? '9+' : String(total);
+                badge.hidden = false;
+            }
+        });
     }
 })();
 </script>

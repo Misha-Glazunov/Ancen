@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -40,6 +41,12 @@ const bcryptCost = 12
 var db *sql.DB
 var templates *template.Template
 var store *sessions.CookieStore
+
+// maintenanceMode — кэш флага "сайт на техработах" из app_settings, чтобы не
+// ходить в БД на каждый запрос. Обновляется через apiAdminMaintenanceToggle.
+// ponytail: atomic.Bool не переживёт несколько инстансов сервера за балансировщиком —
+// при горизонтальном масштабировании читать флаг из БД/Redis вместо памяти процесса.
+var maintenanceMode atomic.Bool
 
 // ---------- Защита от подбора пароля (brute-force) ----------
 
@@ -118,6 +125,8 @@ const (
 	emotionRateWindow = 10 * time.Second
 	commentRateLimit  = 5
 	commentRateWindow = 30 * time.Second
+	messageRateLimit  = 10
+	messageRateWindow = 30 * time.Second
 
 	registerRateLimit  = 5
 	registerRateWindow = time.Hour
@@ -126,8 +135,51 @@ const (
 	forgotPasswordRateWindow = time.Hour
 )
 
-var validEmotions = map[string]bool{
-	"❤️": true, "😭": true, "🔥": true, "🤯": true, "🥰": true, "😂": true, "👍": true, "💢": true,
+// emotionPreset — тип реакции. Базовые (MinLevel 1) доступны всем, эксклюзивные
+// анимированные (Animated true) разблокируются уровнем — та же бесплатная
+// косметика за активность, что рамки аватара/цвет графика, см. 18_Монетизация_и_уровни.md.
+type emotionPreset struct {
+	Emoji    string
+	MinLevel int
+	Animated bool
+}
+
+var emotionPresets = []emotionPreset{
+	{Emoji: "❤️", MinLevel: 1},
+	{Emoji: "😭", MinLevel: 1},
+	{Emoji: "🔥", MinLevel: 1},
+	{Emoji: "🤯", MinLevel: 1},
+	{Emoji: "🥰", MinLevel: 1},
+	{Emoji: "😂", MinLevel: 1},
+	{Emoji: "👍", MinLevel: 1},
+	{Emoji: "💢", MinLevel: 1},
+	{Emoji: "✨", MinLevel: 6, Animated: true},
+	{Emoji: "💯", MinLevel: 9, Animated: true},
+	{Emoji: "👑", MinLevel: 12, Animated: true},
+}
+
+func emotionPresetByEmoji(emoji string) (emotionPreset, bool) {
+	for _, p := range emotionPresets {
+		if p.Emoji == emoji {
+			return p, true
+		}
+	}
+	return emotionPreset{}, false
+}
+
+var validEmotions = func() map[string]bool {
+	m := make(map[string]bool, len(emotionPresets))
+	for _, p := range emotionPresets {
+		m[p.Emoji] = true
+	}
+	return m
+}()
+
+// userLevel возвращает текущий уровень пользователя по его XP.
+func userLevel(userID int) int {
+	var xp int
+	db.QueryRow("SELECT xp FROM user_xp WHERE user_id = ?", userID).Scan(&xp)
+	return getLevelInfo(xp).Level
 }
 
 type actionRateLimiter struct {
@@ -246,10 +298,48 @@ func csrfProtect(next http.HandlerFunc) http.HandlerFunc {
 // маршруты в main() должны идти через неё вместо голого http.HandleFunc.
 func secureHandle(pattern string, h http.HandlerFunc) {
 	handler := securityHeaders(csrfProtect(h))
+	if shouldGateMaintenance(pattern) {
+		handler = maintenanceGate(handler)
+	}
 	if shouldTrackVisit(pattern) {
 		handler = trackVisit(handler)
 	}
 	http.HandleFunc(pattern, handler)
+}
+
+// shouldGateMaintenance исключает /admin* и /login|/register|/logout из
+// проверки техработ — иначе админ не смог бы зайти и выключить maintenance mode.
+func shouldGateMaintenance(pattern string) bool {
+	if strings.HasPrefix(pattern, "/admin") || strings.HasPrefix(pattern, "/api/admin") {
+		return false
+	}
+	switch pattern {
+	case "/login", "/register", "/logout":
+		return false
+	}
+	return true
+}
+
+const maintenancePageHTML = `<!DOCTYPE html>
+<html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Технические работы — AniMemory</title></head>
+<body style="margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0f0f0f;color:#fff;font-family:sans-serif;text-align:center;padding:20px;">
+<div><h1 style="font-size:22px;margin-bottom:8px;">Сайт на техническом обслуживании</h1><p style="color:#adadad;">Мы скоро вернёмся. Попробуйте зайти чуть позже.</p></div>
+</body></html>`
+
+// maintenanceGate закрывает публичные маршруты, если включён maintenance mode
+// (/admin/settings), пропуская только залогиненных администраторов.
+func maintenanceGate(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if maintenanceMode.Load() {
+			if uid, err := getUserIDFromSession(r); err != nil || !isUserAdmin(uid) {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				w.Write([]byte(maintenancePageHTML))
+				return
+			}
+		}
+		next(w, r)
+	}
 }
 
 // shouldTrackVisit исключает API/WS/служебные маршруты из лога визитов
@@ -552,6 +642,7 @@ var achievements = []Achievement{
 	{ID: "expert_50", Name: "Эксперт", Description: "Посмотреть более 50 эпизодов", Category: "special", Icon: "🎓"},
 	{ID: "timekeeper", Name: "Хранитель таймкодов", Description: "Оставить 20 эмоций с погрешностью <1 сек", Category: "special", Icon: "⏰"},
 	{ID: "friendly", Name: "Дружелюбный", Description: "Добавить 5 друзей", Category: "special", Icon: "🤝"},
+	{ID: "popular", Name: "Популярный", Description: "Получить 10 лайков на своих комментариях", Category: "comments", Icon: "⭐"},
 }
 
 // Уровни: сколько всего XP нужно набрать для каждого уровня.
@@ -582,6 +673,41 @@ func buildLevelXPRequirements(maxLevel int) []int {
 		req[i] = req[i-1] + 14*i*i + 28*i
 	}
 	return req
+}
+
+// levelBadge — значок у имени за уровень (бесплатная косметика за активность,
+// автоматический, без выбора пользователем — см. тот же принцип, что и рамки
+// аватара в avatarFramePresets, но проще: не нужен UI выбора).
+func levelBadge(level int) string {
+	switch {
+	case level >= 12:
+		return "💎"
+	case level >= 9:
+		return "🥇"
+	case level >= 6:
+		return "🥈"
+	case level >= 3:
+		return "🥉"
+	default:
+		return ""
+	}
+}
+
+// levelColor — цвет выделения комментария по уровню автора, тот же принцип,
+// что levelBadge (автоматически, без выбора пользователем).
+func levelColor(level int) string {
+	switch {
+	case level >= 12:
+		return "#8A9BFF"
+	case level >= 9:
+		return "#FFCC00"
+	case level >= 6:
+		return "#C0C0C0"
+	case level >= 3:
+		return "#9A5B32"
+	default:
+		return ""
+	}
 }
 
 // getLevelInfo возвращает уровень по количеству XP
@@ -749,6 +875,11 @@ func checkAndUnlockAchievements(userID int) []Achievement {
 			db.QueryRow("SELECT COUNT(*) FROM friendships WHERE status = 'accepted' AND (requester_id = ? OR addressee_id = ?)", userID, userID).Scan(&friendCount)
 			return friendCount >= 5
 		}},
+		{"popular", func() bool {
+			var likeCount int
+			db.QueryRow(`SELECT COUNT(*) FROM comment_likes cl JOIN comments c ON cl.comment_id = c.id WHERE c.user_id = ?`, userID).Scan(&likeCount)
+			return likeCount >= 10
+		}},
 	}
 
 	var newlyUnlocked []Achievement
@@ -872,6 +1003,53 @@ func getFriends(userID int) []FriendInfo {
 		return nil
 	}
 	return friendInfoRows(rows)
+}
+
+// FriendWatchingInfo — строка ленты активности друзей ("Х сейчас смотрит Y").
+type FriendWatchingInfo struct {
+	Username   string
+	AvatarURL  string
+	AnimeID    int
+	AnimeTitle string
+	EpisodeID  int
+	EpisodeNum int
+}
+
+// friendsWatchingWindow — "сейчас смотрит" считается по свежести
+// user_progress.updated_at (плеер пишет его раз в 5с, см. /api/progress) —
+// не требует отдельной realtime-инфраструктуры, переиспользует то, что уже
+// есть. Уважает users.show_watching_activity (решено 2026-08-14).
+const friendsWatchingWindow = 3 * time.Minute
+
+// getFriendsWatchingNow возвращает друзей, которые прямо сейчас смотрят
+// что-то (свежий прогресс за friendsWatchingWindow) и не скрыли эту активность.
+func getFriendsWatchingNow(userID int) []FriendWatchingInfo {
+	rows, err := db.Query(`
+		SELECT u.username, u.avatar_url, a.id, a.title, e.id, e.episode_num
+		FROM friendships f
+		JOIN users u ON u.id = CASE WHEN f.requester_id = ? THEN f.addressee_id ELSE f.requester_id END
+		JOIN user_progress up ON up.user_id = u.id
+		JOIN episodes e ON e.id = up.episode_id
+		JOIN anime a ON a.id = e.anime_id
+		WHERE f.status = 'accepted' AND (f.requester_id = ? OR f.addressee_id = ?)
+			AND u.show_watching_activity = 1
+			AND up.updated_at >= ?
+		ORDER BY up.updated_at DESC
+	`, userID, userID, userID, time.Now().Add(-friendsWatchingWindow))
+	if err != nil {
+		log.Printf("getFriendsWatchingNow error: %v", err)
+		return nil
+	}
+	defer rows.Close()
+
+	var result []FriendWatchingInfo
+	for rows.Next() {
+		var f FriendWatchingInfo
+		if rows.Scan(&f.Username, &f.AvatarURL, &f.AnimeID, &f.AnimeTitle, &f.EpisodeID, &f.EpisodeNum) == nil {
+			result = append(result, f)
+		}
+	}
+	return result
 }
 
 // getPendingIncoming возвращает входящие заявки в друзья.
@@ -1081,6 +1259,35 @@ func createTables() {
 			INDEX idx_created_at (created_at),
 			INDEX idx_session (session_id, created_at)
 		)`,
+		// Единственная строка конфигурации сайта — сейчас только maintenance mode
+		// (/admin/settings). Кэшируется в maintenanceMode при старте main().
+		`CREATE TABLE IF NOT EXISTS app_settings (
+			id TINYINT PRIMARY KEY DEFAULT 1,
+			maintenance_mode BOOLEAN NOT NULL DEFAULT 0
+		)`,
+		`CREATE TABLE IF NOT EXISTS comment_likes (
+			user_id INT NOT NULL,
+			comment_id INT NOT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (user_id, comment_id),
+			FOREIGN KEY (user_id) REFERENCES users(id),
+			FOREIGN KEY (comment_id) REFERENCES comments(id)
+		)`,
+		// Личные сообщения. read_at NULL = непрочитано. Индекс по паре
+		// (sender_id, recipient_id) и обратный — для быстрой выборки переписки
+		// с конкретным собеседником и списка диалогов.
+		`CREATE TABLE IF NOT EXISTS messages (
+			id BIGINT AUTO_INCREMENT PRIMARY KEY,
+			sender_id INT NOT NULL,
+			recipient_id INT NOT NULL,
+			text VARCHAR(1000) NOT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			read_at TIMESTAMP NULL DEFAULT NULL,
+			FOREIGN KEY (sender_id) REFERENCES users(id),
+			FOREIGN KEY (recipient_id) REFERENCES users(id),
+			INDEX idx_sender_recipient (sender_id, recipient_id, created_at),
+			INDEX idx_recipient_sender (recipient_id, sender_id, created_at)
+		)`,
 	}
 	for _, q := range tables {
 		if _, err := db.Exec(q); err != nil {
@@ -1088,6 +1295,10 @@ func createTables() {
 		}
 	}
 	log.Println("Таблицы ачивок и сброса пароля проверены/созданы")
+
+	if _, err := db.Exec("INSERT IGNORE INTO app_settings (id, maintenance_mode) VALUES (1, 0)"); err != nil {
+		log.Printf("app_settings init error: %v", err)
+	}
 
 	// Добавляем поле email в users, если его нет
 	if _, err := db.Exec("ALTER TABLE users ADD COLUMN email VARCHAR(255) DEFAULT '' AFTER username"); err != nil {
@@ -1130,13 +1341,28 @@ func createTables() {
 	if _, err := db.Exec("ALTER TABLE users ADD COLUMN is_premium TINYINT(1) NOT NULL DEFAULT 0"); err != nil {
 		log.Printf("ALTER TABLE users (is_premium) может уже существовать: %v", err)
 	}
-	// Кастомизация профиля: свой аватар (только Premium — хранение в MinIO стоит денег,
-	// см. 18_Монетизация_и_уровни.md) и рамка аватара (пресет, разблокируется уровнем)
+	// Кастомизация профиля: свой аватар (бесплатно всем, см. 18_Монетизация_и_уровни.md)
+	// и рамка аватара (пресет, разблокируется уровнем)
 	if _, err := db.Exec("ALTER TABLE users ADD COLUMN avatar_url VARCHAR(500) DEFAULT ''"); err != nil {
 		log.Printf("ALTER TABLE users (avatar_url) может уже существовать: %v", err)
 	}
 	if _, err := db.Exec("ALTER TABLE users ADD COLUMN avatar_frame VARCHAR(32) DEFAULT ''"); err != nil {
 		log.Printf("ALTER TABLE users (avatar_frame) может уже существовать: %v", err)
+	}
+	if _, err := db.Exec("ALTER TABLE users ADD COLUMN chart_color VARCHAR(32) DEFAULT ''"); err != nil {
+		log.Printf("ALTER TABLE users (chart_color) может уже существовать: %v", err)
+	}
+	// Приватность ленты активности друзей ("Х сейчас смотрит Y") — по умолчанию
+	// включено, пользователь может отключить в профиле.
+	if _, err := db.Exec("ALTER TABLE users ADD COLUMN show_watching_activity TINYINT(1) NOT NULL DEFAULT 1"); err != nil {
+		log.Printf("ALTER TABLE users (show_watching_activity) может уже существовать: %v", err)
+	}
+	// Приватность личных сообщений: 'everyone' (бесплатно, по умолчанию) или
+	// 'friends_only' (Premium-фича, см. 18_Монетизация_и_уровни.md) — кто
+	// может написать пользователю. Значение 'friends_only' у не-Premium
+	// игнорируется на сервере (canMessage), не только на UI.
+	if _, err := db.Exec("ALTER TABLE users ADD COLUMN dm_privacy VARCHAR(16) NOT NULL DEFAULT 'everyone'"); err != nil {
+		log.Printf("ALTER TABLE users (dm_privacy) может уже существовать: %v", err)
 	}
 	if _, err := db.Exec("ALTER TABLE users ADD COLUMN background_url VARCHAR(500) DEFAULT ''"); err != nil {
 		log.Printf("ALTER TABLE users (background_url) может уже существовать: %v", err)
@@ -1162,6 +1388,122 @@ const defaultBackgroundURL = "/static/img/profile/default_bg.jpg"
 
 // ---------- Обработчики ----------
 
+// recommendedAnimeCard — карточка аниме для блока "Рекомендуем вам" на главной.
+type recommendedAnimeCard struct {
+	ID     int
+	Title  string
+	Poster string
+	Genres string
+}
+
+// getRecommendedAnime — простая рекомендательная система без ML (решено
+// 2026-08-14, см. 13_Дальнейшие_улучшения.md): сначала аниме тех жанров, на
+// которых пользователь оставил больше всего реакций/комментариев, затем —
+// внутри этого — по общей популярности среди всех пользователей. Гостям и
+// пользователям без активности отдаём просто топ по популярности (fallback).
+func getRecommendedAnime(userID int, limit int) []recommendedAnimeCard {
+	popularityWhere := ""
+	args := []interface{}{}
+
+	if userID > 0 {
+		genreRows, err := db.Query(`
+			SELECT a.genres FROM anime a
+			JOIN episodes e ON e.anime_id = a.id
+			WHERE a.genres != '' AND (
+				e.id IN (SELECT episode_id FROM emotions WHERE user_id = ?)
+				OR e.id IN (SELECT episode_id FROM comments WHERE user_id = ?)
+			)
+		`, userID, userID)
+		if err == nil {
+			genreWeight := make(map[string]int)
+			for genreRows.Next() {
+				var genres string
+				if genreRows.Scan(&genres) == nil {
+					for _, g := range strings.Split(genres, ",") {
+						g = strings.TrimSpace(g)
+						if g != "" {
+							genreWeight[g]++
+						}
+					}
+				}
+			}
+			genreRows.Close()
+
+			topGenre := ""
+			topWeight := 0
+			for g, w := range genreWeight {
+				if w > topWeight {
+					topGenre, topWeight = g, w
+				}
+			}
+			if topGenre != "" {
+				popularityWhere = "WHERE a.genres LIKE ?"
+				args = append(args, "%"+topGenre+"%")
+			}
+		}
+	}
+
+	query := `
+		SELECT a.id, a.title, a.poster_url, a.genres
+		FROM anime a
+		LEFT JOIN (SELECT e.anime_id, COUNT(*) c FROM user_progress up JOIN episodes e ON e.id = up.episode_id GROUP BY e.anime_id) v ON v.anime_id = a.id
+		LEFT JOIN (SELECT e.anime_id, COUNT(*) c FROM emotions em JOIN episodes e ON e.id = em.episode_id GROUP BY e.anime_id) r ON r.anime_id = a.id
+		LEFT JOIN (SELECT e.anime_id, COUNT(*) c FROM comments cm JOIN episodes e ON e.id = cm.episode_id GROUP BY e.anime_id) c ON c.anime_id = a.id
+		` + popularityWhere + `
+		ORDER BY (COALESCE(v.c,0) + COALESCE(r.c,0) + COALESCE(c.c,0)) DESC
+		LIMIT ?
+	`
+	rows, err := db.Query(query, append(args, limit)...)
+	if err != nil {
+		log.Printf("getRecommendedAnime: %v", err)
+		return nil
+	}
+	defer rows.Close()
+
+	var results []recommendedAnimeCard
+	for rows.Next() {
+		var c recommendedAnimeCard
+		if rows.Scan(&c.ID, &c.Title, &c.Poster, &c.Genres) == nil {
+			results = append(results, c)
+		}
+	}
+
+	// Если рекомендации по жанру пользователя дали слишком мало результатов
+	// (мало аниме этого жанра в каталоге) — дополняем общей популярностью,
+	// без фильтра по жанру, чтобы блок не выглядел пустым/куцым.
+	if popularityWhere != "" && len(results) < limit {
+		return getRecommendedAnimeFallback(limit)
+	}
+	return results
+}
+
+// getRecommendedAnimeFallback — топ по популярности без фильтра по жанру.
+func getRecommendedAnimeFallback(limit int) []recommendedAnimeCard {
+	rows, err := db.Query(`
+		SELECT a.id, a.title, a.poster_url, a.genres
+		FROM anime a
+		LEFT JOIN (SELECT e.anime_id, COUNT(*) c FROM user_progress up JOIN episodes e ON e.id = up.episode_id GROUP BY e.anime_id) v ON v.anime_id = a.id
+		LEFT JOIN (SELECT e.anime_id, COUNT(*) c FROM emotions em JOIN episodes e ON e.id = em.episode_id GROUP BY e.anime_id) r ON r.anime_id = a.id
+		LEFT JOIN (SELECT e.anime_id, COUNT(*) c FROM comments cm JOIN episodes e ON e.id = cm.episode_id GROUP BY e.anime_id) c ON c.anime_id = a.id
+		ORDER BY (COALESCE(v.c,0) + COALESCE(r.c,0) + COALESCE(c.c,0)) DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		log.Printf("getRecommendedAnimeFallback: %v", err)
+		return nil
+	}
+	defer rows.Close()
+
+	var results []recommendedAnimeCard
+	for rows.Next() {
+		var c recommendedAnimeCard
+		if rows.Scan(&c.ID, &c.Title, &c.Poster, &c.Genres) == nil {
+			results = append(results, c)
+		}
+	}
+	return results
+}
+
 func homeHandler(w http.ResponseWriter, r *http.Request) {
 	// "/" зарегистрирован в DefaultServeMux как catch-all: Go отдаёт этот
 	// хендлер для ЛЮБОГО пути без отдельного маршрута, так что несуществующие
@@ -1171,14 +1513,33 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userID, _ := getUserIDFromSession(r)
+
 	// Отдаём реальный контент главной страницы сразу по "/" (важно для SEO —
 	// поисковый робот должен видеть контент без JS-редиректа). Прелоадер
 	// показывается как визуальный оверлей внутри home.html и просто гаснет,
 	// без навигации на отдельный URL.
-	render(w, "home.html", PageData{
-		Title:    "AniMemory — смотри аниме и делись эмоциями в реальном времени",
-		Username: currentUsername(r),
-	})
+	var friendsWatching []FriendWatchingInfo
+	if userID > 0 {
+		friendsWatching = getFriendsWatchingNow(userID)
+	}
+
+	data := struct {
+		Title            string
+		Username         string
+		RecommendedAnime []recommendedAnimeCard
+		FriendsWatching  []FriendWatchingInfo
+	}{
+		Title:            "AniMemory — смотри аниме и делись эмоциями в реальном времени",
+		Username:         currentUsername(r),
+		RecommendedAnime: getRecommendedAnime(userID, 6),
+		FriendsWatching:  friendsWatching,
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := templates.ExecuteTemplate(w, "home.html", data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func notFoundHandler(w http.ResponseWriter, r *http.Request) {
@@ -1495,12 +1856,29 @@ func watchHandler(w http.ResponseWriter, r *http.Request) {
 	// Получаем информацию об уровне пользователя для отображения
 	userID, _ := getUserIDFromSession(r)
 	levelInfo := UserLevelInfo{}
+	chartColorID := ""
 	if userID > 0 {
 		var xp int
 		err := db.QueryRow("SELECT xp FROM user_xp WHERE user_id = ?", userID).Scan(&xp)
 		if err == nil {
 			levelInfo = getLevelInfo(xp)
 		}
+		db.QueryRow("SELECT chart_color FROM users WHERE id = ?", userID).Scan(&chartColorID)
+	}
+	chartColor := chartColorPresets[0]
+	if c, ok := chartColorByID(chartColorID); ok {
+		chartColor = c
+	}
+
+	// Кнопки реакций с отметкой "разблокирована текущим уровнем" — эксклюзивные
+	// анимированные смайлы (✨💯👑) показываются заблокированными ниже нужного уровня.
+	type EmotionOption struct {
+		emotionPreset
+		Unlocked bool
+	}
+	emotionOptions := make([]EmotionOption, len(emotionPresets))
+	for i, p := range emotionPresets {
+		emotionOptions[i] = EmotionOption{emotionPreset: p, Unlocked: levelInfo.Level >= p.MinLevel}
 	}
 
 	// Следующие серии этого же сезона — показываем под блоком реакций/комментариев
@@ -1544,25 +1922,31 @@ func watchHandler(w http.ResponseWriter, r *http.Request) {
 		// IntroStart/IntroEnd/OutroStart/OutroEnd: 0 здесь означает "не задано" (NULL в БД),
 		// а не "начинается с 0-й секунды" — фронтенду нужно отдельно проверять,
 		// заданы ли таймкоды (например, через ненулевой IntroEnd), прежде чем показывать кнопку "Пропустить".
-		IntroStart int64
-		IntroEnd   int64
-		OutroStart int64
-		OutroEnd   int64
+		IntroStart      int64
+		IntroEnd        int64
+		OutroStart      int64
+		OutroEnd        int64
+		ChartColor      string
+		ChartColorHover string
+		EmotionOptions  []EmotionOption
 	}{
-		EpisodeNum:    episode.EpisodeNum,
-		VideoURL:      episode.VideoURL,
-		Title:         episode.Title,
-		UserLevel:     levelInfo,
-		Username:      currentUsername(r),
-		IsPremium:     isPremiumUser(userID),
-		AnimeID:       episode.AnimeID,
-		PrevEpisodeID: prevEpisodeID,
-		NextEpisodeID: nextEpisodeID,
-		NextEpisodes:  nextEpisodes,
-		IntroStart:    episode.IntroStart.Int64,
-		IntroEnd:      episode.IntroEnd.Int64,
-		OutroStart:    episode.OutroStart.Int64,
-		OutroEnd:      episode.OutroEnd.Int64,
+		EpisodeNum:      episode.EpisodeNum,
+		VideoURL:        episode.VideoURL,
+		Title:           episode.Title,
+		UserLevel:       levelInfo,
+		Username:        currentUsername(r),
+		IsPremium:       isPremiumUser(userID),
+		AnimeID:         episode.AnimeID,
+		PrevEpisodeID:   prevEpisodeID,
+		NextEpisodeID:   nextEpisodeID,
+		NextEpisodes:    nextEpisodes,
+		IntroStart:      episode.IntroStart.Int64,
+		IntroEnd:        episode.IntroEnd.Int64,
+		OutroStart:      episode.OutroStart.Int64,
+		OutroEnd:        episode.OutroEnd.Int64,
+		ChartColor:      chartColor.Color,
+		ChartColorHover: chartColor.HoverColor,
+		EmotionOptions:  emotionOptions,
 	}
 
 	err = templates.ExecuteTemplate(w, "watch.html", data)
@@ -1610,10 +1994,10 @@ func renderProfile(w http.ResponseWriter, r *http.Request, targetID, viewerID in
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	isOwn := viewerID == targetID
 
-	var username, avatarURL, avatarFrame, backgroundURL string
-	var isPremium, isBanned bool
-	err := db.QueryRow("SELECT username, avatar_url, avatar_frame, is_premium, background_url, is_banned FROM users WHERE id = ?", targetID).
-		Scan(&username, &avatarURL, &avatarFrame, &isPremium, &backgroundURL, &isBanned)
+	var username, avatarURL, avatarFrame, backgroundURL, chartColor, dmPrivacy string
+	var isPremium, isBanned, showWatchingActivity bool
+	err := db.QueryRow("SELECT username, avatar_url, avatar_frame, is_premium, background_url, is_banned, chart_color, show_watching_activity, dm_privacy FROM users WHERE id = ?", targetID).
+		Scan(&username, &avatarURL, &avatarFrame, &isPremium, &backgroundURL, &isBanned, &chartColor, &showWatchingActivity, &dmPrivacy)
 	if err != nil {
 		notFoundHandler(w, r)
 		return
@@ -1648,6 +2032,16 @@ func renderProfile(w http.ResponseWriter, r *http.Request, targetID, viewerID in
 	frameOptions := make([]FrameOption, len(avatarFramePresets))
 	for i, f := range avatarFramePresets {
 		frameOptions[i] = FrameOption{avatarFramePreset: f, Unlocked: levelInfo.Level >= f.MinLevel}
+	}
+
+	// Цвета графика реакций с отметкой "разблокирован текущим уровнем" — для селектора на странице
+	type ChartColorOption struct {
+		chartColorPreset
+		Unlocked bool
+	}
+	chartColorOptions := make([]ChartColorOption, len(chartColorPresets))
+	for i, c := range chartColorPresets {
+		chartColorOptions[i] = ChartColorOption{chartColorPreset: c, Unlocked: levelInfo.Level >= c.MinLevel}
 	}
 
 	// Получаем ачивки
@@ -1781,56 +2175,91 @@ func renderProfile(w http.ResponseWriter, r *http.Request, targetID, viewerID in
 	}
 
 	data := struct {
-		Username            string // виewer — для header.html
-		ProfileUsername     string // владелец просматриваемого профиля
-		ProfileUserID       int
-		IsOwnProfile        bool
-		FriendshipStatus    string
-		FriendshipRequestID int
-		Friends             []FriendInfo
-		PendingRequests     []FriendRequestInfo
-		Level               UserLevelInfo
-		AchievementSlots    []AchievementSlot
-		EmotionCount        int
-		CommentCount        int
-		EpisodeCount        int
-		ContinueWatching    []ContinueEpisode
-		FavoriteAnime       []FavoriteAnime
-		AvatarURL           string
-		AvatarFrame         string
-		AvatarFrameColor    string
-		BackgroundURL       string
-		IsPremium           bool
-		FrameOptions        []FrameOption
-		IsViewerAdmin       bool
-		IsBanned            bool
+		Username             string // виewer — для header.html
+		ProfileUsername      string // владелец просматриваемого профиля
+		ProfileUserID        int
+		IsOwnProfile         bool
+		FriendshipStatus     string
+		FriendshipRequestID  int
+		Friends              []FriendInfo
+		PendingRequests      []FriendRequestInfo
+		Level                UserLevelInfo
+		AchievementSlots     []AchievementSlot
+		EmotionCount         int
+		CommentCount         int
+		EpisodeCount         int
+		ContinueWatching     []ContinueEpisode
+		FavoriteAnime        []FavoriteAnime
+		AvatarURL            string
+		AvatarFrame          string
+		AvatarFrameColor     string
+		BackgroundURL        string
+		IsPremium            bool
+		FrameOptions         []FrameOption
+		ChartColor           string
+		ChartColorOptions    []ChartColorOption
+		ShowWatchingActivity bool
+		DmPrivacy            string
+		IsViewerAdmin        bool
+		IsBanned             bool
 	}{
-		Username:            viewerUsername,
-		ProfileUsername:     username,
-		ProfileUserID:       targetID,
-		IsOwnProfile:        isOwn,
-		FriendshipStatus:    friendshipStatus,
-		FriendshipRequestID: friendshipRequestID,
-		Friends:             friends,
-		PendingRequests:     pendingRequests,
-		Level:               levelInfo,
-		AchievementSlots:    achievementSlots,
-		EmotionCount:        emotionCount,
-		CommentCount:        commentCount,
-		EpisodeCount:        episodeCount,
-		ContinueWatching:    continueWatching,
-		FavoriteAnime:       favoriteAnime,
-		AvatarURL:           avatarURL,
-		AvatarFrame:         avatarFrame,
-		AvatarFrameColor:    avatarFrameColor,
-		BackgroundURL:       backgroundURL,
-		IsPremium:           isPremium,
-		FrameOptions:        frameOptions,
-		IsViewerAdmin:       !isOwn && isUserAdmin(viewerID),
-		IsBanned:            isBanned,
+		Username:             viewerUsername,
+		ProfileUsername:      username,
+		ProfileUserID:        targetID,
+		IsOwnProfile:         isOwn,
+		FriendshipStatus:     friendshipStatus,
+		FriendshipRequestID:  friendshipRequestID,
+		Friends:              friends,
+		PendingRequests:      pendingRequests,
+		Level:                levelInfo,
+		AchievementSlots:     achievementSlots,
+		EmotionCount:         emotionCount,
+		CommentCount:         commentCount,
+		EpisodeCount:         episodeCount,
+		ContinueWatching:     continueWatching,
+		FavoriteAnime:        favoriteAnime,
+		AvatarURL:            avatarURL,
+		AvatarFrame:          avatarFrame,
+		AvatarFrameColor:     avatarFrameColor,
+		BackgroundURL:        backgroundURL,
+		IsPremium:            isPremium,
+		FrameOptions:         frameOptions,
+		ChartColor:           chartColor,
+		ChartColorOptions:    chartColorOptions,
+		ShowWatchingActivity: showWatchingActivity,
+		DmPrivacy:            dmPrivacy,
+		IsViewerAdmin:        !isOwn && isUserAdmin(viewerID),
+		IsBanned:             isBanned,
 	}
 
 	if err := templates.ExecuteTemplate(w, "profile.html", data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// messagesHandler — GET /messages[?with=<user_id>]. Список диалогов +
+// (опционально) предвыбранный собеседник — сама переписка грузится JS'ом.
+func messagesHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if _, err := getUserIDFromSession(r); err != nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	withID, _ := strconv.Atoi(r.URL.Query().Get("with"))
+	withUsername := ""
+	if withID > 0 {
+		db.QueryRow("SELECT username FROM users WHERE id = ?", withID).Scan(&withUsername)
+	}
+	data := struct {
+		Username     string
+		WithUserID   int
+		WithUsername string
+	}{
+		Username:     currentUsername(r),
+		WithUserID:   withID,
+		WithUsername: withUsername,
+	}
+	if err := templates.ExecuteTemplate(w, "messages.html", data); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
@@ -1882,8 +2311,13 @@ func apiEmotionPost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"Missing fields"}`, http.StatusBadRequest)
 		return
 	}
-	if !validEmotions[req.EmotionType] {
+	preset, ok := emotionPresetByEmoji(req.EmotionType)
+	if !ok {
 		http.Error(w, `{"error":"Invalid emotion type"}`, http.StatusBadRequest)
+		return
+	}
+	if userLevel(userID) < preset.MinLevel {
+		http.Error(w, `{"error":"Эта реакция ещё не разблокирована — нужен более высокий уровень"}`, http.StatusForbidden)
 		return
 	}
 	if !actionLimiter.allow(fmt.Sprintf("emotion:%d", userID), emotionRateLimit, emotionRateWindow) {
@@ -1936,9 +2370,10 @@ func apiEmotionsGet(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	query := `
-		SELECT e.emotion_type, e.timestamp_sec, u.username, e.user_id
+		SELECT e.emotion_type, e.timestamp_sec, u.username, e.user_id, COALESCE(ux.xp, 0)
 		FROM emotions e
 		JOIN users u ON e.user_id = u.id
+		LEFT JOIN user_xp ux ON ux.user_id = u.id
 		WHERE e.episode_id = ?`
 	args := []interface{}{episodeID}
 	if !isPremiumUser(userID) {
@@ -1960,15 +2395,17 @@ func apiEmotionsGet(w http.ResponseWriter, r *http.Request) {
 		TimestampSec int    `json:"timestamp_sec"`
 		Username     string `json:"username"`
 		IsFriend     bool   `json:"is_friend"`
+		Badge        string `json:"badge"`
 	}
 	emotions := []Emotion{}
 	for rows.Next() {
 		var e Emotion
-		var authorID int
-		if err := rows.Scan(&e.EmotionType, &e.TimestampSec, &e.Username, &authorID); err != nil {
+		var authorID, xp int
+		if err := rows.Scan(&e.EmotionType, &e.TimestampSec, &e.Username, &authorID, &xp); err != nil {
 			continue
 		}
 		e.IsFriend = friendIDs[authorID]
+		e.Badge = levelBadge(getLevelInfo(xp).Level)
 		emotions = append(emotions, e)
 	}
 
@@ -2133,6 +2570,7 @@ type WsMessage struct {
 	EmotionType  string `json:"emotion_type"`
 	Username     string `json:"username"`
 	UserID       int    `json:"user_id,omitempty"`
+	Badge        string `json:"badge,omitempty"`
 }
 
 // Клиент
@@ -2265,7 +2703,11 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			log.Printf("📨 Received WS message: type=%s episode_id=%d emotion_type=%s", msg.Type, msg.EpisodeID, msg.EmotionType)
 			if msg.Type == "emotion" && msg.EpisodeID == episodeID {
-				if !validEmotions[msg.EmotionType] || msg.TimestampSec < 0 {
+				preset, ok := emotionPresetByEmoji(msg.EmotionType)
+				if !ok || msg.TimestampSec < 0 {
+					continue
+				}
+				if userLevel(userID) < preset.MinLevel {
 					continue
 				}
 				if !actionLimiter.allow(fmt.Sprintf("emotion:%d", userID), emotionRateLimit, emotionRateWindow) {
@@ -2279,6 +2721,7 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 				}
 				msg.Username = username
 				msg.UserID = userID
+				msg.Badge = levelBadge(userLevel(userID))
 				hub.broadcast <- msg
 
 				// Начисляем XP за эмоцию через WebSocket (с учётом анти-фарм лимита на эпизод)
@@ -2306,6 +2749,357 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}()
+}
+
+// ===== Личные сообщения: отдельный WS-хаб по user_id =====
+//
+// Комнатный hub выше адресует по episodeID (все зрители одной серии видят
+// одно и то же). Для личных сообщений между произвольными парами
+// пользователей это не подходит — нужен канал на каждого конкретного
+// получателя, а не на комнату. dmHub — push-only: клиент открывает
+// соединение просто чтобы получать новые сообщения в реальном времени,
+// сама отправка идёт через REST (apiMessageSend), не через сокет — это
+// не создаёт новых проблем синхронизации с тем, что уже пишется в БД.
+type dmHub struct {
+	mu      sync.RWMutex
+	clients map[int]map[*websocket.Conn]bool
+}
+
+var dmh = &dmHub{clients: make(map[int]map[*websocket.Conn]bool)}
+
+func (h *dmHub) register(userID int, conn *websocket.Conn) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.clients[userID] == nil {
+		h.clients[userID] = make(map[*websocket.Conn]bool)
+	}
+	h.clients[userID][conn] = true
+}
+
+func (h *dmHub) unregister(userID int, conn *websocket.Conn) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if conns, ok := h.clients[userID]; ok {
+		delete(conns, conn)
+		if len(conns) == 0 {
+			delete(h.clients, userID)
+		}
+	}
+}
+
+func (h *dmHub) push(userID int, data []byte) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for conn := range h.clients[userID] {
+		conn.WriteMessage(websocket.TextMessage, data)
+	}
+}
+
+// wsDMHandler — /ws/dm. Открывается один раз при заходе на сайт (не привязан
+// к конкретному диалогу), держит соединение открытым для push новых
+// сообщений и обновления бейджа непрочитанных.
+func wsDMHandler(w http.ResponseWriter, r *http.Request) {
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Print("dm upgrade error:", err)
+		return
+	}
+	dmh.register(userID, conn)
+	defer func() {
+		dmh.unregister(userID, conn)
+		conn.Close()
+	}()
+	// Читаем только чтобы обнаружить закрытие соединения — клиент по этому
+	// сокету ничего не отправляет, вся отправка идёт через REST.
+	for {
+		if _, _, err := conn.ReadMessage(); err != nil {
+			break
+		}
+	}
+}
+
+// Message — одно личное сообщение в переписке.
+type Message struct {
+	ID          int    `json:"id"`
+	SenderID    int    `json:"sender_id"`
+	RecipientID int    `json:"recipient_id"`
+	SenderName  string `json:"sender_username"`
+	Text        string `json:"text"`
+	CreatedAt   string `json:"created_at"`
+}
+
+// canMessage проверяет, может ли senderID написать recipientID — учитывает
+// dm_privacy получателя (Premium-фича, см. 18_Монетизация_и_уровни.md).
+// Значение 'friends_only' у получателя без Premium игнорируется — форсим
+// 'everyone', чтобы отключение подписки не оставляло зависший приватный
+// режим по старому значению в БД.
+func canMessage(senderID, recipientID int) bool {
+	if senderID == recipientID {
+		return false
+	}
+	var privacy string
+	var recipientIsPremium bool
+	if err := db.QueryRow("SELECT dm_privacy, is_premium FROM users WHERE id = ?", recipientID).Scan(&privacy, &recipientIsPremium); err != nil {
+		return false
+	}
+	if !recipientIsPremium || privacy != "friends_only" {
+		return true
+	}
+	return getFriendshipStatus(senderID, recipientID) == "friends"
+}
+
+// apiMessagesGet — GET /api/messages?with=<user_id>&page=&pageSize= — история
+// переписки с конкретным собеседником, накопительная пагинация как у
+// комментариев/эмоций.
+func apiMessagesGet(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	withID, _ := strconv.Atoi(r.URL.Query().Get("with"))
+	if withID == 0 {
+		http.Error(w, `{"error":"with required"}`, http.StatusBadRequest)
+		return
+	}
+
+	page := 1
+	if p, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && p > 0 {
+		page = p
+	}
+	pageSize := 30
+	if ps, err := strconv.Atoi(r.URL.Query().Get("pageSize")); err == nil && ps > 0 && ps <= 100 {
+		pageSize = ps
+	}
+	offset := (page - 1) * pageSize
+
+	rows, err := db.Query(`
+		SELECT m.id, m.sender_id, m.recipient_id, u.username, m.text, m.created_at
+		FROM messages m
+		JOIN users u ON u.id = m.sender_id
+		WHERE (m.sender_id = ? AND m.recipient_id = ?) OR (m.sender_id = ? AND m.recipient_id = ?)
+		ORDER BY m.created_at DESC LIMIT ? OFFSET ?
+	`, userID, withID, withID, userID, pageSize, offset)
+	if err != nil {
+		http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	messages := []Message{}
+	for rows.Next() {
+		var m Message
+		var createdAt sql.NullTime
+		if err := rows.Scan(&m.ID, &m.SenderID, &m.RecipientID, &m.SenderName, &m.Text, &createdAt); err != nil {
+			continue
+		}
+		if createdAt.Valid {
+			m.CreatedAt = createdAt.Time.Format("2006-01-02 15:04:05")
+		}
+		messages = append(messages, m)
+	}
+	json.NewEncoder(w).Encode(messages)
+}
+
+// apiMessageSend — POST /api/messages/send {recipient_id, text}.
+func apiMessageSend(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	var req struct {
+		RecipientID int    `json:"recipient_id"`
+		Text        string `json:"text"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RecipientID == 0 || strings.TrimSpace(req.Text) == "" {
+		http.Error(w, `{"error":"recipient_id и text обязательны"}`, http.StatusBadRequest)
+		return
+	}
+	if !actionLimiter.allow(fmt.Sprintf("message:%d", userID), messageRateLimit, messageRateWindow) {
+		http.Error(w, `{"error":"Слишком много сообщений подряд, подождите немного"}`, http.StatusTooManyRequests)
+		return
+	}
+	if !canMessage(userID, req.RecipientID) {
+		http.Error(w, `{"error":"Этот пользователь принимает сообщения только от друзей"}`, http.StatusForbidden)
+		return
+	}
+
+	text := req.Text
+	if len(text) > 1000 {
+		text = text[:1000]
+	}
+	text = strings.ReplaceAll(text, "<", "&lt;")
+	text = strings.ReplaceAll(text, ">", "&gt;")
+
+	res, err := db.Exec("INSERT INTO messages (sender_id, recipient_id, text) VALUES (?, ?, ?)", userID, req.RecipientID, text)
+	if err != nil {
+		http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
+		return
+	}
+	msgID, _ := res.LastInsertId()
+
+	msg := Message{
+		ID:          int(msgID),
+		SenderID:    userID,
+		RecipientID: req.RecipientID,
+		SenderName:  currentUsername(r),
+		Text:        text,
+		CreatedAt:   time.Now().Format("2006-01-02 15:04:05"),
+	}
+	if data, err := json.Marshal(map[string]interface{}{"type": "dm", "message": msg}); err == nil {
+		dmh.push(req.RecipientID, data)
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(msg)
+}
+
+// Conversation — одна строка списка диалогов на /messages.
+type Conversation struct {
+	UserID      int    `json:"user_id"`
+	Username    string `json:"username"`
+	AvatarURL   string `json:"avatar_url"`
+	LastText    string `json:"last_text"`
+	LastAt      string `json:"last_at"`
+	UnreadCount int    `json:"unread_count"`
+}
+
+// apiConversationsList — GET /api/conversations — список диалогов с
+// последним сообщением и числом непрочитанных, отсортирован по свежести.
+func apiConversationsList(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
+	// Собеседник — тот, кто не я, в каждой паре, где я участвую.
+	rows, err := db.Query(`
+		SELECT peer_id FROM (
+			SELECT sender_id AS peer_id FROM messages WHERE recipient_id = ?
+			UNION
+			SELECT recipient_id AS peer_id FROM messages WHERE sender_id = ?
+		) peers
+	`, userID, userID)
+	if err != nil {
+		http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
+		return
+	}
+	var peerIDs []int
+	for rows.Next() {
+		var id int
+		if rows.Scan(&id) == nil {
+			peerIDs = append(peerIDs, id)
+		}
+	}
+	rows.Close()
+
+	conversations := make([]Conversation, 0, len(peerIDs))
+	for _, peerID := range peerIDs {
+		var c Conversation
+		c.UserID = peerID
+		db.QueryRow("SELECT username, avatar_url FROM users WHERE id = ?", peerID).Scan(&c.Username, &c.AvatarURL)
+
+		var lastAt sql.NullTime
+		db.QueryRow(`
+			SELECT text, created_at FROM messages
+			WHERE (sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?)
+			ORDER BY created_at DESC LIMIT 1
+		`, userID, peerID, peerID, userID).Scan(&c.LastText, &lastAt)
+		if lastAt.Valid {
+			c.LastAt = lastAt.Time.Format("2006-01-02 15:04:05")
+		}
+
+		db.QueryRow("SELECT COUNT(*) FROM messages WHERE sender_id = ? AND recipient_id = ? AND read_at IS NULL", peerID, userID).Scan(&c.UnreadCount)
+
+		conversations = append(conversations, c)
+	}
+	sort.Slice(conversations, func(i, j int) bool { return conversations[i].LastAt > conversations[j].LastAt })
+
+	json.NewEncoder(w).Encode(conversations)
+}
+
+// apiMessagesMarkRead — POST /api/messages/read {with: user_id}.
+func apiMessagesMarkRead(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	var req struct {
+		With int `json:"with"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.With == 0 {
+		http.Error(w, `{"error":"with required"}`, http.StatusBadRequest)
+		return
+	}
+	if _, err := db.Exec("UPDATE messages SET read_at = NOW() WHERE sender_id = ? AND recipient_id = ? AND read_at IS NULL", req.With, userID); err != nil {
+		http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// apiUnreadMessagesCount — GET /api/messages/unread-count — для бейджа в хедере.
+func apiUnreadMessagesCount(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	var count int
+	db.QueryRow("SELECT COUNT(*) FROM messages WHERE recipient_id = ? AND read_at IS NULL", userID).Scan(&count)
+	json.NewEncoder(w).Encode(map[string]int{"count": count})
+}
+
+// apiDmPrivacyToggle — POST /api/profile/dm-privacy {privacy: "everyone"|"friends_only"}.
+// friends_only доступно только Premium — см. canMessage.
+func apiDmPrivacyToggle(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	var req struct {
+		Privacy string `json:"privacy"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || (req.Privacy != "everyone" && req.Privacy != "friends_only") {
+		http.Error(w, `{"error":"privacy должен быть everyone или friends_only"}`, http.StatusBadRequest)
+		return
+	}
+	if req.Privacy == "friends_only" && !isPremiumUser(userID) {
+		http.Error(w, `{"error":"Ограничение до друзей доступно только по подписке Premium"}`, http.StatusForbidden)
+		return
+	}
+	if _, err := db.Exec("UPDATE users SET dm_privacy = ? WHERE id = ?", req.Privacy, userID); err != nil {
+		http.Error(w, `{"error":"Ошибка сохранения"}`, http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 func apiEmotionsStats(w http.ResponseWriter, r *http.Request) {
@@ -2360,6 +3154,10 @@ type Comment struct {
 	TimestampSec int    `json:"timestamp_sec"`
 	Text         string `json:"text"`
 	CreatedAt    string `json:"created_at"`
+	LikeCount    int    `json:"like_count"`
+	LikedByMe    bool   `json:"liked_by_me"`
+	Badge        string `json:"badge"`
+	Color        string `json:"color"`
 }
 
 func apiCommentPost(w http.ResponseWriter, r *http.Request) {
@@ -2448,11 +3246,15 @@ func apiCommentsGet(w http.ResponseWriter, r *http.Request) {
 
 	userID, _ := getUserIDFromSession(r)
 	query := `
-		SELECT c.id, u.username, c.timestamp_sec, c.text, c.created_at
+		SELECT c.id, u.username, c.timestamp_sec, c.text, c.created_at,
+			(SELECT COUNT(*) FROM comment_likes cl WHERE cl.comment_id = c.id) AS like_count,
+			EXISTS(SELECT 1 FROM comment_likes cl WHERE cl.comment_id = c.id AND cl.user_id = ?) AS liked_by_me,
+			COALESCE(ux.xp, 0)
 		FROM comments c
 		JOIN users u ON c.user_id = u.id
+		LEFT JOIN user_xp ux ON ux.user_id = u.id
 		WHERE c.episode_id = ?`
-	args := []interface{}{episodeID}
+	args := []interface{}{userID, episodeID}
 	if !isPremiumUser(userID) {
 		query += " AND c.timestamp_sec <= ?"
 		args = append(args, watchedUpToSec(userID, episodeID))
@@ -2471,15 +3273,65 @@ func apiCommentsGet(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var c Comment
 		var createdAt sql.NullTime
-		if err := rows.Scan(&c.ID, &c.Username, &c.TimestampSec, &c.Text, &createdAt); err != nil {
+		var xp int
+		if err := rows.Scan(&c.ID, &c.Username, &c.TimestampSec, &c.Text, &createdAt, &c.LikeCount, &c.LikedByMe, &xp); err != nil {
 			continue
 		}
 		if createdAt.Valid {
 			c.CreatedAt = createdAt.Time.Format("2006-01-02 15:04:05")
 		}
+		level := getLevelInfo(xp).Level
+		c.Badge = levelBadge(level)
+		c.Color = levelColor(level)
 		comments = append(comments, c)
 	}
 	json.NewEncoder(w).Encode(comments)
+}
+
+// apiCommentLikeToggle переключает лайк на комментарии и проверяет ачивку
+// "Популярный" для автора комментария (не для того, кто лайкнул).
+func apiCommentLikeToggle(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	var body struct {
+		CommentID int `json:"comment_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.CommentID == 0 {
+		http.Error(w, `{"error":"comment_id required"}`, http.StatusBadRequest)
+		return
+	}
+
+	var authorID int
+	if err := db.QueryRow("SELECT user_id FROM comments WHERE id = ?", body.CommentID).Scan(&authorID); err != nil {
+		http.Error(w, `{"error":"comment not found"}`, http.StatusBadRequest)
+		return
+	}
+
+	var exists int
+	db.QueryRow("SELECT COUNT(*) FROM comment_likes WHERE user_id = ? AND comment_id = ?", userID, body.CommentID).Scan(&exists)
+	if exists > 0 {
+		db.Exec("DELETE FROM comment_likes WHERE user_id = ? AND comment_id = ?", userID, body.CommentID)
+		var likeCount int
+		db.QueryRow("SELECT COUNT(*) FROM comment_likes WHERE comment_id = ?", body.CommentID).Scan(&likeCount)
+		json.NewEncoder(w).Encode(map[string]interface{}{"active": false, "like_count": likeCount})
+		return
+	}
+	if _, err := db.Exec("INSERT INTO comment_likes (user_id, comment_id) VALUES (?, ?)", userID, body.CommentID); err != nil {
+		http.Error(w, `{"error":"like failed"}`, http.StatusBadRequest)
+		return
+	}
+	checkAndUnlockAchievements(authorID)
+	var likeCount int
+	db.QueryRow("SELECT COUNT(*) FROM comment_likes WHERE comment_id = ?", body.CommentID).Scan(&likeCount)
+	json.NewEncoder(w).Encode(map[string]interface{}{"active": true, "like_count": likeCount})
 }
 
 func searchHandler(w http.ResponseWriter, r *http.Request) {
@@ -2726,9 +3578,36 @@ func avatarFrameByID(id string) (avatarFramePreset, bool) {
 	return avatarFramePreset{}, false
 }
 
-// apiAvatarUploadHandler принимает файл аватара — только для Premium-пользователей
-// (хранение в MinIO стоит денег, см. 18_Монетизация_и_уровни.md), остальным доступны
-// только рамки-пресеты (apiAvatarFrameHandler).
+// chartColorPreset — цвет графика реакций на watch.html, разблокируется уровнем
+// (та же схема, что avatarFramePreset: выбор пользователем из бесплатных пресетов).
+type chartColorPreset struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	MinLevel   int    `json:"min_level"`
+	Color      string `json:"color"`
+	HoverColor string `json:"hover_color"`
+}
+
+var chartColorPresets = []chartColorPreset{
+	{ID: "", Name: "По умолчанию", MinLevel: 1, Color: "#d82d7e", HoverColor: "#ff5fa8"},
+	{ID: "teal", Name: "Бирюзовый", MinLevel: 3, Color: "#2dd8a8", HoverColor: "#5fffce"},
+	{ID: "gold", Name: "Золотой", MinLevel: 6, Color: "#d8b62d", HoverColor: "#ffe45f"},
+	{ID: "violet", Name: "Фиолетовый", MinLevel: 9, Color: "#8a2dd8", HoverColor: "#b85fff"},
+	{ID: "ice", Name: "Ледяной", MinLevel: 12, Color: "#2d9ed8", HoverColor: "#5fd4ff"},
+}
+
+func chartColorByID(id string) (chartColorPreset, bool) {
+	for _, c := range chartColorPresets {
+		if c.ID == id {
+			return c, true
+		}
+	}
+	return chartColorPreset{}, false
+}
+
+// apiAvatarUploadHandler принимает файл аватара — бесплатно для всех пользователей
+// (решение 2026-08-14, см. 18_Монетизация_и_уровни.md: перенесено из Premium в
+// бесплатную версию наравне с 1080p/ранним доступом).
 func apiAvatarUploadHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if r.Method != http.MethodPost {
@@ -2738,10 +3617,6 @@ func apiAvatarUploadHandler(w http.ResponseWriter, r *http.Request) {
 	userID, err := getUserIDFromSession(r)
 	if err != nil {
 		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
-		return
-	}
-	if !isPremiumUser(userID) {
-		http.Error(w, `{"error":"Загрузка своего аватара доступна только по подписке Premium"}`, http.StatusForbidden)
 		return
 	}
 
@@ -2799,6 +3674,11 @@ func apiAvatarUploadHandler(w http.ResponseWriter, r *http.Request) {
 
 // apiBackgroundUploadHandler — загрузка своего фона профиля, тот же паттерн,
 // что apiAvatarUploadHandler (Premium-гейт, magic-bytes, MinIO).
+// backgroundUploadMinLevel — свой фон профиля доступен бесплатно с этого уровня
+// (решение 2026-08-14: перенесено из Premium в бесплатную версию, та же логика,
+// что рамки аватара/цвет графика — косметика за активность, не за деньги).
+const backgroundUploadMinLevel = 2
+
 func apiBackgroundUploadHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if r.Method != http.MethodPost {
@@ -2810,8 +3690,8 @@ func apiBackgroundUploadHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
-	if !isPremiumUser(userID) {
-		http.Error(w, `{"error":"Загрузка своего фона доступна только по подписке Premium"}`, http.StatusForbidden)
+	if userLevel(userID) < backgroundUploadMinLevel {
+		http.Error(w, fmt.Sprintf(`{"error":"Свой фон разблокируется на уровне %d"}`, backgroundUploadMinLevel), http.StatusForbidden)
 		return
 	}
 
@@ -2867,6 +3747,49 @@ func apiBackgroundUploadHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "background_url": url})
 }
 
+// apiWatchingActivityToggleHandler переключает видимость в ленте активности
+// друзей ("Х сейчас смотрит Y") — решено 2026-08-14, приватность сразу вместе
+// с фичей, а не отдельным заходом.
+func apiWatchingActivityToggleHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	var current bool
+	db.QueryRow("SELECT show_watching_activity FROM users WHERE id = ?", userID).Scan(&current)
+	newValue := !current
+	if _, err := db.Exec("UPDATE users SET show_watching_activity = ? WHERE id = ?", newValue, userID); err != nil {
+		http.Error(w, `{"error":"Ошибка сохранения"}`, http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]bool{"value": newValue})
+}
+
+// apiBackgroundRemoveHandler сбрасывает фон профиля обратно на дефолтный.
+func apiBackgroundRemoveHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	if _, err := db.Exec("UPDATE users SET background_url = ? WHERE id = ?", defaultBackgroundURL, userID); err != nil {
+		http.Error(w, `{"error":"Ошибка сохранения"}`, http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "background_url": defaultBackgroundURL})
+}
+
 // apiAvatarFrameHandler устанавливает рамку аватара из бесплатных пресетов,
 // разблокированных уровнем пользователя.
 func apiAvatarFrameHandler(w http.ResponseWriter, r *http.Request) {
@@ -2899,6 +3822,44 @@ func apiAvatarFrameHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := db.Exec("UPDATE users SET avatar_frame = ? WHERE id = ?", frame.ID, userID); err != nil {
+		http.Error(w, `{"error":"Ошибка сохранения"}`, http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// apiChartColorHandler устанавливает цвет графика реакций из бесплатных пресетов,
+// разблокированных уровнем пользователя (тот же паттерн, что apiAvatarFrameHandler).
+func apiChartColorHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	var req struct {
+		ColorID string `json:"color_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"Invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+	preset, ok := chartColorByID(req.ColorID)
+	if !ok {
+		http.Error(w, `{"error":"Неизвестный цвет"}`, http.StatusBadRequest)
+		return
+	}
+	var xp int
+	db.QueryRow("SELECT xp FROM user_xp WHERE user_id = ?", userID).Scan(&xp)
+	if getLevelInfo(xp).Level < preset.MinLevel {
+		http.Error(w, `{"error":"Цвет ещё не разблокирован — нужен более высокий уровень"}`, http.StatusForbidden)
+		return
+	}
+	if _, err := db.Exec("UPDATE users SET chart_color = ? WHERE id = ?", preset.ID, userID); err != nil {
 		http.Error(w, `{"error":"Ошибка сохранения"}`, http.StatusInternalServerError)
 		return
 	}
@@ -3148,40 +4109,85 @@ type adminUserRow struct {
 	CreatedAt string
 }
 
-const adminUsersPageSize = 25
+const adminUsersPageSize = 15
 
-// adminUsersHandler — GET /admin/users. Список пользователей с поиском по
-// username и пагинацией; управление ролями идёт через apiAdminUserToggle.
-func adminUsersHandler(w http.ResponseWriter, r *http.Request) {
-	userID, err := getUserIDFromSession(r)
-	if err != nil {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
-		return
-	}
-	if !isUserAdmin(userID) {
-		http.Error(w, "Доступ запрещён", http.StatusForbidden)
-		return
-	}
+// ponytail: не ограничено, при росте базы админов/премиумов на порядки
+// стоит добавить пагинацию и в нижние плашки.
+const adminUsersPanelLimit = 300
 
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-	if page < 1 {
-		page = 1
+// levelXPRange возвращает диапазон XP, соответствующий уровню level (для
+// фильтра по уровню в /admin/users — уровень не хранится в БД, только XP).
+func levelXPRange(level int) (minXP int, maxXP int, hasMax bool) {
+	if level < 1 {
+		level = 1
 	}
-	offset := (page - 1) * adminUsersPageSize
+	if level-1 < len(levelXPRequirements) {
+		minXP = levelXPRequirements[level-1]
+	}
+	if level < len(levelXPRequirements) {
+		maxXP = levelXPRequirements[level]
+		hasMax = true
+	}
+	return
+}
 
-	where := ""
-	args := []interface{}{}
-	if q != "" {
-		where = "WHERE u.username LIKE ?"
+// adminUsersFilterConds разбирает общие query-параметры фильтра (q/level/date_from/date_to)
+// из запроса в список условий+args — переиспользуется и в основной таблице, и в
+// плашках премиум/админов (с добавлением своего is_premium=1/is_admin=1), и в
+// apiAdminUsersList (подгрузка "Показать ещё"), чтобы фильтры не терялись при пагинации.
+func adminUsersFilterConds(r *http.Request) (conds []string, args []interface{}) {
+	if q := strings.TrimSpace(r.URL.Query().Get("q")); q != "" {
+		conds = append(conds, "u.username LIKE ?")
 		args = append(args, "%"+q+"%")
 	}
+	if levelStr := r.URL.Query().Get("level"); levelStr != "" {
+		if level, err := strconv.Atoi(levelStr); err == nil && level >= 1 {
+			minXP, maxXP, hasMax := levelXPRange(level)
+			conds = append(conds, "COALESCE(ux.xp, 0) >= ?")
+			args = append(args, minXP)
+			if hasMax {
+				conds = append(conds, "COALESCE(ux.xp, 0) < ?")
+				args = append(args, maxXP)
+			}
+		}
+	}
+	if dateFrom := r.URL.Query().Get("date_from"); dateFrom != "" {
+		if _, err := time.Parse("2006-01-02", dateFrom); err == nil {
+			conds = append(conds, "u.created_at >= ?")
+			args = append(args, dateFrom)
+		}
+	}
+	if dateTo := r.URL.Query().Get("date_to"); dateTo != "" {
+		if t, err := time.Parse("2006-01-02", dateTo); err == nil {
+			conds = append(conds, "u.created_at < ?")
+			args = append(args, t.AddDate(0, 0, 1).Format("2006-01-02"))
+		}
+	}
+	return
+}
 
-	var total int
-	countArgs := append([]interface{}{}, args...)
-	db.QueryRow("SELECT COUNT(*) FROM users u "+where, countArgs...).Scan(&total)
+// buildWhere собирает WHERE-условие из базового условия (например "u.is_premium = 1",
+// может быть пустым) и общих фильтров из adminUsersFilterConds.
+func buildWhere(baseCond string, baseArgs []interface{}, conds []string, condArgs []interface{}) (string, []interface{}) {
+	all := []string{}
+	args := []interface{}{}
+	if baseCond != "" {
+		all = append(all, baseCond)
+		args = append(args, baseArgs...)
+	}
+	all = append(all, conds...)
+	args = append(args, condArgs...)
+	if len(all) == 0 {
+		return "", args
+	}
+	return "WHERE " + strings.Join(all, " AND "), args
+}
 
-	rowsArgs := append(append([]interface{}{}, args...), adminUsersPageSize, offset)
+// queryAdminUsers — общий запрос списка пользователей с опциональным WHERE,
+// используется и для основной таблицы (постранично), и для плашек
+// премиум/админов (весь список), и для JSON-подгрузки "показать ещё".
+func queryAdminUsers(where string, args []interface{}, limit, offset int) ([]adminUserRow, error) {
+	rowsArgs := append(append([]interface{}{}, args...), limit, offset)
 	rows, err := db.Query(`
 		SELECT u.id, u.username, COALESCE(ux.xp, 0), u.is_premium, u.is_admin, u.is_banned, u.created_at
 		FROM users u
@@ -3191,8 +4197,7 @@ func adminUsersHandler(w http.ResponseWriter, r *http.Request) {
 		LIMIT ? OFFSET ?
 	`, rowsArgs...)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -3209,10 +4214,51 @@ func adminUsersHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		users = append(users, u)
 	}
+	return users, nil
+}
 
-	totalPages := (total + adminUsersPageSize - 1) / adminUsersPageSize
-	if totalPages < 1 {
-		totalPages = 1
+// adminUsersHandler — GET /admin/users. Верхняя плашка — общий список
+// пользователей (первые 15, дальше подгружаются через apiAdminUsersList),
+// нижние плашки — полные списки премиум/админов, управление ролями идёт
+// через apiAdminUserToggle.
+func adminUsersHandler(w http.ResponseWriter, r *http.Request) {
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	if !isUserAdmin(userID) {
+		http.Error(w, "Доступ запрещён", http.StatusForbidden)
+		return
+	}
+
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	level := strings.TrimSpace(r.URL.Query().Get("level"))
+	dateFrom := strings.TrimSpace(r.URL.Query().Get("date_from"))
+	dateTo := strings.TrimSpace(r.URL.Query().Get("date_to"))
+	conds, condArgs := adminUsersFilterConds(r)
+	where, args := buildWhere("", nil, conds, condArgs)
+
+	var total int
+	db.QueryRow("SELECT COUNT(*) FROM users u LEFT JOIN user_xp ux ON ux.user_id = u.id "+where, args...).Scan(&total)
+
+	users, err := queryAdminUsers(where, args, adminUsersPageSize, 0)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	premiumWhere, premiumArgs := buildWhere("u.is_premium = 1", nil, conds, condArgs)
+	adminWhere, adminArgs := buildWhere("u.is_admin = 1", nil, conds, condArgs)
+	premiumUsers, err := queryAdminUsers(premiumWhere, premiumArgs, adminUsersPanelLimit, 0)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	adminUsers, err := queryAdminUsers(adminWhere, adminArgs, adminUsersPanelLimit, 0)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	username := currentUsername(r)
@@ -3225,24 +4271,222 @@ func adminUsersHandler(w http.ResponseWriter, r *http.Request) {
 		Username     string
 		AdminInitial string
 		Users        []adminUserRow
+		PremiumUsers []adminUserRow
+		AdminUsers   []adminUserRow
 		Query        string
-		Page         int
-		TotalPages   int
+		Level        string
+		Levels       []int
+		DateFrom     string
+		DateTo       string
 		Total        int
+		HasMore      bool
+		NextOffset   int
 	}{
 		Username:     username,
 		AdminInitial: initial,
 		Users:        users,
+		PremiumUsers: premiumUsers,
+		AdminUsers:   adminUsers,
 		Query:        q,
-		Page:         page,
-		TotalPages:   totalPages,
+		Level:        level,
+		Levels:       []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+		DateFrom:     dateFrom,
+		DateTo:       dateTo,
 		Total:        total,
+		HasMore:      len(users) < total,
+		NextOffset:   len(users),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := templates.ExecuteTemplate(w, "admin_users.html", data); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+// apiAdminUsersList — GET /api/admin/users?q=&offset= — JSON-подгрузка
+// следующих adminUsersPageSize пользователей для кнопки "Показать ещё".
+func apiAdminUsersList(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	userID, err := getUserIDFromSession(r)
+	if err != nil || !isUserAdmin(userID) {
+		http.Error(w, `{"error":"Доступ запрещён"}`, http.StatusForbidden)
+		return
+	}
+
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	if offset < 0 {
+		offset = 0
+	}
+
+	conds, condArgs := adminUsersFilterConds(r)
+	where, args := buildWhere("", nil, conds, condArgs)
+
+	var total int
+	db.QueryRow("SELECT COUNT(*) FROM users u LEFT JOIN user_xp ux ON ux.user_id = u.id "+where, args...).Scan(&total)
+
+	users, err := queryAdminUsers(where, args, adminUsersPageSize, offset)
+	if err != nil {
+		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(struct {
+		Users      []adminUserRow `json:"users"`
+		HasMore    bool           `json:"has_more"`
+		NextOffset int            `json:"next_offset"`
+	}{
+		Users:      users,
+		HasMore:    offset+len(users) < total,
+		NextOffset: offset + len(users),
+	})
+}
+
+type analyticsRow struct {
+	Title     string
+	Sub       string
+	Views     int
+	Reactions int
+	Comments  int
+}
+
+// adminAnalyticsHandler — GET /admin/analytics. Топ-20 аниме и топ-20
+// эпизодов по вовлечённости (просмотры из user_progress, реакции из
+// emotions, комментарии из comments).
+func adminAnalyticsHandler(w http.ResponseWriter, r *http.Request) {
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	if !isUserAdmin(userID) {
+		http.Error(w, "Доступ запрещён", http.StatusForbidden)
+		return
+	}
+
+	episodeRows, err := db.Query(`
+		SELECT a.title, CONCAT('Эп. ', e.episode_num, ' — ', e.title),
+			COALESCE(v.views,0), COALESCE(rc.reactions,0), COALESCE(c.comments,0)
+		FROM episodes e
+		JOIN anime a ON a.id = e.anime_id
+		LEFT JOIN (SELECT episode_id, COUNT(*) views FROM user_progress GROUP BY episode_id) v ON v.episode_id = e.id
+		LEFT JOIN (SELECT episode_id, COUNT(*) reactions FROM emotions GROUP BY episode_id) rc ON rc.episode_id = e.id
+		LEFT JOIN (SELECT episode_id, COUNT(*) comments FROM comments GROUP BY episode_id) c ON c.episode_id = e.id
+		ORDER BY (COALESCE(v.views,0)+COALESCE(rc.reactions,0)+COALESCE(c.comments,0)) DESC
+		LIMIT 20
+	`)
+	var episodes []analyticsRow
+	if err == nil {
+		defer episodeRows.Close()
+		for episodeRows.Next() {
+			var row analyticsRow
+			if episodeRows.Scan(&row.Title, &row.Sub, &row.Views, &row.Reactions, &row.Comments) == nil {
+				episodes = append(episodes, row)
+			}
+		}
+	}
+
+	animeRows, err := db.Query(`
+		SELECT a.title,
+			COALESCE(SUM(v.views),0), COALESCE(SUM(rc.reactions),0), COALESCE(SUM(c.comments),0)
+		FROM anime a
+		JOIN episodes e ON e.anime_id = a.id
+		LEFT JOIN (SELECT episode_id, COUNT(*) views FROM user_progress GROUP BY episode_id) v ON v.episode_id = e.id
+		LEFT JOIN (SELECT episode_id, COUNT(*) reactions FROM emotions GROUP BY episode_id) rc ON rc.episode_id = e.id
+		LEFT JOIN (SELECT episode_id, COUNT(*) comments FROM comments GROUP BY episode_id) c ON c.episode_id = e.id
+		GROUP BY a.id, a.title
+		ORDER BY (SUM(COALESCE(v.views,0))+SUM(COALESCE(rc.reactions,0))+SUM(COALESCE(c.comments,0))) DESC
+		LIMIT 20
+	`)
+	var anime []analyticsRow
+	if err == nil {
+		defer animeRows.Close()
+		for animeRows.Next() {
+			var row analyticsRow
+			if animeRows.Scan(&row.Title, &row.Views, &row.Reactions, &row.Comments) == nil {
+				anime = append(anime, row)
+			}
+		}
+	}
+
+	username := currentUsername(r)
+	initial := "?"
+	if runes := []rune(username); len(runes) > 0 {
+		initial = strings.ToUpper(string(runes[:1]))
+	}
+
+	data := struct {
+		Username     string
+		AdminInitial string
+		Anime        []analyticsRow
+		Episodes     []analyticsRow
+	}{
+		Username:     username,
+		AdminInitial: initial,
+		Anime:        anime,
+		Episodes:     episodes,
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := templates.ExecuteTemplate(w, "admin_analytics.html", data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// adminSettingsHandler — GET /admin/settings. Единственная настройка на
+// сегодня — maintenance mode, переключается через apiAdminMaintenanceToggle.
+func adminSettingsHandler(w http.ResponseWriter, r *http.Request) {
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	if !isUserAdmin(userID) {
+		http.Error(w, "Доступ запрещён", http.StatusForbidden)
+		return
+	}
+
+	username := currentUsername(r)
+	initial := "?"
+	if runes := []rune(username); len(runes) > 0 {
+		initial = strings.ToUpper(string(runes[:1]))
+	}
+
+	data := struct {
+		Username        string
+		AdminInitial    string
+		MaintenanceMode bool
+	}{
+		Username:        username,
+		AdminInitial:    initial,
+		MaintenanceMode: maintenanceMode.Load(),
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := templates.ExecuteTemplate(w, "admin_settings.html", data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// apiAdminMaintenanceToggle переключает maintenance mode для всего сайта
+// (см. maintenanceGate) и сохраняет значение в app_settings.
+func apiAdminMaintenanceToggle(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	adminID, err := getUserIDFromSession(r)
+	if err != nil || !isUserAdmin(adminID) {
+		http.Error(w, `{"error":"Доступ запрещён"}`, http.StatusForbidden)
+		return
+	}
+
+	newValue := !maintenanceMode.Load()
+	if _, err := db.Exec("UPDATE app_settings SET maintenance_mode = ? WHERE id = 1", newValue); err != nil {
+		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+		return
+	}
+	maintenanceMode.Store(newValue)
+
+	json.NewEncoder(w).Encode(struct {
+		Value bool `json:"value"`
+	}{Value: newValue})
 }
 
 // apiAdminUserToggle переключает одну из ролевых меток пользователя
@@ -3723,14 +4967,14 @@ func adminCommunityHandler(w http.ResponseWriter, r *http.Request) {
 
 	username, initial := adminInitial(r)
 	data := struct {
-		Username          string
-		AdminInitial      string
-		AchievementStats  []adminAchievementStat
-		Friendships       []adminFriendshipRow
-		TotalFriendships  int
-		Query             string
-		Page              int
-		TotalPages        int
+		Username         string
+		AdminInitial     string
+		AchievementStats []adminAchievementStat
+		Friendships      []adminFriendshipRow
+		TotalFriendships int
+		Query            string
+		Page             int
+		TotalPages       int
 	}{
 		Username: username, AdminInitial: initial,
 		AchievementStats: achievementStats, Friendships: friendships,
@@ -4532,6 +5776,10 @@ func main() {
 	// Создаём таблицы для системы ачивок
 	createTables()
 
+	var maintenanceOn bool
+	db.QueryRow("SELECT maintenance_mode FROM app_settings WHERE id = 1").Scan(&maintenanceOn)
+	maintenanceMode.Store(maintenanceOn)
+
 	if err := auth.LoadKeys(); err != nil {
 		log.Fatal("Ошибка загрузки JWT-ключей:", err)
 	}
@@ -4555,9 +5803,11 @@ func main() {
 	secureHandle("/api/emotion", apiEmotionPost)
 	secureHandle("/api/emotions", apiEmotionsGet)
 	secureHandle("/ws", wsHandler)
+	secureHandle("/ws/dm", wsDMHandler)
 	secureHandle("/api/emotions/stats", apiEmotionsStats)
 	secureHandle("/api/comment", apiCommentPost)
 	secureHandle("/api/comments", apiCommentsGet)
+	secureHandle("/api/comments/like", apiCommentLikeToggle)
 	secureHandle("/search", searchHandler)
 	secureHandle("/forgot-password", forgotPasswordHandler)
 	secureHandle("/new-password", newPasswordHandler)
@@ -4583,6 +5833,10 @@ func main() {
 	secureHandle("/admin", adminDashboardHandler)
 	secureHandle("/admin/users", adminUsersHandler)
 	secureHandle("/api/admin/users/toggle", apiAdminUserToggle)
+	secureHandle("/api/admin/users", apiAdminUsersList)
+	secureHandle("/admin/analytics", adminAnalyticsHandler)
+	secureHandle("/admin/settings", adminSettingsHandler)
+	secureHandle("/api/admin/settings/maintenance", apiAdminMaintenanceToggle)
 	secureHandle("/admin/catalog", adminCatalogHandler)
 	secureHandle("/admin/catalog/anime", adminAnimeDetailHandler)
 	secureHandle("/admin/community", adminCommunityHandler)
@@ -4593,7 +5847,17 @@ func main() {
 	secureHandle("/api/admin/upload-video", adminUploadVideoHandler)
 	secureHandle("/api/profile/avatar", apiAvatarUploadHandler)
 	secureHandle("/api/profile/background", apiBackgroundUploadHandler)
+	secureHandle("/api/profile/background/remove", apiBackgroundRemoveHandler)
+	secureHandle("/api/profile/watching-activity", apiWatchingActivityToggleHandler)
+	secureHandle("/api/profile/dm-privacy", apiDmPrivacyToggle)
+	secureHandle("/messages", messagesHandler)
+	secureHandle("/api/messages", apiMessagesGet)
+	secureHandle("/api/messages/send", apiMessageSend)
+	secureHandle("/api/messages/read", apiMessagesMarkRead)
+	secureHandle("/api/messages/unread-count", apiUnreadMessagesCount)
+	secureHandle("/api/conversations", apiConversationsList)
 	secureHandle("/api/profile/avatar-frame", apiAvatarFrameHandler)
+	secureHandle("/api/profile/chart-color", apiChartColorHandler)
 	secureHandle("/api/profile/request-password-change", apiRequestPasswordChangeHandler)
 	secureHandle("/api/change-password", apiChangePasswordHandler)
 	secureHandle("/api/auth/refresh", apiAuthRefreshHandler)

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="ru"{{if .BackgroundURL}} style="background-image: url('{{.BackgroundURL}}')"{{end}}>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,12 +11,20 @@
     <link rel="stylesheet" href="/static/css/tokens.css?v=2">
     <style>
         * { box-sizing: border-box; }
+        /* Фон на html, не body: у body высота растёт вместе с контентом, и
+           background-size:cover считался бы от высоты всей страницы, а не
+           окна (даже с background-attachment:fixed) — картинка растягивалась
+           и теряла резкость на длинных страницах. У html как корневого
+           элемента браузер всегда считает cover от viewport. */
+        html {
+            background: var(--color-bg) url('/static/img/login/background_image_blure_v3.png') no-repeat top center;
+            background-size: cover;
+            background-attachment: fixed;
+        }
         body {
             margin: 0;
             color: var(--color-text);
             font-family: var(--font-base);
-            background: var(--color-bg) url('/static/img/login/background_image_blure_v3.png') no-repeat top center;
-            background-size: cover;
         }
 
         .profile-card {
@@ -76,7 +84,48 @@
         .frame-option[data-unlocked="false"] { opacity: 0.35; cursor: not-allowed; }
         .frame-option .swatch { width: 24px; height: 24px; border-radius: 50%; border: 3px solid currentColor; }
         .avatar-upload-row { display: flex; align-items: center; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
-        .avatar-upload-row input[type=file] { color: var(--color-gray-300); font-size: var(--fs-small); max-width: 220px; }
+        .privacy-toggle { display: flex; align-items: center; gap: 8px; font-size: var(--fs-small); cursor: pointer; }
+
+        /* Кнопка загрузки файла (аватар/фон): открывает file picker, во время
+           загрузки текст меняется на "%", заливка слева-направо — реальный
+           прогресс XHR, не фейковая анимация по таймеру. */
+        .upload-btn {
+            --upload-progress: 0%;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 5px 12px;
+            border: 1px solid transparent;
+            border-radius: var(--radius-lg);
+            background:
+                linear-gradient(90deg, rgba(216, 45, 126, 0.35) var(--upload-progress), transparent var(--upload-progress)),
+                rgba(255, 255, 255, 0.04);
+            background-clip: padding-box;
+            color: var(--color-text);
+            font-family: var(--font-base);
+            font-size: var(--fs-small);
+            cursor: pointer;
+            transition: background 0.2s linear, transform 0.2s ease, box-shadow 0.2s ease;
+            position: relative;
+        }
+        .upload-btn::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: var(--radius-lg);
+            padding: 1px;
+            background: var(--color-accent-gradient);
+            -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+            -webkit-mask-composite: xor;
+            mask-composite: exclude;
+            pointer-events: none;
+        }
+        .upload-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(216, 45, 126, 0.25); }
+        .upload-btn:disabled { cursor: default; }
+        .upload-btn-icon { display: flex; flex-shrink: 0; color: var(--color-accent); }
+        .upload-btn-icon svg { display: block; width: 16px; height: 16px; }
+        .upload-btn.is-success .upload-btn-icon { color: #4CD964; }
+        .upload-btn-label { white-space: nowrap; }
         .profile-info h1 {
             font-family: var(--font-base);
             font-weight: 400;
@@ -308,12 +357,13 @@
             .col-main { min-width: 0; width: 100%; }
             .customize-panel { max-width: none; width: 100%; }
             .frame-options { justify-content: center; }
+            .avatar-upload-row { justify-content: center; }
             .change-password-corner { position: static; display: block; width: fit-content; margin: 16px auto; }
             .panel h2 { text-align: center; }
         }
     </style>
 </head>
-<body{{if .BackgroundURL}} style="background-image: url('{{.BackgroundURL}}')"{{end}}>
+<body>
 {{template "header" .}}
 <div class="profile-card" data-animate>
     <div class="profile-hero">
@@ -341,6 +391,7 @@
                 {{else}}
                 <button type="button" class="btn btn-sm" id="friend-action-btn" data-action="request">Добавить в друзья</button>
                 {{end}}
+                <a href="/messages?with={{.ProfileUserID}}" class="btn btn-sm">Написать сообщение</a>
             </div>
             {{end}}
 
@@ -355,11 +406,20 @@
             {{if .IsOwnProfile}}
             <div class="customize-panel">
                 <div class="avatar-upload-row">
-                    {{if .IsPremium}}
-                    <input type="file" id="avatar-file" accept="image/jpeg,image/png,image/webp">
-                    <button type="button" id="avatar-upload-btn" class="btn btn-sm">Загрузить аватар</button>
+                    <input type="file" id="avatar-file" accept="image/jpeg,image/png,image/webp" hidden>
+                    <button type="button" id="avatar-upload-btn" class="upload-btn">
+                        <span class="upload-btn-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4M12 4l-4 4M12 4l4 4"></path><path d="M5 16v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"></path></svg></span>
+                        <span class="upload-btn-label">Загрузить аватар</span>
+                    </button>
+                    {{if ge .Level.Level 2}}
+                    <input type="file" id="background-file" accept="image/jpeg,image/png,image/webp" hidden>
+                    <button type="button" id="background-upload-btn" class="upload-btn">
+                        <span class="upload-btn-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4M12 4l-4 4M12 4l4 4"></path><path d="M5 16v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"></path></svg></span>
+                        <span class="upload-btn-label">Загрузить фон</span>
+                    </button>
+                    <button type="button" id="background-remove-btn" class="btn btn-sm">Убрать фон</button>
                     {{else}}
-                    <p class="hint">Загрузка своего аватара — по подписке Premium. Пока доступны рамки за уровень ниже.</p>
+                    <p class="hint">Свой фон профиля — разблокируется на уровне 2.</p>
                     {{end}}
                 </div>
                 <button type="button" id="change-password-btn" class="btn btn-sm change-password-corner">Изменить пароль</button>
@@ -372,15 +432,29 @@
                     {{end}}
                 </div>
 
-                <p class="hint" style="margin-top:16px;">Фон профиля</p>
-                <div class="avatar-upload-row">
-                    {{if .IsPremium}}
-                    <input type="file" id="background-file" accept="image/jpeg,image/png,image/webp">
-                    <button type="button" id="background-upload-btn" class="btn btn-sm">Загрузить фон</button>
-                    {{else}}
-                    <p class="hint">Смена фона профиля — по подписке Premium.</p>
+                <p class="hint" style="margin-top:16px;">Цвет графика реакций</p>
+                <div class="frame-options" id="chart-color-options">
+                    {{range .ChartColorOptions}}
+                    <div class="frame-option" data-color-id="{{.ID}}" data-unlocked="{{.Unlocked}}" data-selected="{{eq .ID $.ChartColor}}" title="{{.Name}}{{if not .Unlocked}} (уровень {{.MinLevel}}+){{end}}">
+                        <span class="swatch" style="color: {{.Color}}; border-color: {{.Color}};"></span>
+                    </div>
                     {{end}}
                 </div>
+
+                <p class="hint" style="margin-top:16px;">Приватность</p>
+                <label class="privacy-toggle">
+                    <input type="checkbox" id="watching-activity-toggle" {{if .ShowWatchingActivity}}checked{{end}}>
+                    Показывать друзьям на главной, что я сейчас смотрю
+                </label>
+                {{if .IsPremium}}
+                <label class="privacy-toggle" style="margin-top:8px;">
+                    <input type="checkbox" id="dm-privacy-toggle" {{if eq .DmPrivacy "friends_only"}}checked{{end}}>
+                    Мне могут писать только друзья
+                </label>
+                {{else}}
+                <p class="hint" style="margin-top:8px;">Ограничить, кто может вам писать — до друзей — доступно по подписке Premium. Сейчас вам может написать любой пользователь.</p>
+                {{end}}
+
             </div>
             {{end}}
         </div>
@@ -499,29 +573,76 @@
 <script src="/static/js/scroll-reveal.js"></script>
 <script src="/static/js/toast.js"></script>
 <script>
-    var uploadBtn = document.getElementById('avatar-upload-btn');
-    if (uploadBtn) {
-        uploadBtn.addEventListener('click', function () {
-            var fileInput = document.getElementById('avatar-file');
-            var file = fileInput.files[0];
-            if (!file) { showToast({ icon: '⚠️', title: 'Выберите файл', body: 'jpg / png / webp, до 5 МБ' }); return; }
+    var UPLOAD_ICON = '<path d="M12 15V4M12 4l-4 4M12 4l4 4"></path><path d="M5 16v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"></path>';
+    var CHECK_ICON = '<path d="M4 12l5 5L20 6"></path>';
+
+    // Кнопка-загрузчик: клик открывает file picker, выбор файла сразу
+    // стартует XHR-загрузку с реальным прогрессом (заливка + "%" в лейбле,
+    // не фейковая анимация по таймеру), по завершении — галочка и колбэк.
+    function initUploadButton(btnId, inputId, endpoint, fieldName, defaultLabel, onSuccess) {
+        var btn = document.getElementById(btnId);
+        var input = document.getElementById(inputId);
+        if (!btn || !input) return;
+        var icon = btn.querySelector('.upload-btn-icon');
+        var label = btn.querySelector('.upload-btn-label');
+
+        btn.addEventListener('click', function () { if (!btn.disabled) input.click(); });
+
+        input.addEventListener('change', function () {
+            var file = input.files[0];
+            if (!file) return;
+
+            btn.disabled = true;
+            btn.classList.remove('is-success');
+            btn.style.setProperty('--upload-progress', '0%');
+
+            var xhr = new XMLHttpRequest();
+            xhr.upload.addEventListener('progress', function (e) {
+                if (!e.lengthComputable) return;
+                var pct = Math.round((e.loaded / e.total) * 100);
+                btn.style.setProperty('--upload-progress', pct + '%');
+                label.textContent = pct + '%';
+            });
+            xhr.addEventListener('load', function () {
+                var res = {};
+                try { res = JSON.parse(xhr.responseText); } catch (e) {}
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    btn.classList.add('is-success');
+                    icon.innerHTML = CHECK_ICON;
+                    label.textContent = 'Готово';
+                    if (onSuccess) onSuccess(res);
+                } else {
+                    showToast({ icon: '⚠️', title: 'Ошибка', body: res.error || 'не удалось загрузить' });
+                }
+                finish();
+            });
+            xhr.addEventListener('error', function () {
+                showToast({ icon: '⚠️', title: 'Ошибка сети', body: '' });
+                finish();
+            });
+
+            function finish() {
+                btn.disabled = false;
+                input.value = '';
+                setTimeout(function () {
+                    btn.classList.remove('is-success');
+                    btn.style.setProperty('--upload-progress', '0%');
+                    icon.innerHTML = UPLOAD_ICON;
+                    label.textContent = defaultLabel;
+                }, 1500);
+            }
+
+            xhr.open('POST', endpoint);
             var formData = new FormData();
-            formData.append('avatar', file);
-            uploadBtn.disabled = true;
-            fetch('/api/profile/avatar', { method: 'POST', body: formData })
-                .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
-                .then(function (res) {
-                    if (res.ok) {
-                        document.getElementById('profile-avatar').innerHTML = '<img src="' + res.data.avatar_url + '" alt="">';
-                        showToast({ icon: '🖼️', title: 'Аватар обновлён', body: '' });
-                    } else {
-                        showToast({ icon: '⚠️', title: 'Ошибка', body: res.data.error || 'не удалось загрузить' });
-                    }
-                })
-                .catch(function () { showToast({ icon: '⚠️', title: 'Ошибка сети', body: '' }); })
-                .finally(function () { uploadBtn.disabled = false; });
+            formData.append(fieldName, file);
+            xhr.send(formData);
         });
     }
+
+    initUploadButton('avatar-upload-btn', 'avatar-file', '/api/profile/avatar', 'avatar', 'Загрузить аватар', function (res) {
+        document.getElementById('profile-avatar').innerHTML = '<img src="' + res.avatar_url + '" alt="">';
+        showToast({ icon: '🖼️', title: 'Аватар обновлён', body: '' });
+    });
 
     var changePasswordBtn = document.getElementById('change-password-btn');
     if (changePasswordBtn) {
@@ -541,31 +662,74 @@
         });
     }
 
-    var bgUploadBtn = document.getElementById('background-upload-btn');
-    if (bgUploadBtn) {
-        bgUploadBtn.addEventListener('click', function () {
-            var fileInput = document.getElementById('background-file');
-            var file = fileInput.files[0];
-            if (!file) { showToast({ icon: '⚠️', title: 'Выберите файл', body: 'jpg / png / webp, до 5 МБ' }); return; }
-            var formData = new FormData();
-            formData.append('background', file);
-            bgUploadBtn.disabled = true;
-            fetch('/api/profile/background', { method: 'POST', body: formData })
+    initUploadButton('background-upload-btn', 'background-file', '/api/profile/background', 'background', 'Загрузить фон', function (res) {
+        document.documentElement.style.backgroundImage = "url('" + res.background_url + "')";
+        showToast({ icon: '🖼️', title: 'Фон обновлён', body: '' });
+    });
+
+    var backgroundRemoveBtn = document.getElementById('background-remove-btn');
+    if (backgroundRemoveBtn) {
+        backgroundRemoveBtn.addEventListener('click', function () {
+            backgroundRemoveBtn.disabled = true;
+            fetch('/api/profile/background/remove', { method: 'POST' })
                 .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
                 .then(function (res) {
                     if (res.ok) {
-                        document.body.style.backgroundImage = "url('" + res.data.background_url + "')";
-                        showToast({ icon: '🖼️', title: 'Фон обновлён', body: '' });
+                        document.documentElement.style.backgroundImage = "url('" + res.data.background_url + "')";
+                        showToast({ icon: '🖼️', title: 'Фон сброшен', body: '' });
                     } else {
-                        showToast({ icon: '⚠️', title: 'Ошибка', body: res.data.error || 'не удалось загрузить' });
+                        showToast({ icon: '⚠️', title: 'Ошибка', body: res.data.error || '' });
                     }
                 })
                 .catch(function () { showToast({ icon: '⚠️', title: 'Ошибка сети', body: '' }); })
-                .finally(function () { bgUploadBtn.disabled = false; });
+                .finally(function () { backgroundRemoveBtn.disabled = false; });
         });
     }
 
-    document.querySelectorAll('.frame-option').forEach(function (el) {
+    var watchingActivityToggle = document.getElementById('watching-activity-toggle');
+    if (watchingActivityToggle) {
+        watchingActivityToggle.addEventListener('change', function () {
+            watchingActivityToggle.disabled = true;
+            fetch('/api/profile/watching-activity', { method: 'POST' })
+                .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+                .then(function (res) {
+                    if (res.ok) {
+                        watchingActivityToggle.checked = res.data.value;
+                    } else {
+                        showToast({ icon: '⚠️', title: 'Ошибка', body: res.data.error || '' });
+                    }
+                })
+                .catch(function () { showToast({ icon: '⚠️', title: 'Ошибка сети', body: '' }); })
+                .finally(function () { watchingActivityToggle.disabled = false; });
+        });
+    }
+
+    var dmPrivacyToggle = document.getElementById('dm-privacy-toggle');
+    if (dmPrivacyToggle) {
+        dmPrivacyToggle.addEventListener('change', function () {
+            dmPrivacyToggle.disabled = true;
+            var privacy = dmPrivacyToggle.checked ? 'friends_only' : 'everyone';
+            fetch('/api/profile/dm-privacy', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ privacy: privacy })
+            })
+                .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+                .then(function (res) {
+                    if (!res.ok) {
+                        dmPrivacyToggle.checked = !dmPrivacyToggle.checked;
+                        showToast({ icon: '⚠️', title: 'Ошибка', body: res.data.error || '' });
+                    }
+                })
+                .catch(function () {
+                    dmPrivacyToggle.checked = !dmPrivacyToggle.checked;
+                    showToast({ icon: '⚠️', title: 'Ошибка сети', body: '' });
+                })
+                .finally(function () { dmPrivacyToggle.disabled = false; });
+        });
+    }
+
+    document.querySelectorAll('#frame-options .frame-option').forEach(function (el) {
         el.addEventListener('click', function () {
             if (el.dataset.unlocked !== 'true') {
                 showToast({ icon: '🔒', title: 'Рамка заблокирована', body: el.getAttribute('title') });
@@ -579,10 +743,34 @@
                 .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
                 .then(function (res) {
                     if (res.ok) {
-                        document.querySelectorAll('.frame-option').forEach(function (o) { o.dataset.selected = 'false'; });
+                        document.querySelectorAll('#frame-options .frame-option').forEach(function (o) { o.dataset.selected = 'false'; });
                         el.dataset.selected = 'true';
                         var color = getComputedStyle(el.querySelector('.swatch')).borderColor;
                         document.getElementById('profile-avatar').style.borderColor = color;
+                    } else {
+                        showToast({ icon: '⚠️', title: 'Ошибка', body: res.data.error || '' });
+                    }
+                })
+                .catch(function () { showToast({ icon: '⚠️', title: 'Ошибка сети', body: '' }); });
+        });
+    });
+
+    document.querySelectorAll('#chart-color-options .frame-option').forEach(function (el) {
+        el.addEventListener('click', function () {
+            if (el.dataset.unlocked !== 'true') {
+                showToast({ icon: '🔒', title: 'Цвет заблокирован', body: el.getAttribute('title') });
+                return;
+            }
+            fetch('/api/profile/chart-color', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ color_id: el.dataset.colorId })
+            })
+                .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+                .then(function (res) {
+                    if (res.ok) {
+                        document.querySelectorAll('#chart-color-options .frame-option').forEach(function (o) { o.dataset.selected = 'false'; });
+                        el.dataset.selected = 'true';
                     } else {
                         showToast({ icon: '⚠️', title: 'Ошибка', body: res.data.error || '' });
                     }

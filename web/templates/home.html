@@ -108,7 +108,7 @@
             display: inline-block;
             padding: 4px 10px;
             border-radius: var(--radius-sm);
-            background: rgba(147, 55, 153, 0.7);
+            background: rgba(216, 45, 126, 0.7);
             font-family: var(--font-base);
             font-size: var(--fs-caption);
         }
@@ -148,7 +148,7 @@
             background-position: center;
             position: relative;
             overflow: hidden;
-            box-shadow: 0 30px 100px 15px #5E0135;
+            box-shadow: 0 30px 100px 15px #d82d7e;
         }
         .hero-featured-visual::after {
             content: '';
@@ -218,7 +218,7 @@
             justify-content: space-between;
             background: rgba(22, 22, 22, 0.2);
             border-radius: var(--radius-lg);
-            box-shadow: 0 30px 100px 15px #5E0135;
+            box-shadow: 0 30px 100px 15px #d82d7e;
         }
         .hero-rail li {
             display: flex;
@@ -353,6 +353,35 @@
         .catalog-card { display: block; text-align: center; color: inherit; text-decoration: none; }
         .catalog-card .title { font-size: var(--fs-body); font-weight: 500; margin-bottom: 6px; }
 
+        .friends-watching-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+        .friend-watching-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 16px;
+            border-radius: var(--radius-lg);
+            background: rgba(255, 255, 255, 0.04);
+            color: inherit;
+            text-decoration: none;
+            transition: background 0.2s ease;
+        }
+        .friend-watching-row:hover { background: rgba(255, 255, 255, 0.08); }
+        .friend-watching-row img, .friend-watching-initial {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            object-fit: cover;
+            flex-shrink: 0;
+        }
+        .friend-watching-initial {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--color-accent-gradient);
+            font-family: var(--font-display);
+            text-transform: uppercase;
+        }
+
         .see-all {
             display: block;
             text-align: center;
@@ -369,12 +398,16 @@
             display: flex;
             justify-content: space-between;
             align-items: stretch;
-            /* Ширина ограничена высотой вьюпорта (через aspect-ratio) — на
-               широких/невысоких экранах секция раньше держала фиксированные
-               margin: 0 140px и просто росла вниз пропорционально ширине,
-               из-за чего на большом экране могла вылезать за нижний край
-               (и кнопка "Смотреть аниме" внутри неё вместе с ней). */
-            width: min(calc(100% - 280px), calc((100vh - 180px) * 1160 / 650));
+            /* Ширина = calc(100% - 280px), как у .hero-featured (margin: 0 140px)
+               чуть выше — те же боковые отступы 140px, чтобы обе секции были
+               одной ширины. Высота по-прежнему держит пропорцию 1160:650
+               через aspect-ratio, но на низких вьюпортах не должна тянуть
+               ширину вниз — вместо этого ограничена отдельно через max-height
+               (аспект просто перестаёт применяться, если высота упёрлась в
+               потолок, video внутри и так object-fit:cover — обрежется
+               без искажений). */
+            width: calc(100% - 280px);
+            max-height: calc(100vh - 180px);
             margin: 40px auto 100px;
             border-radius: var(--radius-lg);
             padding: 20px;
@@ -398,7 +431,7 @@
             max-width: 44%;
         }
         .about-card, .top-card, .about-right {
-            background: rgba(0, 0, 0, 0.004);
+            background: rgba(0, 0, 0, 0.35);
             -webkit-backdrop-filter: blur(20px);
             backdrop-filter: blur(20px);
             border-radius: var(--radius-lg);
@@ -426,8 +459,8 @@
         .about-card p { color: #fff; font-size: 16px; line-height: 23px; margin: 0; white-space: pre-line; }
         .about-right {
             justify-content: flex-end;
-            width: 320px;
-            max-width: 100%;
+            width: 437px;
+            max-width: 44%;
             margin-top: auto;
         }
         .about-right p { color: #fff; font-family: 'Jost', var(--font-base); font-size: 18px; line-height: 27px; margin: 0; text-align: left; }
@@ -440,7 +473,7 @@
         .top-card li span:last-child { font-size: 16px; line-height: 23px; color: #fff; }
 
         @media (max-width: 900px) {
-            .about-section { flex-direction: column; align-items: stretch; aspect-ratio: auto; width: auto; padding: 20px; gap: 20px; }
+            .about-section { flex-direction: column; align-items: stretch; aspect-ratio: auto; width: auto; max-height: none; padding: 20px; gap: 20px; }
             .about-left, .about-right { width: auto; max-width: none; align-items: flex-start; }
             .about-right .cta { width: 100%; }
             .top-card { width: 100%; box-sizing: border-box; }
@@ -708,6 +741,43 @@
                     <div class="title">Тетрадь смерти</div>
                     <span class="genre-tag">Приключение /драма</span>
                 </a>
+            </div>
+        </section>
+        {{end}}
+
+        {{if .FriendsWatching}}
+        <!-- ===== Друзья сейчас смотрят (реальные данные, свежий прогресс просмотра) ===== -->
+        <section class="catalog" id="friends-watching">
+            <div class="catalog-header">
+                <h2>Друзья сейчас смотрят</h2>
+            </div>
+            <ul class="friends-watching-list">
+                {{range .FriendsWatching}}
+                <li>
+                    <a href="/watch?episode={{.EpisodeID}}" class="friend-watching-row">
+                        {{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="{{.Username}}">{{else}}<span class="friend-watching-initial">{{slice .Username 0 1}}</span>{{end}}
+                        <span><strong>{{.Username}}</strong> смотрит «{{.AnimeTitle}}», серия {{.EpisodeNum}}</span>
+                    </a>
+                </li>
+                {{end}}
+            </ul>
+        </section>
+        {{end}}
+
+        {{if .RecommendedAnime}}
+        <!-- ===== Рекомендуем вам (по жанрам активности + популярности, реальные данные из БД) ===== -->
+        <section class="catalog" id="recommended">
+            <div class="catalog-header">
+                <h2>Рекомендуем вам</h2>
+            </div>
+            <div class="catalog-grid">
+                {{range .RecommendedAnime}}
+                <a class="catalog-card" data-animate href="/anime/{{.ID}}">
+                    <img src="{{.Poster}}" alt="{{.Title}}">
+                    <div class="title">{{.Title}}</div>
+                    {{if .Genres}}<span class="genre-tag">{{.Genres}}</span>{{end}}
+                </a>
+                {{end}}
             </div>
         </section>
         {{end}}
