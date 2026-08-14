@@ -217,8 +217,19 @@ func isPremiumUser(userID int) bool {
 		return false
 	}
 	var isPremium bool
-	db.QueryRow("SELECT is_premium FROM users WHERE id = ?", userID).Scan(&isPremium)
-	return isPremium
+	var premiumUntil sql.NullTime
+	db.QueryRow("SELECT is_premium, premium_until FROM users WHERE id = ?", userID).Scan(&isPremium, &premiumUntil)
+	if !isPremium {
+		return false
+	}
+	// premium_until = NULL — бессрочный Premium (включён вручную SQL/админкой).
+	// Задан и уже прошёл — срок вышел (например, награда за ретеншн истекла);
+	// самоочищаем флаг здесь же, чтобы админка и остальной код не путались.
+	if premiumUntil.Valid && premiumUntil.Time.Before(time.Now()) {
+		db.Exec("UPDATE users SET is_premium = 0, premium_until = NULL WHERE id = ?", userID)
+		return false
+	}
+	return true
 }
 
 // watchedUpToSec — источник истины для "докуда пользователь досмотрел серию": берём
@@ -394,6 +405,14 @@ func logVisit(userID interface{}, cookieValue, path, userAgent string) {
 
 	db.Exec("INSERT INTO admin_visits (user_id, session_id, path, device) VALUES (?,?,?,?)",
 		userID, sessionID, path, device)
+
+	// Ретеншн-механика: считаем день активным для залогиненного пользователя
+	// (INSERT IGNORE — идемпотентно, повторные визиты в тот же день не в счёт),
+	// и заодно проверяем, не пора ли выдать награду.
+	if uid, ok := userID.(int); ok && uid > 0 {
+		db.Exec("INSERT IGNORE INTO user_daily_visits (user_id, day) VALUES (?, CURDATE())", uid)
+		checkRetentionReward(uid)
+	}
 }
 
 // PageData используется для передачи данных в шаблоны
@@ -751,6 +770,85 @@ const (
 	maxXPCommentsPerEpisode = 5   // то же для комментариев
 	dailyXPCap              = 150 // суммарный потолок начисления XP в сутки
 )
+
+// ---------- Ретеншн-механика: бесплатный месяц Premium за активность ----------
+// См. 18_Монетизация_и_уровни.md. Условие: 20 из 30 дней активности + 15
+// по-настоящему досмотренных эпизодов (не перемотанных до конца).
+const (
+	progressHeartbeatCreditCap  = 8   // сек, чуть больше интервала хартбита плеера (5с) — запас на джиттер сети
+	retentionWatchThresholdSec  = 600 // 10 минут реально накопленного просмотра = эпизод "засчитан"
+	retentionWindowDays         = 30  // скользящее окно, а не календарный месяц — проще и не хуже по сути
+	retentionActiveDaysRequired = 20  // из 30
+	retentionEpisodesRequired   = 15  // "по-настоящему" досмотренных эпизодов за то же окно
+	retentionRewardDays         = 30  // на сколько дней выдаётся Premium
+)
+
+// apiRetentionProgressHandler — GET /api/retention-progress — для показа
+// прогресса к бесплатному месяцу подписки в профиле.
+func apiRetentionProgressHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
+	var claimed bool
+	db.QueryRow("SELECT retention_reward_claimed FROM users WHERE id = ?", userID).Scan(&claimed)
+
+	windowStart := time.Now().AddDate(0, 0, -(retentionWindowDays - 1)).Format("2006-01-02")
+	var activeDays, watchedEpisodes int
+	db.QueryRow("SELECT COUNT(*) FROM user_daily_visits WHERE user_id = ? AND day >= ?", userID, windowStart).Scan(&activeDays)
+	db.QueryRow(`
+		SELECT COUNT(*) FROM user_progress
+		WHERE user_id = ? AND watched_seconds >= ? AND updated_at >= ?
+	`, userID, retentionWatchThresholdSec, windowStart).Scan(&watchedEpisodes)
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"claimed":            claimed,
+		"active_days":        activeDays,
+		"active_days_needed": retentionActiveDaysRequired,
+		"episodes":           watchedEpisodes,
+		"episodes_needed":    retentionEpisodesRequired,
+	})
+}
+
+// checkRetentionReward проверяет условия ретеншн-награды и выдаёт Premium на
+// retentionRewardDays, если пользователь их выполнил и ещё не получал награду
+// раньше (retention_reward_claimed — разово за всё время жизни аккаунта).
+// Дешёвый ранний выход: для подавляющего большинства вызовов (уже получили
+// награду, или совсем свежий аккаунт) достаточно первого запроса.
+func checkRetentionReward(userID int) {
+	var claimed bool
+	if err := db.QueryRow("SELECT retention_reward_claimed FROM users WHERE id = ?", userID).Scan(&claimed); err != nil || claimed {
+		return
+	}
+
+	windowStart := time.Now().AddDate(0, 0, -(retentionWindowDays - 1)).Format("2006-01-02")
+
+	var activeDays int
+	db.QueryRow("SELECT COUNT(*) FROM user_daily_visits WHERE user_id = ? AND day >= ?", userID, windowStart).Scan(&activeDays)
+	if activeDays < retentionActiveDaysRequired {
+		return
+	}
+
+	var watchedEpisodes int
+	db.QueryRow(`
+		SELECT COUNT(*) FROM user_progress
+		WHERE user_id = ? AND watched_seconds >= ? AND updated_at >= ?
+	`, userID, retentionWatchThresholdSec, windowStart).Scan(&watchedEpisodes)
+	if watchedEpisodes < retentionEpisodesRequired {
+		return
+	}
+
+	until := time.Now().AddDate(0, 0, retentionRewardDays)
+	if _, err := db.Exec(
+		"UPDATE users SET is_premium = 1, premium_until = ?, retention_reward_claimed = 1 WHERE id = ?",
+		until, userID,
+	); err != nil {
+		log.Printf("checkRetentionReward: не удалось выдать награду user_id=%d: %v", userID, err)
+	}
+}
 
 // addXP начисляет XP пользователю с учётом суточного лимита (dailyXPCap).
 // ponytail: чтение grantedToday и запись — не одна транзакция, при
@@ -1288,6 +1386,14 @@ func createTables() {
 			INDEX idx_sender_recipient (sender_id, recipient_id, created_at),
 			INDEX idx_recipient_sender (recipient_id, sender_id, created_at)
 		)`,
+		// Один день = одна строка, независимо от числа визитов за день —
+		// источник "20 из 30 дней" для ретеншн-механики (см. checkRetentionReward).
+		`CREATE TABLE IF NOT EXISTS user_daily_visits (
+			user_id INT NOT NULL,
+			day DATE NOT NULL,
+			PRIMARY KEY (user_id, day),
+			FOREIGN KEY (user_id) REFERENCES users(id)
+		)`,
 	}
 	for _, q := range tables {
 		if _, err := db.Exec(q); err != nil {
@@ -1363,6 +1469,22 @@ func createTables() {
 	// игнорируется на сервере (canMessage), не только на UI.
 	if _, err := db.Exec("ALTER TABLE users ADD COLUMN dm_privacy VARCHAR(16) NOT NULL DEFAULT 'everyone'"); err != nil {
 		log.Printf("ALTER TABLE users (dm_privacy) может уже существовать: %v", err)
+	}
+	// Ретеншн-механика "бесплатный месяц за активность" (см. 18_Монетизация_и_уровни.md).
+	// premium_until — срок действия Premium, выданного этой наградой (NULL — не задан,
+	// т.е. обычный бессрочный Premium, включённый вручную через SQL/админку, как раньше).
+	if _, err := db.Exec("ALTER TABLE users ADD COLUMN premium_until DATETIME NULL DEFAULT NULL"); err != nil {
+		log.Printf("ALTER TABLE users (premium_until) может уже существовать: %v", err)
+	}
+	if _, err := db.Exec("ALTER TABLE users ADD COLUMN retention_reward_claimed TINYINT(1) NOT NULL DEFAULT 0"); err != nil {
+		log.Printf("ALTER TABLE users (retention_reward_claimed) может уже существовать: %v", err)
+	}
+	// watched_seconds — реально накопленное время просмотра эпизода, отдельно от
+	// last_timestamp_sec (позиции для "продолжить с этого места"). Считается по
+	// приросту таймкода между хартбитами плеера (раз в 5с), с потолком на прирост —
+	// перемотка вперёд не даёт накрутить его мгновенно (см. apiProgressPost).
+	if _, err := db.Exec("ALTER TABLE user_progress ADD COLUMN watched_seconds INT NOT NULL DEFAULT 0"); err != nil {
+		log.Printf("ALTER TABLE user_progress (watched_seconds) может уже существовать: %v", err)
 	}
 	if _, err := db.Exec("ALTER TABLE users ADD COLUMN background_url VARCHAR(500) DEFAULT ''"); err != nil {
 		log.Printf("ALTER TABLE users (background_url) может уже существовать: %v", err)
@@ -5194,11 +5316,33 @@ func apiProgressPost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"Missing fields"}`, http.StatusBadRequest)
 		return
 	}
+
+	// watched_seconds защищает от перемотки в конец ради накрутки "досмотрел":
+	// плеер шлёт хартбит раз в 5с (см. watch.html), поэтому легитимный прирост
+	// между двумя хартбитами не превышает ~5-7с. Прыжок таймкода (перемотка
+	// вперёд) даёт большую дельту — засчитываем не больше потолка, остаток
+	// прироста просто не учитывается в watched_seconds (last_timestamp_sec
+	// при этом всё равно обновляется как обычно — resume-позиция не страдает).
+	var prevTimestamp, watchedSeconds int
+	err = db.QueryRow("SELECT last_timestamp_sec, watched_seconds FROM user_progress WHERE user_id = ? AND episode_id = ?", userID, req.EpisodeID).
+		Scan(&prevTimestamp, &watchedSeconds)
+	if err != nil && err != sql.ErrNoRows {
+		http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
+		return
+	}
+	delta := req.TimestampSec - prevTimestamp
+	if delta > 0 {
+		if delta > progressHeartbeatCreditCap {
+			delta = progressHeartbeatCreditCap
+		}
+		watchedSeconds += delta
+	}
+
 	_, err = db.Exec(`
-		INSERT INTO user_progress (user_id, episode_id, last_timestamp_sec)
-		VALUES (?, ?, ?)
-		ON DUPLICATE KEY UPDATE last_timestamp_sec = VALUES(last_timestamp_sec)
-	`, userID, req.EpisodeID, req.TimestampSec)
+		INSERT INTO user_progress (user_id, episode_id, last_timestamp_sec, watched_seconds)
+		VALUES (?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE last_timestamp_sec = VALUES(last_timestamp_sec), watched_seconds = VALUES(watched_seconds)
+	`, userID, req.EpisodeID, req.TimestampSec, watchedSeconds)
 	if err != nil {
 		log.Println("DB error in progress save:", err)
 		http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
@@ -5856,6 +6000,7 @@ func main() {
 	secureHandle("/api/messages/read", apiMessagesMarkRead)
 	secureHandle("/api/messages/unread-count", apiUnreadMessagesCount)
 	secureHandle("/api/conversations", apiConversationsList)
+	secureHandle("/api/retention-progress", apiRetentionProgressHandler)
 	secureHandle("/api/profile/avatar-frame", apiAvatarFrameHandler)
 	secureHandle("/api/profile/chart-color", apiChartColorHandler)
 	secureHandle("/api/profile/request-password-change", apiRequestPasswordChangeHandler)

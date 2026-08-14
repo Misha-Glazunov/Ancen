@@ -380,6 +380,10 @@
             </div>
             {{end}}
 
+            {{if .IsOwnProfile}}
+            <p class="hint" id="retention-progress" style="margin-top:-12px; margin-bottom:16px;"></p>
+            {{end}}
+
             {{if not .IsOwnProfile}}
             <div class="friend-action" id="friend-action" data-user-id="{{.ProfileUserID}}" data-username="{{.ProfileUsername}}" data-status="{{.FriendshipStatus}}" data-request-id="{{.FriendshipRequestID}}">
                 {{if eq .FriendshipStatus "friends"}}
@@ -727,6 +731,18 @@
                 })
                 .finally(function () { dmPrivacyToggle.disabled = false; });
         });
+    }
+
+    var retentionEl = document.getElementById('retention-progress');
+    if (retentionEl) {
+        fetch('/api/retention-progress')
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (data) {
+                if (!data || data.claimed) return;
+                retentionEl.textContent = 'До бесплатного месяца подписки: активность ' + data.active_days + '/' + data.active_days_needed +
+                    ' дней, досмотрено ' + data.episodes + '/' + data.episodes_needed + ' серий';
+            })
+            .catch(function () {});
     }
 
     document.querySelectorAll('#frame-options .frame-option').forEach(function (el) {
