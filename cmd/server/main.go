@@ -5560,6 +5560,40 @@ func apiUsersSearchGet(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(friendInfoRows(rows))
 }
 
+// apiAnimeSearchGet — поиск аниме по названию для выпадающего списка в шапке.
+func apiAnimeSearchGet(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	type AnimeResult struct {
+		ID     int    `json:"id"`
+		Title  string `json:"title"`
+		Genres string `json:"genres"`
+		Year   string `json:"year"`
+		Poster string `json:"poster"`
+	}
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if q == "" {
+		json.NewEncoder(w).Encode([]AnimeResult{})
+		return
+	}
+	rows, err := db.Query(`
+		SELECT id, title, genres, year, poster_url FROM anime
+		WHERE title LIKE ? ORDER BY title LIMIT 8
+	`, "%"+q+"%")
+	if err != nil {
+		http.Error(w, `{"error":"search failed"}`, http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+	results := []AnimeResult{}
+	for rows.Next() {
+		var a AnimeResult
+		if rows.Scan(&a.ID, &a.Title, &a.Genres, &a.Year, &a.Poster) == nil {
+			results = append(results, a)
+		}
+	}
+	json.NewEncoder(w).Encode(results)
+}
+
 // apiFavoriteAnimeToggle переключает избранное аниме для текущего пользователя.
 func apiFavoriteAnimeToggle(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -6023,6 +6057,7 @@ func main() {
 	secureHandle("/api/friends/respond", apiFriendRespondPost)
 	secureHandle("/api/friends/remove", apiFriendRemovePost)
 	secureHandle("/api/users/search", apiUsersSearchGet)
+	secureHandle("/api/anime/search", apiAnimeSearchGet)
 	secureHandle("/api/favorites/anime", apiFavoriteAnimeToggle)
 	secureHandle("/api/favorites/episode", apiFavoriteEpisodeToggle)
 

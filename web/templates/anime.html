@@ -103,52 +103,11 @@
             position: absolute;
             right: 0;
             bottom: 0;
-            display: inline-flex;
-            align-items: center;
             gap: 20px;
             width: fit-content;
             padding: 4px 10px;
-            border-radius: var(--radius-lg);
-            background-color: rgba(0, 0, 0, 0.01);
-            backdrop-filter: blur(20px);
-            border: 1px solid transparent;
-            background-clip: padding-box;
-            font-family: var(--font-base);
             font-size: var(--fs-body);
-            color: var(--color-text);
-            cursor: pointer;
-            overflow: hidden;
-            isolation: isolate;
-            transition: color 0.3s ease 0.05s, transform 0.2s ease, box-shadow 0.3s ease;
         }
-        .anime-favorite::before {
-            content: '';
-            position: absolute;
-            inset: 0;
-            border-radius: var(--radius-lg);
-            padding: 1px;
-            background: var(--color-accent-gradient);
-            -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-            -webkit-mask-composite: xor;
-            mask-composite: exclude;
-            pointer-events: none;
-        }
-        .anime-favorite::after {
-            content: '';
-            position: absolute;
-            inset: 0;
-            z-index: -1;
-            border-radius: inherit;
-            background: #fff;
-            clip-path: ellipse(80% 50% at 50% 152%);
-            transition: clip-path 0.6s cubic-bezier(0.19, 1, 0.22, 1);
-            pointer-events: none;
-        }
-        .anime-favorite:hover::after {
-            clip-path: ellipse(100% 70% at 50% 50%);
-            transition: clip-path 0.8s cubic-bezier(0.86, 0, 0.07, 1);
-        }
-        .anime-favorite:hover { color: #000; transform: translateY(-2px); box-shadow: 0 8px 20px rgba(216, 45, 126, 0.35); }
         .anime-favorite .heart { font-size: 18px; }
         .anime-favorite.active .heart { color: var(--color-accent); }
 
@@ -268,7 +227,7 @@
                 </div>
                 {{end}}
             </div>
-            <button type="button" class="anime-favorite{{if .IsFavorite}} active{{end}}" data-favorite data-anime-id="{{.Anime.ID}}">
+            <button type="button" class="btn anime-favorite{{if .IsFavorite}} active{{end}}" data-favorite data-anime-id="{{.Anime.ID}}">
                 <span class="heart">{{if .IsFavorite}}♥{{else}}♡{{end}}</span>
                 <span class="favorite-label">{{if .IsFavorite}}В избранном{{else}}Добавить в избранное{{end}}</span>
             </button>
