@@ -49,6 +49,28 @@ func TestSecurityHeaders_CSPIncludesMinioHost(t *testing.T) {
 	}
 }
 
+// TestSecurityHeaders_CSPAllowsBlobForVhs — регрессия на баг из сессии
+// 2026-08-16: VHS-трансмаксер Video.js декодирует HLS-сегменты в веб-воркере
+// и скармливает их MediaSource через blob: URL; без этих директив браузер
+// тихо блокирует переключение качества в плеере.
+func TestSecurityHeaders_CSPAllowsBlobForVhs(t *testing.T) {
+	handler := securityHeaders(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+
+	handler(rec, req)
+
+	csp := rec.Header().Get("Content-Security-Policy")
+	if !strings.Contains(csp, "worker-src 'self' blob:") {
+		t.Errorf("expected CSP to allow blob: workers, got: %s", csp)
+	}
+	if !strings.Contains(csp, "media-src") || !strings.Contains(csp, "blob:") {
+		t.Errorf("expected media-src to allow blob:, got: %s", csp)
+	}
+}
+
 func TestCsrfProtect_BlocksCrossOriginMutation(t *testing.T) {
 	called := false
 	handler := csrfProtect(func(w http.ResponseWriter, r *http.Request) {

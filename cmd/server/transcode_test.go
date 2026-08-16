@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -54,6 +55,22 @@ func TestTranscodeToHLS(t *testing.T) {
 		playlist := filepath.Join(outDir, rendition, "stream.m3u8")
 		if _, err := os.Stat(playlist); err != nil {
 			t.Errorf("rendition %s playlist not created: %v", rendition, err)
+		}
+	}
+
+	// master.m3u8 содержит URI дочерних плейлистов (не ОС-пути) — на Windows
+	// filepath.Join даёт "480p\stream.m3u8", что ломает HLS-плеер в браузере.
+	// Регрессия на прод-баг из сессии 2026-08-16 (реальный тест на Windows-сервере).
+	master, err := os.ReadFile(masterPath)
+	if err != nil {
+		t.Fatalf("failed to read master.m3u8: %v", err)
+	}
+	if strings.Contains(string(master), `\`) {
+		t.Errorf("master.m3u8 contains backslash, HLS URIs must use forward slashes:\n%s", master)
+	}
+	for _, rendition := range []string{"480p", "720p", "1080p"} {
+		if !strings.Contains(string(master), rendition+"/stream.m3u8") {
+			t.Errorf("master.m3u8 missing expected forward-slash URI for %s:\n%s", rendition, master)
 		}
 	}
 }
