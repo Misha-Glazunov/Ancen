@@ -1,0 +1,28 @@
+stages:
+  - test
+  - deploy
+
+test:
+  stage: test
+  image: golang:1.25-alpine
+  script:
+    - go vet ./...
+    - go test ./...
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
+# Раннер для деплоя — специально зарегистрированный self-hosted GitLab Runner
+# на Windows-сервере (тег ancen-windows), не shared-раннер. GitHub-репозиторий
+# зеркалируется в этот GitLab-проект pull-mirror'ом; исходный код и issues/PR
+# остаются на GitHub, GitLab используется только как CI/CD-движок.
+deploy:
+  stage: deploy
+  tags:
+    - ancen-windows
+  script:
+    - docker build -t ancen-app:latest .
+    - docker compose up -d
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  needs:
+    - test
