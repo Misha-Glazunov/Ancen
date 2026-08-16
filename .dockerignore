@@ -1,0 +1,9 @@
+.git
+.env
+*.pem
+*.key
+id_rsa*
+logs/
+cmd/server/server
+deploy/mysql/data
+deploy/minio/data
