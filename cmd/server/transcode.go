@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 )
 
@@ -35,8 +36,10 @@ func transcodeToHLS(inputPath, outDir string) error {
 		"-hls_flags", "independent_segments",
 		"-master_pl_name", "master.m3u8",
 		"-var_stream_map", "v:0,a:0,name:480p v:1,a:1,name:720p v:2,a:2,name:1080p",
-		"-hls_segment_filename", filepath.Join("%v", "data%03d.ts"),
-		filepath.Join("%v", "stream.m3u8"),
+		// path.Join (не filepath.Join): эти пути попадают в master.m3u8 как
+		// относительные URI, а m3u8/HLS всегда использует "/", даже на Windows.
+		"-hls_segment_filename", path.Join("%v", "data%03d.ts"),
+		path.Join("%v", "stream.m3u8"),
 	}
 
 	// master.m3u8 без явного пути пишется ffmpeg-ом в рабочую директорию процесса,
