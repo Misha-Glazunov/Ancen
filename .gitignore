@@ -25,6 +25,10 @@ Thumbs.db
 # Logs
 logs/*.log
 
+# docker-compose bind-mount data dirs (MySQL/MinIO persistent storage)
+deploy/mysql/data/
+deploy/minio/data/
+
 # Claude Code / claude-flow tool state (belongs one level up, in Ancen_web/)
 /.claude/
 .claude-flow/
