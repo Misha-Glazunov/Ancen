@@ -20,8 +20,12 @@ deploy:
   tags:
     - ancen-windows
   script:
-    # Раннер чекаутит код в чистую build-директорию, где нет .env (в .gitignore) —
-    # секреты остаются на месте в постоянной рабочей копии на сервере, забираем их оттуда.
+    # Раннер чекаутит код в чистую build-директорию (git clean -ffdx перед каждым
+    # job'ом стирает всё untracked, включая deploy/mysql/data и deploy/minio/data,
+    # если они там появятся) — .env тоже в .gitignore, поэтому секреты и
+    # MYSQL_DATA_DIR/MINIO_DATA_DIR (обязаны указывать на постоянный путь ВНЕ
+    # build-директории, иначе БД стирается на каждом деплое) остаются в постоянной
+    # рабочей копии на сервере, забираем их оттуда.
     - Copy-Item "C:\Users\mishg\Desktop\Ancen\.env" ".env" -Force
     - Copy-Item "C:\Users\mishg\Desktop\Ancen\deploy\mysql\.env" "deploy\mysql\.env" -Force
     - Copy-Item "C:\Users\mishg\Desktop\Ancen\deploy\minio\.env" "deploy\minio\.env" -Force
