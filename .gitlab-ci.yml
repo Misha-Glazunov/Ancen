@@ -27,6 +27,8 @@ deploy:
     - Copy-Item "C:\Users\mishg\Desktop\Ancen\deploy\minio\.env" "deploy\minio\.env" -Force
     - docker build -t ancen-app:latest .
     - docker compose up -d
+    - docker restart ancen-nginx-1
+    - docker image prune -f
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
   needs:
