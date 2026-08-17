@@ -28,6 +28,7 @@ logs/*.log
 # docker-compose bind-mount data dirs (MySQL/MinIO persistent storage)
 deploy/mysql/data/
 deploy/minio/data/
+deploy/backup/tmp/
 
 # Claude Code / claude-flow tool state (belongs one level up, in Ancen_web/)
 /.claude/
