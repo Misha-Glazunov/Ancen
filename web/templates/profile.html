@@ -706,6 +706,7 @@
         var saveBtn = document.getElementById('avatar-crop-save');
         var cancelBtn = document.getElementById('avatar-crop-cancel');
         if (!input || !btn || !overlay) return;
+        btn.addEventListener('click', function () { if (!btn.disabled) input.click(); });
         var ctx = canvas.getContext('2d');
         var size = canvas.width;
 
