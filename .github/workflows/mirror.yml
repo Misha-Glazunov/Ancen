@@ -1,0 +1,24 @@
+name: Mirror to GitLab
+
+# GitLab-side pull mirroring didn't sync reliably (see project history) —
+# push-mirroring from GitHub instead. GitHub stays the source of truth
+# (issues/PRs/code review); GitLab is used only as the CI/CD engine
+# (.gitlab-ci.yml — test on shared runners, deploy on the self-hosted
+# ancen-windows runner, since the deploy target isn't publicly reachable).
+on:
+  push:
+    branches: [main]
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to GitLab
+        env:
+          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+        run: |
+          git push "https://oauth2:${GITLAB_TOKEN}@gitlab.com/Misha-Glazunov/ancen.git" HEAD:main
