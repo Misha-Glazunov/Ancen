@@ -266,7 +266,7 @@ func securityHeaders(next http.HandlerFunc) http.HandlerFunc {
 			"script-src 'self' 'unsafe-inline' https://vjs.zencdn.net https://cdnjs.cloudflare.com",
 			"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://vjs.zencdn.net",
 			"font-src 'self' https://fonts.gstatic.com data:",
-			"img-src 'self' data: https:",
+			"img-src 'self' data: https: " + mediaSrc,
 			// blob: нужен трансмаксеру VHS (Video.js) — он декодирует HLS-сегменты
 			// в веб-воркере и скармливает их MediaSource через blob: URL.
 			"media-src " + mediaSrc + " https://vjs.zencdn.net blob:",
