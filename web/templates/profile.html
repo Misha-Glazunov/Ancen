@@ -65,6 +65,40 @@
         }
         .profile-avatar img { width: 100%; height: 100%; object-fit: cover; }
 
+        /* ===== Кроп аватара перед загрузкой ===== */
+        .crop-modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.75);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+        }
+        .crop-modal-overlay.is-open { display: flex; }
+        .crop-modal {
+            background: var(--color-gray-950);
+            border-radius: var(--radius-lg);
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+            max-width: 90vw;
+        }
+        .crop-modal h3 { margin: 0; font-family: var(--font-display); font-weight: 400; }
+        .crop-canvas-wrap {
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            touch-action: none;
+            cursor: grab;
+            line-height: 0;
+        }
+        .crop-canvas-wrap:active { cursor: grabbing; }
+        .crop-zoom-row { display: flex; align-items: center; gap: 10px; width: 280px; }
+        .crop-zoom-row input[type="range"] { flex: 1; accent-color: var(--color-accent); }
+        .crop-modal-actions { display: flex; gap: 12px; }
+
         /* ===== Кастомизация: загрузка аватара + выбор рамки ===== */
         .customize-panel { margin-top: 20px; max-width: 460px; }
         .customize-panel .hint { font-size: var(--fs-small); color: var(--color-gray-500); margin: 0 0 12px; }
@@ -415,6 +449,22 @@
                         <span class="upload-btn-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4M12 4l-4 4M12 4l4 4"></path><path d="M5 16v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"></path></svg></span>
                         <span class="upload-btn-label">Загрузить аватар</span>
                     </button>
+                    <div class="crop-modal-overlay" id="avatar-crop-overlay">
+                        <div class="crop-modal">
+                            <h3>Выберите область аватара</h3>
+                            <div class="crop-canvas-wrap">
+                                <canvas id="avatar-crop-canvas" width="320" height="320"></canvas>
+                            </div>
+                            <div class="crop-zoom-row">
+                                <span class="hint" style="margin:0;">🔍</span>
+                                <input type="range" id="avatar-crop-zoom" min="1" max="3" step="0.01" value="1">
+                            </div>
+                            <div class="crop-modal-actions">
+                                <button type="button" class="btn btn-sm btn-ghost" id="avatar-crop-cancel">Отмена</button>
+                                <button type="button" class="btn btn-sm" id="avatar-crop-save">Сохранить</button>
+                            </div>
+                        </div>
+                    </div>
                     {{if ge .Level.Level 2}}
                     <input type="file" id="background-file" accept="image/jpeg,image/png,image/webp" hidden>
                     <button type="button" id="background-upload-btn" class="upload-btn">
@@ -643,10 +693,150 @@
         });
     }
 
-    initUploadButton('avatar-upload-btn', 'avatar-file', '/api/profile/avatar', 'avatar', 'Загрузить аватар', function (res) {
-        document.getElementById('profile-avatar').innerHTML = '<img src="' + res.avatar_url + '" alt="">';
-        showToast({ icon: '🖼️', title: 'Аватар обновлён', body: '' });
-    });
+    // Кроп аватара: сервер отдаёт квадрат через object-fit:cover, который
+    // обрезает картинку "как получится". Даём выбрать область самим —
+    // перетаскивание + зум на canvas, отправляем на сервер уже обрезанный
+    // квадрат вместо оригинала.
+    (function initAvatarCropUpload() {
+        var input = document.getElementById('avatar-file');
+        var btn = document.getElementById('avatar-upload-btn');
+        var overlay = document.getElementById('avatar-crop-overlay');
+        var canvas = document.getElementById('avatar-crop-canvas');
+        var zoomInput = document.getElementById('avatar-crop-zoom');
+        var saveBtn = document.getElementById('avatar-crop-save');
+        var cancelBtn = document.getElementById('avatar-crop-cancel');
+        if (!input || !btn || !overlay) return;
+        var ctx = canvas.getContext('2d');
+        var size = canvas.width;
+
+        var img = null, minScale = 1, scale = 1, offsetX = 0, offsetY = 0;
+        var dragging = false, lastX = 0, lastY = 0;
+
+        function clampOffsets() {
+            var w = img.width * scale, h = img.height * scale;
+            offsetX = Math.min(0, Math.max(size - w, offsetX));
+            offsetY = Math.min(0, Math.max(size - h, offsetY));
+        }
+        function draw() {
+            ctx.clearRect(0, 0, size, size);
+            ctx.drawImage(img, offsetX, offsetY, img.width * scale, img.height * scale);
+        }
+        function pointFromEvent(e) {
+            var rect = canvas.getBoundingClientRect();
+            var p = e.touches ? e.touches[0] : e;
+            return { x: (p.clientX - rect.left) * (size / rect.width), y: (p.clientY - rect.top) * (size / rect.height) };
+        }
+
+        canvas.addEventListener('pointerdown', function (e) {
+            dragging = true;
+            lastX = e.clientX; lastY = e.clientY;
+            canvas.setPointerCapture(e.pointerId);
+        });
+        canvas.addEventListener('pointermove', function (e) {
+            if (!dragging || !img) return;
+            var rect = canvas.getBoundingClientRect();
+            offsetX += (e.clientX - lastX) * (size / rect.width);
+            offsetY += (e.clientY - lastY) * (size / rect.height);
+            lastX = e.clientX; lastY = e.clientY;
+            clampOffsets();
+            draw();
+        });
+        canvas.addEventListener('pointerup', function () { dragging = false; });
+        canvas.addEventListener('pointercancel', function () { dragging = false; });
+
+        zoomInput.addEventListener('input', function () {
+            if (!img) return;
+            var cx = size / 2, cy = size / 2;
+            var imgX = (cx - offsetX) / scale, imgY = (cy - offsetY) / scale;
+            scale = minScale * parseFloat(zoomInput.value);
+            offsetX = cx - imgX * scale;
+            offsetY = cy - imgY * scale;
+            clampOffsets();
+            draw();
+        });
+
+        input.addEventListener('change', function () {
+            var file = input.files[0];
+            if (!file) return;
+            var reader = new FileReader();
+            reader.onload = function () {
+                img = new Image();
+                img.onload = function () {
+                    minScale = Math.max(size / img.width, size / img.height);
+                    scale = minScale;
+                    offsetX = (size - img.width * scale) / 2;
+                    offsetY = (size - img.height * scale) / 2;
+                    zoomInput.value = '1';
+                    draw();
+                    overlay.classList.add('is-open');
+                };
+                img.src = reader.result;
+            };
+            reader.readAsDataURL(file);
+        });
+
+        cancelBtn.addEventListener('click', function () {
+            overlay.classList.remove('is-open');
+            input.value = '';
+        });
+
+        saveBtn.addEventListener('click', function () {
+            canvas.toBlob(function (blob) {
+                overlay.classList.remove('is-open');
+                uploadAvatarBlob(blob);
+            }, 'image/jpeg', 0.92);
+        });
+
+        function uploadAvatarBlob(blob) {
+            var icon = btn.querySelector('.upload-btn-icon');
+            var label = btn.querySelector('.upload-btn-label');
+            var defaultLabel = 'Загрузить аватар';
+            btn.disabled = true;
+            btn.classList.remove('is-success');
+            btn.style.setProperty('--upload-progress', '0%');
+
+            var xhr = new XMLHttpRequest();
+            xhr.upload.addEventListener('progress', function (e) {
+                if (!e.lengthComputable) return;
+                var pct = Math.round((e.loaded / e.total) * 100);
+                btn.style.setProperty('--upload-progress', pct + '%');
+                label.textContent = pct + '%';
+            });
+            xhr.addEventListener('load', function () {
+                var res = {};
+                try { res = JSON.parse(xhr.responseText); } catch (e) {}
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    btn.classList.add('is-success');
+                    icon.innerHTML = CHECK_ICON;
+                    label.textContent = 'Готово';
+                    document.getElementById('profile-avatar').innerHTML = '<img src="' + res.avatar_url + '" alt="">';
+                    showToast({ icon: '🖼️', title: 'Аватар обновлён', body: '' });
+                } else {
+                    showToast({ icon: '⚠️', title: 'Ошибка', body: res.error || 'не удалось загрузить' });
+                }
+                finish();
+            });
+            xhr.addEventListener('error', function () {
+                showToast({ icon: '⚠️', title: 'Ошибка сети', body: '' });
+                finish();
+            });
+            function finish() {
+                btn.disabled = false;
+                input.value = '';
+                setTimeout(function () {
+                    btn.classList.remove('is-success');
+                    btn.style.setProperty('--upload-progress', '0%');
+                    icon.innerHTML = UPLOAD_ICON;
+                    label.textContent = defaultLabel;
+                }, 1500);
+            }
+
+            xhr.open('POST', '/api/profile/avatar');
+            var formData = new FormData();
+            formData.append('avatar', blob, 'avatar.jpg');
+            xhr.send(formData);
+        }
+    })();
 
     var changePasswordBtn = document.getElementById('change-password-btn');
     if (changePasswordBtn) {
