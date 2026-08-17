@@ -1089,6 +1089,41 @@ func friendInfoRows(rows *sql.Rows) []FriendInfo {
 	return result
 }
 
+// TopUserInfo — строка блока "Топ пользователей" на главной.
+type TopUserInfo struct {
+	Username  string
+	AvatarURL string
+	Level     int
+}
+
+// getTopUsers возвращает первых limit пользователей по XP (убывание) для
+// блока "Топ пользователей" на главной — раньше это был захардкоженный
+// список из трёх выдуманных имён.
+func getTopUsers(limit int) []TopUserInfo {
+	rows, err := db.Query(`
+		SELECT u.username, u.avatar_url, ux.xp
+		FROM user_xp ux
+		JOIN users u ON u.id = ux.user_id
+		ORDER BY ux.xp DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		log.Printf("getTopUsers error: %v", err)
+		return nil
+	}
+	defer rows.Close()
+	var result []TopUserInfo
+	for rows.Next() {
+		var t TopUserInfo
+		var xp int
+		if rows.Scan(&t.Username, &t.AvatarURL, &xp) == nil {
+			t.Level = getLevelInfo(xp).Level
+			result = append(result, t)
+		}
+	}
+	return result
+}
+
 // getFriends возвращает принятых друзей пользователя.
 func getFriends(userID int) []FriendInfo {
 	rows, err := db.Query(`
@@ -1654,11 +1689,13 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 		Username         string
 		RecommendedAnime []recommendedAnimeCard
 		FriendsWatching  []FriendWatchingInfo
+		TopUsers         []TopUserInfo
 	}{
 		Title:            "AniMemory — смотри аниме и делись эмоциями в реальном времени",
 		Username:         currentUsername(r),
 		RecommendedAnime: getRecommendedAnime(userID, 6),
 		FriendsWatching:  friendsWatching,
+		TopUsers:         getTopUsers(3),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

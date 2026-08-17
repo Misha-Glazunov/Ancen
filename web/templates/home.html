@@ -605,18 +605,14 @@
                         <img src="/static/img/home/icon_top.png" alt="">
                     </div>
                     <ul>
+                        {{range $i, $u := .TopUsers}}
                         <li>
-                            <img src="/static/img/home/top1.png" alt="Lerchek">
-                            <div><span class="place">🥇 1 место</span><span>Lerchek</span></div>
+                            {{if $u.AvatarURL}}<img src="{{$u.AvatarURL}}" alt="{{$u.Username}}">{{else}}<img src="/static/img/home/icon_top.png" alt="{{$u.Username}}">{{end}}
+                            <div><span class="place">{{if eq $i 0}}🥇{{else if eq $i 1}}🥈{{else}}🥉{{end}} {{add $i 1}} место</span><span>{{$u.Username}}</span></div>
                         </li>
-                        <li>
-                            <img src="/static/img/home/top2.png" alt="Deadinside">
-                            <div><span class="place">🥈 2 место</span><span>Deadinside</span></div>
-                        </li>
-                        <li>
-                            <img src="/static/img/home/top3.png" alt="Vika">
-                            <div><span class="place">🥉 3 место</span><span>Vika</span></div>
-                        </li>
+                        {{else}}
+                        <li><div><span>Пока нет данных — начните смотреть, чтобы попасть в топ</span></div></li>
+                        {{end}}
                     </ul>
                 </div>
             </div>
