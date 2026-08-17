@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru"{{if .BackgroundURL}} style="background-image: url('{{.BackgroundURL}}')"{{end}}>
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,20 +11,25 @@
     <link rel="stylesheet" href="/static/css/tokens.css?v=2">
     <style>
         * { box-sizing: border-box; }
-        /* Фон на html, не body: у body высота растёт вместе с контентом, и
-           background-size:cover считался бы от высоты всей страницы, а не
-           окна (даже с background-attachment:fixed) — картинка растягивалась
-           и теряла резкость на длинных страницах. У html как корневого
-           элемента браузер всегда считает cover от viewport. */
-        html {
-            background: var(--color-bg) url('/static/img/login/background_image_blure_v3.png') no-repeat top center;
-            background-size: cover;
-            background-attachment: fixed;
-        }
+        html { background: var(--color-bg); }
         body {
             margin: 0;
             color: var(--color-text);
             font-family: var(--font-base);
+        }
+        /* Отдельный position:fixed слой позади контента, а не
+           background-attachment:fixed на html/body — iOS Safari не
+           поддерживает fixed-attachment (тихо откатывает на scroll), из-за
+           чего cover считался от высоты всей страницы, а не экрана, и
+           картинка растягивалась/обрезалась на длинных страницах. Слой
+           фиксированного размера с viewport всегда даёт "во весь экран"
+           независимо от браузера и высоты контента. */
+        .page-bg {
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            background: url('/static/img/login/background_image_blure_v3.png') no-repeat center center;
+            background-size: cover;
         }
 
         .profile-card {
@@ -398,6 +403,7 @@
     </style>
 </head>
 <body>
+<div class="page-bg"{{if .BackgroundURL}} style="background-image: url('{{.BackgroundURL}}')"{{end}}></div>
 {{template "header" .}}
 <div class="profile-card" data-animate>
     <div class="profile-hero">
