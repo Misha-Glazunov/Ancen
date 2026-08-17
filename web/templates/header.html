@@ -30,7 +30,7 @@
         <a href="/premium" data-swap-word>Premium</a>
     </nav>
     <div class="header-account">
-        <a href="/profile" class="header-avatar" title="{{.Username}}">{{initial .Username}}<span class="header-friend-badge" id="header-friend-badge" hidden>0</span></a>
+        <a href="/profile" class="header-avatar" id="header-avatar" title="{{.Username}}"><span id="header-avatar-initial">{{initial .Username}}</span><span class="header-friend-badge" id="header-friend-badge" hidden>0</span></a>
         <a href="/logout" class="header-logout" title="Выйти" data-swap-word>Выход</a>
     </div>
 </header>
@@ -108,8 +108,10 @@
     text-decoration: none;
     transition: opacity 0.2s;
     position: relative;
+    overflow: hidden;
 }
 .header-avatar:hover { opacity: 0.85; }
+.header-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
 .header-friend-badge {
     /* .header-account (родитель) держит overflow:hidden для анимации
        сворачивания при поиске — бейдж не может вылезать за край аватарки,
@@ -473,6 +475,18 @@
                 badge.hidden = false;
             }
         });
+    }
+
+    var avatarInitial = document.getElementById('header-avatar-initial');
+    if (avatarInitial) {
+        fetch('/api/user/avatar').then(function (r) { return r.ok ? r.json() : {}; }).then(function (res) {
+            if (res.avatar_url) {
+                var img = document.createElement('img');
+                img.src = res.avatar_url;
+                img.alt = '';
+                avatarInitial.replaceWith(img);
+            }
+        }).catch(function () {});
     }
 })();
 </script>

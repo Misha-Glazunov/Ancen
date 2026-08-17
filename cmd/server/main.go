@@ -5469,6 +5469,21 @@ func apiAchievementsGet(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(userAchievements)
 }
 
+// apiUserAvatarGet отдаёт avatar_url текущего пользователя — используется
+// header.html, чтобы показать реальный аватар вместо буквы-заглушки без
+// протаскивания AvatarURL через каждый page-handler отдельно.
+func apiUserAvatarGet(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	var avatarURL string
+	db.QueryRow("SELECT avatar_url FROM users WHERE id = ?", userID).Scan(&avatarURL)
+	json.NewEncoder(w).Encode(map[string]string{"avatar_url": avatarURL})
+}
+
 func apiLevelGet(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	userID, err := getUserIDFromSession(r)
@@ -6047,6 +6062,7 @@ func main() {
 	// API для ачивок
 	secureHandle("/api/achievements", apiAchievementsGet)
 	secureHandle("/api/level", apiLevelGet)
+	secureHandle("/api/user/avatar", apiUserAvatarGet)
 	secureHandle("/api/achievements/all", apiAllAchievementsGet)
 	secureHandle("/admin", adminDashboardHandler)
 	secureHandle("/admin/users", adminUsersHandler)
