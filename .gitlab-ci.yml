@@ -20,6 +20,11 @@ deploy:
   tags:
     - ancen-windows
   script:
+    # Раннер чекаутит код в чистую build-директорию, где нет .env (в .gitignore) —
+    # секреты остаются на месте в постоянной рабочей копии на сервере, забираем их оттуда.
+    - Copy-Item "C:\Users\mishg\Desktop\Ancen\.env" ".env" -Force
+    - Copy-Item "C:\Users\mishg\Desktop\Ancen\deploy\mysql\.env" "deploy\mysql\.env" -Force
+    - Copy-Item "C:\Users\mishg\Desktop\Ancen\deploy\minio\.env" "deploy\minio\.env" -Force
     - docker build -t ancen-app:latest .
     - docker compose up -d
   rules:
