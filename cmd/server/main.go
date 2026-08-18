@@ -3017,6 +3017,18 @@ func (p *partyHub) isMember(partyID string, userID int) bool {
 	return ok && pt.members[userID]
 }
 
+// hostOf — кто позвал (для REST-отклонения приглашения из шапки: декланер
+// сам ещё не член party, поэтому isMember тут не подходит).
+func (p *partyHub) hostOf(partyID string) (int, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	pt, ok := p.parties[partyID]
+	if !ok {
+		return 0, false
+	}
+	return pt.hostID, true
+}
+
 // otherMembers возвращает остальных участников party (для рассылки
 // player_sync — событие плеера долетает до всех, кроме отправителя).
 func (p *partyHub) otherMembers(partyID string, exceptUserID int) []int {
@@ -3102,6 +3114,18 @@ func sendToUser(userID int, msg WsMessage) bool {
 	}
 }
 
+// pushToUser — как sendToUser, но через dmHub (глобальный push по user_id,
+// не привязан к тому, на watch.html ли получатель прямо сейчас). Нужен для
+// party_invite: приглашённый друг может быть где угодно на сайте, а не
+// обязательно на той же серии — episode-scoped hub его бы не нашёл.
+func pushToUser(userID int, msg WsMessage) bool {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return false
+	}
+	return dmh.push(userID, data)
+}
+
 // handlePartyMessage обрабатывает party_*/rtc_*/player_sync сообщения из
 // wsHandler. senderID/senderUsername — уже проверенная личность отправителя
 // (сессия проверена выше в wsHandler, здесь просто диспетчер по типу).
@@ -3124,7 +3148,9 @@ func handlePartyMessage(msg WsMessage, senderID int, senderUsername string) {
 			return
 		}
 		partyID := partyH.create(msg.EpisodeID, senderID)
-		delivered := sendToUser(msg.TargetUserID, WsMessage{
+		// pushToUser (dmHub), не sendToUser (episode-hub) — друга приглашают
+		// откуда угодно на сайте, он не обязан быть на watch.html этой серии.
+		delivered := pushToUser(msg.TargetUserID, WsMessage{
 			Type:      "party_invite",
 			PartyID:   partyID,
 			EpisodeID: msg.EpisodeID,
@@ -3132,8 +3158,8 @@ func handlePartyMessage(msg WsMessage, senderID int, senderUsername string) {
 			Username:  senderUsername,
 		})
 		if !delivered {
-			// Друг сейчас не на watch.html (WS не подключен) — раньше это
-			// молча терялось: приглашающий видел "Приглашение отправлено" и
+			// Друг реально не в сети (ни одной открытой вкладки сайта) — раньше
+			// это молча терялось: приглашающий видел "Приглашение отправлено" и
 			// ждал ответа, которого никогда не будет.
 			partyH.cancel(partyID)
 			sendToUser(senderID, WsMessage{Type: "party_invite_failed", TargetUserID: msg.TargetUserID, Reason: "offline"})
@@ -3226,12 +3252,18 @@ func (h *dmHub) unregister(userID int, conn *websocket.Conn) {
 	}
 }
 
-func (h *dmHub) push(userID int, data []byte) {
+// push возвращает true, если у получателя было хоть одно активное соединение —
+// используется приглашением в party, чтобы понять, дошло ли оно вообще
+// (пользователь может быть просто не в сети, а не только не на этой странице).
+func (h *dmHub) push(userID int, data []byte) bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+	delivered := false
 	for conn := range h.clients[userID] {
 		conn.WriteMessage(websocket.TextMessage, data)
+		delivered = true
 	}
+	return delivered
 }
 
 // wsDMHandler — /ws/dm. Открывается один раз при заходе на сайт (не привязан
@@ -5803,6 +5835,35 @@ func apiFriendsGet(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(getFriends(userID))
 }
 
+// apiPartyDeclineHandler — отклонение приглашения на синхропросмотр из
+// шапки. /ws/dm (которым доставляется само приглашение) push-only, сервер
+// не читает по нему входящие сообщения — поэтому отклонение идёт через REST,
+// не через WS, в отличие от остальной party-логики на watch.html.
+func apiPartyDeclineHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	var req struct {
+		PartyID string `json:"party_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.PartyID == "" {
+		http.Error(w, `{"error":"party_id обязателен"}`, http.StatusBadRequest)
+		return
+	}
+	if hostID, ok := partyH.hostOf(req.PartyID); ok {
+		sendToUser(hostID, WsMessage{Type: "party_declined", PartyID: req.PartyID, UserID: userID})
+		partyH.cancel(req.PartyID)
+	}
+	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
 func apiFriendRequestsGet(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	userID, err := getUserIDFromSession(r)
@@ -6403,6 +6464,7 @@ func main() {
 	secureHandle("/api/friends/requests", apiFriendRequestsGet)
 	secureHandle("/api/friends/respond", apiFriendRespondPost)
 	secureHandle("/api/friends/remove", apiFriendRemovePost)
+	secureHandle("/api/party/decline", apiPartyDeclineHandler)
 	secureHandle("/api/users/search", apiUsersSearchGet)
 	secureHandle("/api/anime/search", apiAnimeSearchGet)
 	secureHandle("/api/favorites/anime", apiFavoriteAnimeToggle)

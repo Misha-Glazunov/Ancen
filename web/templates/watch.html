@@ -261,7 +261,7 @@
         }
         .party-panel .empty { color: var(--color-gray-500); font-size: var(--fs-small); }
 
-        #partyInviteBanner, #partyCallBar {
+        #partyCallBar {
             display: none;
             align-items: center;
             justify-content: space-between;
@@ -328,14 +328,6 @@
         </div>
     </div>
 
-    <div id="partyInviteBanner">
-        <span id="partyInviteText"></span>
-        <div class="party-actions">
-            <button type="button" id="partyAcceptBtn" class="btn btn-sm">Принять</button>
-            <button type="button" id="partyDeclineBtn" class="btn btn-sm">Отклонить</button>
-        </div>
-    </div>
-
     <div id="partyCallBar">
         <span class="party-status"><span class="party-dot"></span><span id="partyCallText">На связи</span></span>
         <div class="party-actions">
@@ -343,6 +335,7 @@
             <button type="button" id="partyLeaveBtn" class="btn btn-sm">Завершить</button>
         </div>
     </div>
+    <p id="partyGuestNote" class="spoiler-note" hidden>Хост управляет воспроизведением — play/pause/перемотка синхронизируются автоматически.</p>
 
     <!-- Кнопки эмоций -->
     <div class="emotion-buttons">
@@ -471,6 +464,11 @@
     const chartColor = {{.ChartColor}};
     const chartColorHover = {{.ChartColorHover}};
 
+    // Пришли по приглашению из шапки (window.location.href с этими параметрами,
+    // см. header.html) — сразу известно, что мы гость в party, без in-page баннера.
+    const partyIdFromUrl = urlParams.get('party');
+    const hostUserIdFromUrl = urlParams.get('host');
+
     let ws;
 
     // --- WebSocket ---
@@ -479,6 +477,13 @@
         ws = new WebSocket(`${proto}//${window.location.host}/ws?episode_id=${episodeId}`);
         ws.onopen = function() {
             console.log("✅ WebSocket connected for episode", episodeId);
+            if (partyIdFromUrl && !partyId) {
+                partyId = partyIdFromUrl;
+                partyPeerId = parseInt(hostUserIdFromUrl, 10);
+                isPartyHost = false;
+                wsSend({ type: 'party_accept', party_id: partyId });
+                setupCall(); // готовим микрофон/PC заранее, offer от хоста придёт следом
+            }
         };
         ws.onmessage = function(event) {
             const msg = JSON.parse(event.data);
@@ -520,6 +525,10 @@
     let pc = null;                // RTCPeerConnection текущего звонка
     let localStream = null;
     let applyingRemoteSync = false; // подавляет обратную отправку player_sync при применении входящего события
+    // Кто позвал — тот и управляет плеером (play/pause/seek), второй только смотрит.
+    // Гость узнаёт свою роль сразу из URL (?party=&host=, см. ws.onopen выше), хост —
+    // из party_joined в момент, когда приглашённый друг реально присоединился.
+    let isPartyHost = false;
 
     function wsSend(obj) {
         if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
@@ -563,42 +572,13 @@
         wsSend({ type: 'party_invite', episode_id: episodeId, target_user_id: targetUserId });
         partyPanel.hidden = true;
         if (typeof showToast === 'function') {
-            showToast({ icon: '🎧', title: 'Приглашение отправлено', body: targetName + ' сможет присоединиться, пока смотрит эту же серию' });
+            showToast({ icon: '🎧', title: 'Приглашение отправлено', body: targetName + ' увидит уведомление в шапке сайта, где бы ни находился' });
         }
     }
-
-    // --- Входящее приглашение ---
-    const inviteBanner = document.getElementById('partyInviteBanner');
-    const inviteText = document.getElementById('partyInviteText');
-    let incomingInvite = null; // { partyId, fromUserId, fromUsername }
-
-    function showIncomingInvite(msg) {
-        // Уже в звонке или ждём ответа на своё приглашение — новое входящее не принимаем молча,
-        // проще всего просто игнорировать (MVP на двоих, без очереди приглашений)
-        if (partyId || incomingInvite) return;
-        incomingInvite = { partyId: msg.party_id, fromUserId: msg.user_id, fromUsername: msg.username };
-        inviteText.textContent = msg.username + ' зовёт смотреть вместе';
-        inviteBanner.style.display = 'flex';
-    }
-
-    document.getElementById('partyAcceptBtn').addEventListener('click', async () => {
-        if (!incomingInvite) return;
-        const inv = incomingInvite;
-        incomingInvite = null;
-        inviteBanner.style.display = 'none';
-        partyId = inv.partyId;
-        partyPeerId = inv.fromUserId;
-        partyPeerName = inv.fromUsername;
-        await setupCall(); // готовим локальный микрофон/PC до прихода offer
-        wsSend({ type: 'party_accept', party_id: inv.partyId });
-    });
-
-    document.getElementById('partyDeclineBtn').addEventListener('click', () => {
-        if (!incomingInvite) return;
-        wsSend({ type: 'party_decline', party_id: incomingInvite.partyId, target_user_id: incomingInvite.fromUserId });
-        incomingInvite = null;
-        inviteBanner.style.display = 'none';
-    });
+    // Приём приглашения теперь происходит в шапке (header.html) — оттуда виден
+    // где угодно на сайте, не только на watch.html этой серии. "Принять" делает
+    // обычный переход на /watch?episode=...&party=...&host=..., и гость
+    // подключается сразу при открытии WS (см. ws.onopen выше).
 
     // --- Активный звонок ---
     const callBar = document.getElementById('partyCallBar');
@@ -645,6 +625,14 @@
                 wsSend({ type: 'rtc_ice', party_id: partyId, target_user_id: partyPeerId, candidate: JSON.stringify(e.candidate) });
             }
         };
+        // Гость не управляет плеером — прячем нативные controls video.js, чтобы
+        // локальный клик play/pause/перемотку не создавал иллюзию контроля
+        // (событие всё равно не уйдёт дальше — см. sendPlayerSync ниже, но лучше
+        // не показывать элементы, которые ни на что не влияют).
+        if (!isPartyHost) {
+            player.controls(false);
+            document.getElementById('partyGuestNote').hidden = false;
+        }
         updatePartyUI();
     }
 
@@ -657,23 +645,34 @@
         partyPeerName = '';
         pendingInviteTargetId = null;
         micMuted = false;
+        isPartyHost = false;
+        player.controls(true);
+        document.getElementById('partyGuestNote').hidden = true;
         document.getElementById('partyMuteBtn').textContent = 'Выключить микрофон';
         updatePartyUI();
     }
 
     // --- Синхронизация плеера ---
+    // Только хост шлёт события — раньше слали оба участника, что требовало
+    // подавлять эхо между ними; теперь синхронизация однонаправленная, поэтому
+    // порог коррекции можно держать заметно ниже (см. applyPlayerSync).
     function sendPlayerSync(paused) {
-        if (!partyId || applyingRemoteSync) return;
+        if (!partyId || !isPartyHost || applyingRemoteSync) return;
         wsSend({ type: 'player_sync', party_id: partyId, playback_sec: player.currentTime(), paused: paused });
     }
     player.on('play', () => sendPlayerSync(false));
     player.on('pause', () => sendPlayerSync(true));
     player.on('seeked', () => sendPlayerSync(player.paused()));
 
+    // Хартбит поверх событий play/pause/seeked — без него дрейф между гостем и
+    // хостом накапливается молча между явными действиями (например, во время
+    // долгого проигрывания без единого клика).
+    setInterval(() => { if (partyId && isPartyHost) sendPlayerSync(player.paused()); }, 2000);
+
     function applyPlayerSync(msg) {
         applyingRemoteSync = true;
         const drift = Math.abs(player.currentTime() - msg.playback_sec);
-        if (drift > 1.5) player.currentTime(msg.playback_sec); // маленький дрейф не трогаем — иначе постоянные микро-рывки у обоих
+        if (drift > 0.3) player.currentTime(msg.playback_sec); // однонаправленно от хоста — можно синкать плотнее без риска дёрганья
         if (msg.paused) player.pause(); else player.play();
         setTimeout(() => { applyingRemoteSync = false; }, 300);
     }
@@ -681,19 +680,20 @@
     // --- Диспетчер party_*/rtc_*/player_sync сообщений с сервера ---
     async function handlePartyWsMessage(msg) {
         switch (msg.type) {
-            case 'party_invite':
-                showIncomingInvite(msg);
-                break;
+            // party_invite сюда больше не приходит — доставка теперь идёт через
+            // /ws/dm в шапку (header.html), видна на любой странице сайта, не
+            // только на watch.html этой серии.
 
             case 'party_joined':
                 // Сервер шлёт party_joined всем участникам party при каждом join.
-                // Приглашённый уже настроил свою сторону в обработчике "Принять" —
-                // этот case важен только хосту: подтверждение, что приглашённый друг
+                // Гость уже настроил свою сторону сам (см. ws.onopen выше) — этот
+                // case важен только хосту: подтверждение, что приглашённый друг
                 // принял, и пора поднимать WebRTC-хендшейк первым (создавать offer).
                 if (pendingInviteTargetId !== null && msg.user_id === pendingInviteTargetId) {
                     pendingInviteTargetId = null;
                     partyId = msg.party_id;
                     partyPeerId = msg.user_id;
+                    isPartyHost = true;
                     await setupCall();
                     const offer = await pc.createOffer();
                     await pc.setLocalDescription(offer);
@@ -706,7 +706,7 @@
                 if (msg.reason === 'not_friend') {
                     alert('Пригласить можно только друга — сначала добавьте его в друзья и дождитесь принятия заявки');
                 } else if (msg.reason === 'offline') {
-                    alert((partyPeerName || 'Друг') + ' сейчас не на странице просмотра — попросите его открыть эту серию');
+                    alert((partyPeerName || 'Друг') + ' сейчас не в сети');
                 } else {
                     alert('Не удалось отправить приглашение');
                 }

@@ -34,6 +34,13 @@
         <a href="/logout" class="header-logout" title="Выйти" data-swap-word>Выход</a>
     </div>
 </header>
+<div id="party-invite-banner" hidden>
+    <span id="party-invite-text"></span>
+    <div class="party-invite-actions">
+        <button type="button" id="party-invite-accept" class="btn btn-sm">Принять</button>
+        <button type="button" id="party-invite-decline" class="btn btn-sm">Отклонить</button>
+    </div>
+</div>
 {{else}}
 <!-- Header_Unlogin (Figma): для неавторизованных пользователей на всех публичных страницах -->
 <header class="site-header site-header-guest">
@@ -67,6 +74,26 @@
 {{end}}
 
 <style>
+/* Неисчезающий баннер приглашения на синхропросмотр — виден на любой
+   странице сайта (в отличие от toast.js, который сам прячется через 5с и
+   не годится для действия, требующего решения пользователя). */
+#party-invite-banner {
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 140px;
+    background: var(--color-gray-950);
+    border-bottom: 1px solid var(--color-accent);
+    position: sticky;
+    top: 0;
+    z-index: 999;
+}
+.party-invite-actions { display: flex; gap: 8px; flex-shrink: 0; }
+@media (max-width: 768px) {
+    #party-invite-banner { padding: 12px 16px; flex-wrap: wrap; }
+}
+
 .site-header {
     display: flex;
     align-items: center;
@@ -458,6 +485,50 @@
             if (activeTab() === 'friends') e.preventDefault();
         });
     });
+
+    // Приглашение на синхропросмотр — глобально, видно на любой странице сайта
+    // (не только на watch.html конкретной серии). Использует /ws/dm — тот же
+    // push-канал по user_id, что и личные сообщения (messages.html открывает
+    // его отдельно для своих целей, это независимое второе соединение).
+    var partyBanner = document.getElementById('party-invite-banner');
+    if (partyBanner) {
+        var pendingParty = null; // { partyId, episodeId, hostUserId }
+
+        function connectPartyDM() {
+            var proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            var ws = new WebSocket(proto + '//' + window.location.host + '/ws/dm');
+            ws.onmessage = function (event) {
+                var data;
+                try { data = JSON.parse(event.data); } catch (e) { return; }
+                if (data.type !== 'party_invite') return;
+                // Уже ждём ответа на другое приглашение — новое просто игнорируем
+                // (MVP на двоих без очереди, как и раньше на watch.html).
+                if (pendingParty) return;
+                pendingParty = { partyId: data.party_id, episodeId: data.episode_id, hostUserId: data.user_id };
+                document.getElementById('party-invite-text').textContent = data.username + ' зовёт смотреть аниме вместе';
+                partyBanner.hidden = false;
+            };
+            ws.onclose = function () { setTimeout(connectPartyDM, 3000); };
+        }
+        connectPartyDM();
+
+        document.getElementById('party-invite-accept').addEventListener('click', function () {
+            if (!pendingParty) return;
+            var p = pendingParty;
+            window.location.href = '/watch?episode=' + p.episodeId + '&party=' + encodeURIComponent(p.partyId) + '&host=' + p.hostUserId;
+        });
+
+        document.getElementById('party-invite-decline').addEventListener('click', function () {
+            if (!pendingParty) return;
+            fetch('/api/party/decline', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ party_id: pendingParty.partyId })
+            }).catch(function () {});
+            pendingParty = null;
+            partyBanner.hidden = true;
+        });
+    }
 
     // Бейдж на аватарке — сумма непрочитанных сообщений и заявок в друзья,
     // одним числом (решено 2026-08-14), а не раздельными индикаторами.
