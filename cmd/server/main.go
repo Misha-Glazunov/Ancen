@@ -3157,7 +3157,6 @@ func handlePartyMessage(msg WsMessage, senderID int, senderUsername string) {
 			UserID:    senderID,
 			Username:  senderUsername,
 		})
-		log.Printf("🎧 party_invite from=%d to=%d delivered=%v", senderID, msg.TargetUserID, delivered)
 		if !delivered {
 			// Друг реально не в сети (ни одной открытой вкладки сайта) — раньше
 			// это молча терялось: приглашающий видел "Приглашение отправлено" и
