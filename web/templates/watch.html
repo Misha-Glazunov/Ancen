@@ -64,6 +64,21 @@
             z-index: 10;
             background: var(--color-gray-950);
         }
+        /* Гость в синхропросмотре: клик по самому видео (не по скрытой кнопке
+           play) у video.js всё равно ставит на паузу — отдельный обработчик,
+           не завязанный на видимость controlBar-кнопок. Прозрачный оверлей
+           перехватывает клики по видео, но геометрически не доходит до
+           control bar (3em — стандартная высота control bar video.js) —
+           поэтому звук/fullscreen остаются кликабельны без гонки z-index
+           с внутренней вёрсткой video.js. */
+        #partyGuestClickBlock {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 3em;
+            z-index: 5;
+        }
 
         /* ===== Кнопки эмоций ===== */
         .emotion-buttons {
@@ -302,6 +317,7 @@
             <p class="vjs-no-js">Для просмотра видео включите JavaScript</p>
         </video>
         <button type="button" id="skipBtn" class="btn btn-sm skip-btn" hidden></button>
+        <div id="partyGuestClickBlock" hidden></div>
     </div>
 
     <!-- Навигация между сериями -->
@@ -627,18 +643,18 @@
         };
         // Гость управляет своей "картинкой" (звук, полноэкранный режим) — это
         // локальные настройки просмотра, не часть синхронизации. А play/pause/
-        // перемотку прячем: это то, чем управляет хост. Полностью скрывать весь
-        // control bar (player.controls(false)) нельзя — тогда пропали бы и
-        // громкость с полноэкранным режимом. Известное ограничение: клик по
-        // самому видео у video.js всё ещё локально ставит на паузу (это не
-        // через playToggle, отдельный обработчик) — не блокируем, полагаемся
-        // на хартбит-коррекцию (см. applyPlayerSync), которая через ~4с вернёт
-        // как надо; блокировать и это не стоит усилий ради редкого случая.
+        // перемотку блокируем: это то, чем управляет хост. Полностью скрывать
+        // весь control bar (player.controls(false)) нельзя — тогда пропали бы
+        // и громкость с полноэкранным режимом. Клик по playToggle/progressControl
+        // прячем видимо, но video.js ставит на паузу и по клику на само видео
+        // (отдельный обработчик, не завязан на видимость кнопок) — поэтому
+        // дополнительно накрываем видео прозрачным блоком (#partyGuestClickBlock).
         if (!isPartyHost) {
             var playToggle = player.controlBar.getChild('playToggle');
             var progressControl = player.controlBar.getChild('progressControl');
             if (playToggle) playToggle.hide();
             if (progressControl) progressControl.hide();
+            document.getElementById('partyGuestClickBlock').hidden = false;
             document.getElementById('partyGuestNote').hidden = false;
         }
         updatePartyUI();
@@ -658,6 +674,7 @@
         var progressControl = player.controlBar.getChild('progressControl');
         if (playToggle) playToggle.show();
         if (progressControl) progressControl.show();
+        document.getElementById('partyGuestClickBlock').hidden = true;
         document.getElementById('partyGuestNote').hidden = true;
         document.getElementById('partyMuteBtn').textContent = 'Выключить микрофон';
         updatePartyUI();
