@@ -667,13 +667,21 @@
     // Хартбит поверх событий play/pause/seeked — без него дрейф между гостем и
     // хостом накапливается молча между явными действиями (например, во время
     // долгого проигрывания без единого клика).
-    setInterval(() => { if (partyId && isPartyHost) sendPlayerSync(player.paused()); }, 2000);
+    setInterval(() => { if (partyId && isPartyHost) sendPlayerSync(player.paused()); }, 4000);
 
+    // Порог дрейфа и частота хартбита — компромисс, не идеал: у HLS перемотка
+    // не бесплатна (новый сегмент надо перекачать), а не "дрейф", поэтому
+    // слишком частая/точная коррекция сама стала причиной лагов у гостя
+    // (перематывали каждые 2с при пороге 0.3с — почти постоянный ресик вместо
+    // плавного воспроизведения). 1с порог + 4с хартбит — заметно меньше
+    // рывков ценой чуть менее точной синхронизации.
     function applyPlayerSync(msg) {
         applyingRemoteSync = true;
         const drift = Math.abs(player.currentTime() - msg.playback_sec);
-        if (drift > 0.3) player.currentTime(msg.playback_sec); // однонаправленно от хоста — можно синкать плотнее без риска дёрганья
-        if (msg.paused) player.pause(); else player.play();
+        if (drift > 1.0) player.currentTime(msg.playback_sec);
+        if (msg.paused !== player.paused()) {
+            if (msg.paused) player.pause(); else player.play();
+        }
         setTimeout(() => { applyingRemoteSync = false; }, 300);
     }
 
