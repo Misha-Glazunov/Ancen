@@ -35,6 +35,9 @@
   .btn-pink{background:var(--accent);border:none;border-radius:999px;padding:10px 18px;color:#fff;font-family:var(--font-secondary);font-weight:600;font-size:13px;cursor:pointer;}
   .btn-ghost-sm{background:var(--card2);border:1px solid rgba(255,255,255,.1);border-radius:999px;padding:6px 12px;color:var(--text);font-family:var(--font-secondary);font-size:12px;cursor:pointer;}
   .btn-danger-sm{background:transparent;border:1px solid var(--red);color:var(--red);border-radius:999px;padding:6px 12px;font-family:var(--font-secondary);font-size:12px;cursor:pointer;}
+  .image-upload-row{display:flex;align-items:center;gap:12px;}
+  .image-preview{width:70px;height:100px;border-radius:8px;background:var(--card2) center/cover no-repeat;flex-shrink:0;}
+  .image-preview-wide{width:130px;height:70px;}
 
   table{width:100%;border-collapse:collapse;}
   th{text-align:left;font-family:var(--font-secondary);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700;padding:10px 12px;}
@@ -97,7 +100,24 @@
         <input type="hidden" name="id" value="{{.Anime.ID}}">
         <div class="field"><label>Название *</label><input type="text" name="title" value="{{.Anime.Title}}" required></div>
         <div class="field"><label>Описание</label><textarea name="description" rows="4">{{.Anime.Description}}</textarea></div>
-        <div class="field"><label>URL постера</label><input type="text" name="poster_url" value="{{.Anime.Poster}}"></div>
+
+        <div class="field">
+          <label>Постер (узкий — страница аниме, обсуждаемые)</label>
+          <div class="image-upload-row">
+            <div class="image-preview" id="posterPreview" style="{{if .Anime.Poster}}background-image:url('{{.Anime.Poster}}'){{end}}"></div>
+            <label class="btn-ghost-sm">Загрузить<input type="file" accept="image/*" id="posterInput" hidden></label>
+          </div>
+          <input type="hidden" name="poster_url" id="posterUrl" value="{{.Anime.Poster}}">
+        </div>
+        <div class="field">
+          <label>Баннер (широкий — блок «Новое» на главной)</label>
+          <div class="image-upload-row">
+            <div class="image-preview image-preview-wide" id="bannerPreview" style="{{if .Anime.Banner}}background-image:url('{{.Anime.Banner}}'){{end}}"></div>
+            <label class="btn-ghost-sm">Загрузить<input type="file" accept="image/*" id="bannerInput" hidden></label>
+          </div>
+          <input type="hidden" name="banner_url" id="bannerUrl" value="{{.Anime.Banner}}">
+        </div>
+
         <div class="field">
           <label>Жанры</label>
           <div class="genre-checks" id="genreChecks">
@@ -172,6 +192,26 @@
   document.querySelectorAll('#genreChecks input[type=checkbox]').forEach(cb => {
     if (existingGenres.includes(cb.value)) cb.checked = true;
   });
+
+  // Постер/баннер грузятся сразу по выбору файла (как аватар в профиле) —
+  // сервер декодирует/ресайзит/перекодирует в JPEG, возвращённый URL кладём
+  // в скрытый инпут, который уходит вместе с остальной формой на save.
+  function wireImageUpload(inputId, previewId, hiddenId, kind) {
+    document.getElementById(inputId).addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const fd = new FormData();
+      fd.append('kind', kind);
+      fd.append('image', file);
+      const res = await fetch('/api/admin/anime/image', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || 'Ошибка загрузки'); return; }
+      document.getElementById(hiddenId).value = data.url;
+      document.getElementById(previewId).style.backgroundImage = `url('${data.url}')`;
+    });
+  }
+  wireImageUpload('posterInput', 'posterPreview', 'posterUrl', 'poster');
+  wireImageUpload('bannerInput', 'bannerPreview', 'bannerUrl', 'banner');
 
   document.getElementById('anime-form').addEventListener('submit', async (e) => {
     e.preventDefault();

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
@@ -9,6 +10,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"image"
+	_ "image/gif"
+	"image/jpeg"
+	_ "image/png"
 	"io"
 	"log"
 	"math"
@@ -30,6 +35,8 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/joho/godotenv"
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/image/draw"
+	_ "golang.org/x/image/webp"
 
 	"Ancen/internal/auth"
 )
@@ -461,7 +468,47 @@ func init() {
 	}
 	templates = template.Must(template.New("").Funcs(funcMap).ParseGlob("web/templates/*.html"))
 	fs := http.FileServer(http.Dir("web/static"))
-	http.Handle("/static/", http.StripPrefix("/static/", fs))
+	http.Handle("/static/", http.StripPrefix("/static/", cacheStatic(fs)))
+}
+
+// cacheStatic добавляет Cache-Control к статике (css/js/img/video) — без него
+// браузер перезапрашивает те же файлы на каждом визите. Имена файлов не
+// версионируются, поэтому TTL умеренный (1 день), а не "immutable" навечно.
+func cacheStatic(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// gzipMiddleware сжимает текстовые ответы (HTML/CSS/JS/JSON) — картинки и
+// видео уже сжаты форматом, повторное сжатие им не даёт выигрыша, поэтому
+// сжимаем только по запросу клиента (Accept-Encoding) через стандартный
+// compress/gzip, без внешних зависимостей.
+type gzipResponseWriter struct {
+	http.ResponseWriter
+	gz *gzip.Writer
+}
+
+func (w *gzipResponseWriter) Write(b []byte) (int, error) {
+	return w.gz.Write(b)
+}
+
+func gzipMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// /static/ уже раздаёт бинарные файлы (картинки/видео) через
+		// http.ServeContent, который поддерживает Range-запросы (перемотка
+		// видео) — gzip-обёртка это сломает, поэтому пропускаем её.
+		if strings.HasPrefix(r.URL.Path, "/static/") || !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Add("Vary", "Accept-Encoding")
+		gz := gzip.NewWriter(w)
+		defer gz.Close()
+		next.ServeHTTP(&gzipResponseWriter{ResponseWriter: w, gz: gz}, r)
+	})
 }
 
 // render — вспомогательная функция для отрисовки шаблонов
@@ -1487,6 +1534,11 @@ func createTables() {
 	}
 	if _, err := db.Exec("ALTER TABLE anime ADD COLUMN year VARCHAR(16) DEFAULT ''"); err != nil {
 		log.Printf("ALTER TABLE anime (year) может уже существовать: %v", err)
+	}
+	// Широкий баннер (для карточек-баннеров) — отдельно от узкого poster_url
+	// (постер на странице аниме/в обсуждаемых), см. запрос пользователя 2026-08-18.
+	if _, err := db.Exec("ALTER TABLE anime ADD COLUMN banner_url VARCHAR(500) DEFAULT ''"); err != nil {
+		log.Printf("ALTER TABLE anime (banner_url) может уже существовать: %v", err)
 	}
 	// Premium-подписка: без неё реакции/комментарии видны только до текущего прогресса
 	// просмотра (анти-спойлер), см. isPremiumUser/watchedUpToSec
@@ -4103,28 +4155,58 @@ func sniffVideoContainer(f multipart.File) error {
 // maxAvatarBytes — верхняя граница размера файла аватара.
 const maxAvatarBytes = 5 << 20 // 5 MiB
 
-// sniffImageContainer проверяет magic bytes на JPEG/PNG/WebP — расширение
-// файла легко подделать (см. sniffVideoContainer).
-func sniffImageContainer(f multipart.File) (ext string, err error) {
-	head := make([]byte, 12)
-	n, err := io.ReadFull(f, head)
-	if err != nil && err != io.ErrUnexpectedEOF {
+// uploadImageQuality — качество JPEG для normalizeUploadedImage. 88 визуально
+// неотличимо от оригинала на фото, но заметно легче любого несжатого/PNG-скана
+// телефона — тот же компромисс, что использовался для статики сайта.
+const uploadImageQuality = 88
+
+// normalizeUploadedImage декодирует любой из поддерживаемых форматов (jpg/png/
+// webp/gif — регистрируются через blank-импорты ниже), уменьшает картинку до
+// maxDim по длинной стороне (апскейл никогда не делается — маленькое фото не
+// растягиваем) и перекодирует в JPEG. Так все изображения, попадающие на сайт
+// через загрузку (аватар, фон профиля, постер/баннер аниме), хранятся в одном
+// предсказуемом формате и размере вместо того, что прислал браузер as-is.
+// Возвращает путь к временному .jpg-файлу — вызывающий код должен его
+// удалить (os.Remove) после отправки в MinIO.
+func normalizeUploadedImage(file multipart.File, maxDim int) (string, error) {
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return "", err
 	}
-	head = head[:n]
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return "", err
+	img, _, err := image.Decode(file)
+	if err != nil {
+		return "", fmt.Errorf("файл не распознан как изображение: %w", err)
 	}
 
-	switch {
-	case len(head) >= 3 && bytes.Equal(head[:3], []byte{0xFF, 0xD8, 0xFF}):
-		return ".jpg", nil
-	case len(head) >= 8 && bytes.Equal(head[:8], []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}):
-		return ".png", nil
-	case len(head) >= 12 && string(head[:4]) == "RIFF" && string(head[8:12]) == "WEBP":
-		return ".webp", nil
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+	if w > maxDim || h > maxDim {
+		scale := float64(maxDim) / float64(w)
+		if h > w {
+			scale = float64(maxDim) / float64(h)
+		}
+		nw, nh := int(float64(w)*scale), int(float64(h)*scale)
+		if nw < 1 {
+			nw = 1
+		}
+		if nh < 1 {
+			nh = 1
+		}
+		dst := image.NewRGBA(image.Rect(0, 0, nw, nh))
+		draw.CatmullRom.Scale(dst, dst.Bounds(), img, b, draw.Over, nil)
+		img = dst
 	}
-	return "", fmt.Errorf("unrecognized image signature")
+
+	tmpFile, err := os.CreateTemp("", "ancen-img-*.jpg")
+	if err != nil {
+		return "", err
+	}
+	if err := jpeg.Encode(tmpFile, img, &jpeg.Options{Quality: uploadImageQuality}); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpFile.Name())
+		return "", err
+	}
+	tmpFile.Close()
+	return tmpFile.Name(), nil
 }
 
 // avatarFramePreset — рамка аватара, разблокируется уровнем пользователя (бесплатная
@@ -4206,33 +4288,15 @@ func apiAvatarUploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	ext, err := sniffImageContainer(file)
+	tmpPath, err := normalizeUploadedImage(file, 512)
 	if err != nil {
 		http.Error(w, `{"error":"Файл не распознан как изображение (jpg/png/webp)"}`, http.StatusBadRequest)
 		return
 	}
+	defer os.Remove(tmpPath)
 
-	tmpFile, err := os.CreateTemp("", "ancen-avatar-*"+ext)
-	if err != nil {
-		http.Error(w, `{"error":"Ошибка временного файла"}`, http.StatusInternalServerError)
-		return
-	}
-	defer os.Remove(tmpFile.Name())
-	if _, err := io.Copy(tmpFile, file); err != nil {
-		tmpFile.Close()
-		http.Error(w, `{"error":"Ошибка записи файла"}`, http.StatusInternalServerError)
-		return
-	}
-	tmpFile.Close()
-
-	objectName := fmt.Sprintf("avatars/%d-%d%s", userID, time.Now().UnixNano(), ext)
-	contentType := "image/jpeg"
-	if ext == ".png" {
-		contentType = "image/png"
-	} else if ext == ".webp" {
-		contentType = "image/webp"
-	}
-	url, err := uploadSingleFile(r.Context(), tmpFile.Name(), objectName, contentType)
+	objectName := fmt.Sprintf("avatars/%d-%d.jpg", userID, time.Now().UnixNano())
+	url, err := uploadSingleFile(r.Context(), tmpPath, objectName, "image/jpeg")
 	if err != nil {
 		http.Error(w, `{"error":"Ошибка загрузки в хранилище"}`, http.StatusInternalServerError)
 		return
@@ -4281,33 +4345,15 @@ func apiBackgroundUploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	ext, err := sniffImageContainer(file)
+	tmpPath, err := normalizeUploadedImage(file, 1920)
 	if err != nil {
 		http.Error(w, `{"error":"Файл не распознан как изображение (jpg/png/webp)"}`, http.StatusBadRequest)
 		return
 	}
+	defer os.Remove(tmpPath)
 
-	tmpFile, err := os.CreateTemp("", "ancen-background-*"+ext)
-	if err != nil {
-		http.Error(w, `{"error":"Ошибка временного файла"}`, http.StatusInternalServerError)
-		return
-	}
-	defer os.Remove(tmpFile.Name())
-	if _, err := io.Copy(tmpFile, file); err != nil {
-		tmpFile.Close()
-		http.Error(w, `{"error":"Ошибка записи файла"}`, http.StatusInternalServerError)
-		return
-	}
-	tmpFile.Close()
-
-	objectName := fmt.Sprintf("backgrounds/%d-%d%s", userID, time.Now().UnixNano(), ext)
-	contentType := "image/jpeg"
-	if ext == ".png" {
-		contentType = "image/png"
-	} else if ext == ".webp" {
-		contentType = "image/webp"
-	}
-	url, err := uploadSingleFile(r.Context(), tmpFile.Name(), objectName, contentType)
+	objectName := fmt.Sprintf("backgrounds/%d-%d.jpg", userID, time.Now().UnixNano())
+	url, err := uploadSingleFile(r.Context(), tmpPath, objectName, "image/jpeg")
 	if err != nil {
 		http.Error(w, `{"error":"Ошибка загрузки в хранилище"}`, http.StatusInternalServerError)
 		return
@@ -5259,6 +5305,7 @@ func adminAnimeDetailHandler(w http.ResponseWriter, r *http.Request) {
 		Title       string
 		Description string
 		Poster      string
+		Banner      string
 		Genres      string
 		Year        string
 		Country     string
@@ -5269,9 +5316,9 @@ func adminAnimeDetailHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	var a animeDetail
 	err = db.QueryRow(`
-		SELECT id, title, description, poster_url, genres, year, country, source_type, studio, author, director
+		SELECT id, title, description, poster_url, banner_url, genres, year, country, source_type, studio, author, director
 		FROM anime WHERE id = ?
-	`, animeID).Scan(&a.ID, &a.Title, &a.Description, &a.Poster, &a.Genres, &a.Year, &a.Country, &a.SourceType, &a.Studio, &a.Author, &a.Director)
+	`, animeID).Scan(&a.ID, &a.Title, &a.Description, &a.Poster, &a.Banner, &a.Genres, &a.Year, &a.Country, &a.SourceType, &a.Studio, &a.Author, &a.Director)
 	if err == sql.ErrNoRows {
 		http.NotFound(w, r)
 		return
@@ -5319,6 +5366,7 @@ type animeUpsertBody struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	Poster      string `json:"poster_url"`
+	Banner      string `json:"banner_url"`
 	Genres      string `json:"genres"`
 	Year        string `json:"year"`
 	Country     string `json:"country"`
@@ -5345,9 +5393,9 @@ func apiAdminAnimeUpsert(w http.ResponseWriter, r *http.Request) {
 
 	if b.ID == 0 {
 		res, err := db.Exec(`
-			INSERT INTO anime (title, description, poster_url, genres, year, country, source_type, studio, author, director)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, b.Title, b.Description, b.Poster, b.Genres, b.Year, b.Country, b.SourceType, b.Studio, b.Author, b.Director)
+			INSERT INTO anime (title, description, poster_url, banner_url, genres, year, country, source_type, studio, author, director)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, b.Title, b.Description, b.Poster, b.Banner, b.Genres, b.Year, b.Country, b.SourceType, b.Studio, b.Author, b.Director)
 		if err != nil {
 			http.Error(w, `{"error":"ошибка сохранения"}`, http.StatusInternalServerError)
 			return
@@ -5358,14 +5406,66 @@ func apiAdminAnimeUpsert(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = db.Exec(`
-		UPDATE anime SET title=?, description=?, poster_url=?, genres=?, year=?, country=?, source_type=?, studio=?, author=?, director=?
+		UPDATE anime SET title=?, description=?, poster_url=?, banner_url=?, genres=?, year=?, country=?, source_type=?, studio=?, author=?, director=?
 		WHERE id = ?
-	`, b.Title, b.Description, b.Poster, b.Genres, b.Year, b.Country, b.SourceType, b.Studio, b.Author, b.Director, b.ID)
+	`, b.Title, b.Description, b.Poster, b.Banner, b.Genres, b.Year, b.Country, b.SourceType, b.Studio, b.Author, b.Director, b.ID)
 	if err != nil {
 		http.Error(w, `{"error":"ошибка сохранения"}`, http.StatusInternalServerError)
 		return
 	}
 	json.NewEncoder(w).Encode(map[string]int{"id": b.ID})
+}
+
+// animeImageMaxDim — целевой максимальный размер по длинной стороне для
+// постера (узкий, карточки/страница аниме) и баннера (широкий, "Новое" на
+// главной) — баннер шире, поэтому лимит выше.
+var animeImageMaxDim = map[string]int{"poster": 900, "banner": 1920}
+
+// apiAdminAnimeImageUpload — POST /api/admin/anime/image, multipart с полями
+// kind ("poster"|"banner") и image. Загрузка отдельно от apiAdminAnimeUpsert
+// (тот принимает JSON) — та же схема, что apiAvatarUploadHandler: сначала
+// заливаем файл и получаем URL, потом сохраняем его строкой через save.
+func apiAdminAnimeImageUpload(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	adminID, err := getUserIDFromSession(r)
+	if err != nil || !isUserAdmin(adminID) {
+		http.Error(w, `{"error":"Доступ запрещён"}`, http.StatusForbidden)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxAvatarBytes)
+	kind := r.FormValue("kind")
+	maxDim, ok := animeImageMaxDim[kind]
+	if !ok {
+		http.Error(w, `{"error":"kind должен быть poster или banner"}`, http.StatusBadRequest)
+		return
+	}
+	file, _, err := r.FormFile("image")
+	if err != nil {
+		if err.Error() == "http: request body too large" {
+			http.Error(w, `{"error":"Файл превышает 5 МБ"}`, http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, `{"error":"Файл (поле image) обязателен"}`, http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	tmpPath, err := normalizeUploadedImage(file, maxDim)
+	if err != nil {
+		http.Error(w, `{"error":"Файл не распознан как изображение (jpg/png/webp)"}`, http.StatusBadRequest)
+		return
+	}
+	defer os.Remove(tmpPath)
+
+	objectName := fmt.Sprintf("anime/%s-%d.jpg", kind, time.Now().UnixNano())
+	url, err := uploadSingleFile(r.Context(), tmpPath, objectName, "image/jpeg")
+	if err != nil {
+		http.Error(w, `{"error":"Ошибка загрузки в хранилище"}`, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "url": url})
 }
 
 // apiAdminAnimeDelete — POST /api/admin/anime/delete. Удаляет аниме и
@@ -6531,6 +6631,7 @@ func main() {
 	secureHandle("/admin/catalog/anime", adminAnimeDetailHandler)
 	secureHandle("/admin/community", adminCommunityHandler)
 	secureHandle("/api/admin/anime/save", apiAdminAnimeUpsert)
+	secureHandle("/api/admin/anime/image", apiAdminAnimeImageUpload)
 	secureHandle("/api/admin/anime/delete", apiAdminAnimeDelete)
 	secureHandle("/api/admin/episode/save", apiAdminEpisodeUpsert)
 	secureHandle("/api/admin/episode/delete", apiAdminEpisodeDelete)
@@ -6575,5 +6676,5 @@ func main() {
 	secureHandle("/api/favorites/episode", apiFavoriteEpisodeToggle)
 
 	log.Println("Сервер Ancen запущен на http://localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	log.Fatal(http.ListenAndServe(":8080", gzipMiddleware(http.DefaultServeMux)))
 }
