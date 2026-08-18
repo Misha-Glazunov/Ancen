@@ -2741,6 +2741,14 @@ type WsMessage struct {
 	Username     string `json:"username"`
 	UserID       int    `json:"user_id,omitempty"`
 	Badge        string `json:"badge,omitempty"`
+
+	// Синхропросмотр (party_* / rtc_* / player_sync) — см. PartyHub ниже.
+	PartyID      string  `json:"party_id,omitempty"`
+	TargetUserID int     `json:"target_user_id,omitempty"`
+	SDP          string  `json:"sdp,omitempty"`
+	Candidate    string  `json:"candidate,omitempty"` // JSON-строка ICE-кандидата, сервер не парсит содержимое
+	PlaybackSec  float64 `json:"playback_sec,omitempty"`
+	Paused       bool    `json:"paused,omitempty"`
 }
 
 // Клиент
@@ -2755,6 +2763,7 @@ type Client struct {
 // Hub (управляет комнатами)
 type Hub struct {
 	rooms      map[int]map[*Client]bool
+	byUser     map[int]*Client // последнее активное соединение пользователя — адресная маршрутизация для синхропросмотра (party_*/rtc_*)
 	register   chan *Client
 	unregister chan *Client
 	broadcast  chan WsMessage
@@ -2763,9 +2772,19 @@ type Hub struct {
 
 var hub = &Hub{
 	rooms:      make(map[int]map[*Client]bool),
+	byUser:     make(map[int]*Client),
 	register:   make(chan *Client),
 	unregister: make(chan *Client),
 	broadcast:  make(chan WsMessage),
+}
+
+// clientByUser возвращает текущее WS-соединение пользователя (если он сейчас
+// на watch.html), для адресной отправки сигналинга — не бродкаста всей
+// комнате эпизода, как обычные реакции.
+func (h *Hub) clientByUser(userID int) *Client {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.byUser[userID]
 }
 
 func (h *Hub) run() {
@@ -2777,6 +2796,7 @@ func (h *Hub) run() {
 				h.rooms[client.episodeID] = make(map[*Client]bool)
 			}
 			h.rooms[client.episodeID][client] = true
+			h.byUser[client.userID] = client
 			h.mu.Unlock()
 
 		case client := <-h.unregister:
@@ -2786,6 +2806,9 @@ func (h *Hub) run() {
 				if len(clients) == 0 {
 					delete(h.rooms, client.episodeID)
 				}
+			}
+			if h.byUser[client.userID] == client {
+				delete(h.byUser, client.userID)
 			}
 			h.mu.Unlock()
 			close(client.send)
@@ -2863,6 +2886,14 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			hub.unregister <- client
 			conn.Close()
+			// Отключение по любой причине (закрыл вкладку, упал коннект) должно
+			// закрывать и звонок синхропросмотра — иначе второй участник
+			// зависает в party с молчащим собеседником навсегда.
+			if partyID, remaining := partyH.leave(userID); partyID != "" {
+				for _, uid := range remaining {
+					sendToUser(uid, WsMessage{Type: "party_left", PartyID: partyID, UserID: userID})
+				}
+			}
 		}()
 		for {
 			var msg WsMessage
@@ -2872,6 +2903,11 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 			log.Printf("📨 Received WS message: type=%s episode_id=%d emotion_type=%s", msg.Type, msg.EpisodeID, msg.EmotionType)
+			switch msg.Type {
+			case "party_invite", "party_accept", "party_decline", "party_leave", "rtc_offer", "rtc_answer", "rtc_ice", "player_sync":
+				handlePartyMessage(msg, userID, username)
+				continue
+			}
 			if msg.Type == "emotion" && msg.EpisodeID == episodeID {
 				preset, ok := emotionPresetByEmoji(msg.EmotionType)
 				if !ok || msg.TimestampSec < 0 {
@@ -2919,6 +2955,225 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}()
+}
+
+// ===== Синхропросмотр: party-хаб =====
+//
+// Party — сессия из двух друзей, смотрящих один эпизод синхронно (голосовой
+// звонок + общий play/pause/seek). Комнаты обычного Hub адресуются по
+// episodeID и включают вообще всех зрителей серии — для party нужна
+// отдельная группа из только приглашённых участников, живущая в памяти
+// ровно на время звонка (не в БД — как только оба вышли, сессия не нужна).
+type party struct {
+	episodeID int
+	hostID    int
+	members   map[int]bool
+}
+
+type partyHub struct {
+	mu       sync.Mutex
+	parties  map[string]*party
+	byMember map[int]string // userID -> partyID, для быстрого lookup при leave/disconnect
+}
+
+var partyH = &partyHub{
+	parties:  make(map[string]*party),
+	byMember: make(map[int]string),
+}
+
+// create создаёт новую party с единственным участником — хостом (тем, кто
+// приглашает). Второй участник добавляется через join после party_accept.
+func (p *partyHub) create(episodeID, hostID int) string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	id := fmt.Sprintf("party-%d-%d", hostID, time.Now().UnixNano())
+	p.parties[id] = &party{episodeID: episodeID, hostID: hostID, members: map[int]bool{hostID: true}}
+	p.byMember[hostID] = id
+	return id
+}
+
+// join добавляет пользователя в party при party_accept. Отказывает, если
+// party не существует (протухла/отменена) — вызывающий код должен сообщить
+// об этом отправителю.
+func (p *partyHub) join(partyID string, userID int) (*party, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	pt, ok := p.parties[partyID]
+	if !ok {
+		return nil, false
+	}
+	pt.members[userID] = true
+	p.byMember[userID] = partyID
+	return pt, true
+}
+
+// isMember проверяет принадлежность до маршрутизации rtc_*/player_sync —
+// чтобы один пользователь не мог слать сигналинг в чужую party, зная её id.
+func (p *partyHub) isMember(partyID string, userID int) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	pt, ok := p.parties[partyID]
+	return ok && pt.members[userID]
+}
+
+// otherMembers возвращает остальных участников party (для рассылки
+// player_sync — событие плеера долетает до всех, кроме отправителя).
+func (p *partyHub) otherMembers(partyID string, exceptUserID int) []int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	pt, ok := p.parties[partyID]
+	if !ok {
+		return nil
+	}
+	var others []int
+	for uid := range pt.members {
+		if uid != exceptUserID {
+			others = append(others, uid)
+		}
+	}
+	return others
+}
+
+// leave убирает участника; если party опустела — удаляет её целиком.
+// Возвращает id party и оставшихся участников (чтобы уведомить их о выходе).
+// cancel удаляет party целиком по id, независимо от состава участников —
+// используется при отклонении приглашения, когда party так и не была
+// присоединена вторым участником (leave по userID тут не подходит: у
+// party_decline отправитель — не хост, а тот, кого позвали и кто в party
+// ещё не значится как member).
+func (p *partyHub) cancel(partyID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	pt, ok := p.parties[partyID]
+	if !ok {
+		return
+	}
+	for uid := range pt.members {
+		if p.byMember[uid] == partyID {
+			delete(p.byMember, uid)
+		}
+	}
+	delete(p.parties, partyID)
+}
+
+func (p *partyHub) leave(userID int) (partyID string, remaining []int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	partyID, ok := p.byMember[userID]
+	if !ok {
+		return "", nil
+	}
+	delete(p.byMember, userID)
+	pt, ok := p.parties[partyID]
+	if !ok {
+		return partyID, nil
+	}
+	delete(pt.members, userID)
+	if len(pt.members) == 0 {
+		delete(p.parties, partyID)
+		return partyID, nil
+	}
+	for uid := range pt.members {
+		remaining = append(remaining, uid)
+	}
+	return partyID, remaining
+}
+
+// sendToUser маршалит WsMessage и кладёт его в send-канал конкретного
+// пользователя, если он сейчас подключён — не бродкаст, адресная доставка.
+func sendToUser(userID int, msg WsMessage) {
+	client := hub.clientByUser(userID)
+	if client == nil {
+		return
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+	select {
+	case client.send <- data:
+	default:
+	}
+}
+
+// handlePartyMessage обрабатывает party_*/rtc_*/player_sync сообщения из
+// wsHandler. senderID/senderUsername — уже проверенная личность отправителя
+// (сессия проверена выше в wsHandler, здесь просто диспетчер по типу).
+func handlePartyMessage(msg WsMessage, senderID int, senderUsername string) {
+	switch msg.Type {
+	case "party_invite":
+		// Приглашать можно только друга — переиспользуем уже посчитанный
+		// при коннекте client.friendIDs было бы удобнее, но handlePartyMessage
+		// не имеет доступа к конкретному *Client отправителя, поэтому здесь
+		// достаточно того же источника истины (таблица friendships).
+		isFriend := false
+		for _, f := range getFriends(senderID) {
+			if f.UserID == msg.TargetUserID {
+				isFriend = true
+				break
+			}
+		}
+		if !isFriend || msg.TargetUserID == senderID {
+			return
+		}
+		partyID := partyH.create(msg.EpisodeID, senderID)
+		sendToUser(msg.TargetUserID, WsMessage{
+			Type:      "party_invite",
+			PartyID:   partyID,
+			EpisodeID: msg.EpisodeID,
+			UserID:    senderID,
+			Username:  senderUsername,
+		})
+
+	case "party_accept":
+		pt, ok := partyH.join(msg.PartyID, senderID)
+		if !ok {
+			sendToUser(senderID, WsMessage{Type: "party_expired", PartyID: msg.PartyID})
+			return
+		}
+		// Уведомляем всех членов party (включая хоста), что участник
+		// присоединился — на фронте это сигнал начинать WebRTC-хендшейк.
+		for uid := range pt.members {
+			sendToUser(uid, WsMessage{
+				Type:      "party_joined",
+				PartyID:   msg.PartyID,
+				EpisodeID: pt.episodeID,
+				UserID:    senderID,
+				Username:  senderUsername,
+			})
+		}
+
+	case "party_decline":
+		sendToUser(msg.TargetUserID, WsMessage{Type: "party_declined", PartyID: msg.PartyID, UserID: senderID})
+		partyH.cancel(msg.PartyID)
+
+	case "party_leave":
+		partyID, remaining := partyH.leave(senderID)
+		for _, uid := range remaining {
+			sendToUser(uid, WsMessage{Type: "party_left", PartyID: partyID, UserID: senderID})
+		}
+
+	case "rtc_offer", "rtc_answer", "rtc_ice":
+		if !partyH.isMember(msg.PartyID, senderID) || !partyH.isMember(msg.PartyID, msg.TargetUserID) {
+			return
+		}
+		msg.UserID = senderID
+		sendToUser(msg.TargetUserID, msg)
+
+	case "player_sync":
+		if !partyH.isMember(msg.PartyID, senderID) {
+			return
+		}
+		for _, uid := range partyH.otherMembers(msg.PartyID, senderID) {
+			sendToUser(uid, WsMessage{
+				Type:        "player_sync",
+				PartyID:     msg.PartyID,
+				PlaybackSec: msg.PlaybackSec,
+				Paused:      msg.Paused,
+				UserID:      senderID,
+			})
+		}
+	}
 }
 
 // ===== Личные сообщения: отдельный WS-хаб по user_id =====

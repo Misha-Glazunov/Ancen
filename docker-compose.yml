@@ -50,6 +50,31 @@ services:
     expose:
       - "8080"
 
+  # TURN/STUN-сервер для синхропросмотра (WebRTC). ВАЖНО: на домашнем ПК
+  # входящие соединения извне блокирует провайдер (см. 22_Доступы_и_секреты
+  # в Obsidian-заметках) — TURN-релей (порты ниже) недоступен друзьям вне
+  # локальной сети/Tailscale, пока сайт не переедет на VPS или не появится
+  # проброс портов. STUN-функция (3478) полезна уже сейчас — определяет
+  # публичный адрес клиента для прямого P2P без релея.
+  coturn:
+    image: coturn/coturn:latest
+    restart: unless-stopped
+    # TURN_USER/TURN_PASSWORD — из корневого .env (как MYSQL_DATA_DIR выше),
+    # не отдельный env_file: подстановка ${...} в command работает только
+    # с переменными окружения хоста/корневого .env, не с env_file контейнера.
+    command:
+      - -n
+      - --lt-cred-mech
+      - --fingerprint
+      - --realm=ancen.local
+      - --user=${TURN_USER}:${TURN_PASSWORD}
+      - --min-port=49160
+      - --max-port=49200
+    ports:
+      - "3478:3478"
+      - "3478:3478/udp"
+      - "49160-49200:49160-49200/udp"
+
   nginx:
     image: nginx:alpine
     restart: unless-stopped

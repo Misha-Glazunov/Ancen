@@ -235,6 +235,50 @@
         @media (max-width: 480px) {
             #emotionChart { height: 110px; }
         }
+
+        /* ===== Синхропросмотр ===== */
+        .party-bar { display: flex; justify-content: flex-end; margin: 10px 0; position: relative; }
+        .party-panel {
+            position: absolute;
+            top: calc(100% + 6px);
+            right: 0;
+            z-index: 20;
+            background: var(--color-gray-950);
+            border: 1px solid var(--color-gray-700);
+            border-radius: var(--radius-lg);
+            padding: 12px;
+            min-width: 220px;
+        }
+        .party-panel h4 { margin: 0 0 8px; font-size: var(--fs-small); color: var(--color-gray-500); }
+        .party-panel ul { list-style: none; margin: 0; padding: 0; }
+        .party-panel li {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 0;
+            font-size: var(--fs-small);
+        }
+        .party-panel .empty { color: var(--color-gray-500); font-size: var(--fs-small); }
+
+        #partyInviteBanner, #partyCallBar {
+            display: none;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            background: var(--color-gray-950);
+            border: 1px solid var(--color-accent);
+            border-radius: var(--radius-lg);
+            padding: 12px 16px;
+            margin: 16px 0;
+        }
+        #partyCallBar .party-status { display: flex; align-items: center; gap: 8px; }
+        #partyCallBar .party-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: var(--color-accent);
+            animation: emotionPulse 1.4s ease-in-out infinite;
+        }
+        .party-actions { display: flex; gap: 8px; }
     </style>
 </head>
 <body>
@@ -273,6 +317,31 @@
         {{else}}
         <span class="ep-nav-next"></span>
         {{end}}
+    </div>
+
+    <!-- Синхропросмотр -->
+    <div class="party-bar">
+        <button type="button" id="watchTogetherBtn" class="btn btn-sm">🎧 Смотреть вместе</button>
+        <div class="party-panel" id="partyPanel" hidden>
+            <h4>Пригласить друга</h4>
+            <ul id="partyFriendsList"><li class="empty">Загрузка...</li></ul>
+        </div>
+    </div>
+
+    <div id="partyInviteBanner">
+        <span id="partyInviteText"></span>
+        <div class="party-actions">
+            <button type="button" id="partyAcceptBtn" class="btn btn-sm">Принять</button>
+            <button type="button" id="partyDeclineBtn" class="btn btn-sm">Отклонить</button>
+        </div>
+    </div>
+
+    <div id="partyCallBar">
+        <span class="party-status"><span class="party-dot"></span><span id="partyCallText">На связи</span></span>
+        <div class="party-actions">
+            <button type="button" id="partyMuteBtn" class="btn btn-sm">Выключить микрофон</button>
+            <button type="button" id="partyLeaveBtn" class="btn btn-sm">Завершить</button>
+        </div>
     </div>
 
     <!-- Кнопки эмоций -->
@@ -421,6 +490,8 @@
                 }
             } else if (msg.type === 'achievement_unlocked') {
                 showAchievementToasts(msg.achievements);
+            } else if (msg.type.startsWith('party_') || msg.type.startsWith('rtc_') || msg.type === 'player_sync') {
+                handlePartyWsMessage(msg);
             }
         };
         ws.onclose = function() {
@@ -430,6 +501,246 @@
         ws.onerror = function(err) {
             console.error("❌ WebSocket error", err);
         };
+    }
+
+    // ===== Синхропросмотр: WebRTC-звонок + общий play/pause/seek =====
+    //
+    // Party — сессия из двух друзей на одном эпизоде (см. partyHub в main.go).
+    // Только голос (без видео) — см. решение при оценке объёма фичи. TURN пока
+    // не работает вне локальной сети/Tailscale (см. docker-compose.yml,
+    // сервис coturn) — сконфигурирован только STUN, для реального релея нужны
+    // TURN_USER/TURN_PASSWORD с сервера, которые сознательно не шлём на
+    // фронтенд, пока relay всё равно недоступен извне.
+    const RTC_CONFIG = { iceServers: [{ urls: `stun:${window.location.hostname}:3478` }] };
+
+    let partyId = null;
+    let partyPeerId = null;      // userID второго участника активной/устанавливаемой party
+    let partyPeerName = '';
+    let pendingInviteTargetId = null; // приглашение отправлено, ждём party_joined/party_declined
+    let pc = null;                // RTCPeerConnection текущего звонка
+    let localStream = null;
+    let applyingRemoteSync = false; // подавляет обратную отправку player_sync при применении входящего события
+
+    function wsSend(obj) {
+        if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+    }
+
+    // --- Панель приглашения друга ---
+    const watchTogetherBtn = document.getElementById('watchTogetherBtn');
+    const partyPanel = document.getElementById('partyPanel');
+
+    watchTogetherBtn.addEventListener('click', async () => {
+        if (partyId) return; // уже в звонке — кнопка неактивна, см. updatePartyUI
+        const hidden = partyPanel.hidden;
+        partyPanel.hidden = !hidden;
+        if (hidden) await loadPartyFriendsList();
+    });
+
+    async function loadPartyFriendsList() {
+        const list = document.getElementById('partyFriendsList');
+        try {
+            const response = await fetch('/api/friends');
+            const friends = await response.json();
+            if (!friends || friends.length === 0) {
+                list.innerHTML = '<li class="empty">Нет друзей — добавьте через профиль</li>';
+                return;
+            }
+            list.innerHTML = friends.map(f =>
+                `<li><span>${escapeHtml(f.Username)}</span><button type="button" class="btn btn-sm" data-invite-user="${f.UserID}" data-invite-name="${escapeHtml(f.Username)}">Позвать</button></li>`
+            ).join('');
+            list.querySelectorAll('[data-invite-user]').forEach(btn => {
+                btn.addEventListener('click', () => sendPartyInvite(parseInt(btn.dataset.inviteUser, 10), btn.dataset.inviteName));
+            });
+        } catch (err) {
+            console.error('Ошибка загрузки списка друзей:', err);
+            list.innerHTML = '<li class="empty">Ошибка загрузки</li>';
+        }
+    }
+
+    function sendPartyInvite(targetUserId, targetName) {
+        pendingInviteTargetId = targetUserId;
+        partyPeerName = targetName;
+        wsSend({ type: 'party_invite', episode_id: episodeId, target_user_id: targetUserId });
+        partyPanel.hidden = true;
+        if (typeof showToast === 'function') {
+            showToast({ icon: '🎧', title: 'Приглашение отправлено', body: targetName + ' сможет присоединиться, пока смотрит эту же серию' });
+        }
+    }
+
+    // --- Входящее приглашение ---
+    const inviteBanner = document.getElementById('partyInviteBanner');
+    const inviteText = document.getElementById('partyInviteText');
+    let incomingInvite = null; // { partyId, fromUserId, fromUsername }
+
+    function showIncomingInvite(msg) {
+        // Уже в звонке или ждём ответа на своё приглашение — новое входящее не принимаем молча,
+        // проще всего просто игнорировать (MVP на двоих, без очереди приглашений)
+        if (partyId || incomingInvite) return;
+        incomingInvite = { partyId: msg.party_id, fromUserId: msg.user_id, fromUsername: msg.username };
+        inviteText.textContent = msg.username + ' зовёт смотреть вместе';
+        inviteBanner.style.display = 'flex';
+    }
+
+    document.getElementById('partyAcceptBtn').addEventListener('click', async () => {
+        if (!incomingInvite) return;
+        const inv = incomingInvite;
+        incomingInvite = null;
+        inviteBanner.style.display = 'none';
+        partyId = inv.partyId;
+        partyPeerId = inv.fromUserId;
+        partyPeerName = inv.fromUsername;
+        await setupCall(); // готовим локальный микрофон/PC до прихода offer
+        wsSend({ type: 'party_accept', party_id: inv.partyId });
+    });
+
+    document.getElementById('partyDeclineBtn').addEventListener('click', () => {
+        if (!incomingInvite) return;
+        wsSend({ type: 'party_decline', party_id: incomingInvite.partyId, target_user_id: incomingInvite.fromUserId });
+        incomingInvite = null;
+        inviteBanner.style.display = 'none';
+    });
+
+    // --- Активный звонок ---
+    const callBar = document.getElementById('partyCallBar');
+    const callText = document.getElementById('partyCallText');
+    let micMuted = false;
+
+    function updatePartyUI() {
+        const inCall = !!partyId;
+        watchTogetherBtn.disabled = inCall;
+        watchTogetherBtn.textContent = inCall ? '🎧 В звонке с ' + partyPeerName : '🎧 Смотреть вместе';
+        callBar.style.display = inCall ? 'flex' : 'none';
+        if (inCall) callText.textContent = 'На связи с ' + partyPeerName;
+    }
+
+    document.getElementById('partyMuteBtn').addEventListener('click', (e) => {
+        if (!localStream) return;
+        micMuted = !micMuted;
+        localStream.getAudioTracks().forEach(t => t.enabled = !micMuted);
+        e.target.textContent = micMuted ? 'Включить микрофон' : 'Выключить микрофон';
+    });
+
+    document.getElementById('partyLeaveBtn').addEventListener('click', () => {
+        if (partyId) wsSend({ type: 'party_leave', party_id: partyId });
+        endCall();
+    });
+
+    async function setupCall() {
+        try {
+            localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch (err) {
+            console.error('Микрофон недоступен:', err);
+            alert('Не удалось получить доступ к микрофону — звонок будет без вашего голоса');
+        }
+        pc = new RTCPeerConnection(RTC_CONFIG);
+        if (localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+        pc.ontrack = (e) => {
+            const audio = new Audio();
+            audio.srcObject = e.streams[0];
+            audio.autoplay = true;
+            audio.dataset.partyAudio = 'true';
+        };
+        pc.onicecandidate = (e) => {
+            if (e.candidate) {
+                wsSend({ type: 'rtc_ice', party_id: partyId, target_user_id: partyPeerId, candidate: JSON.stringify(e.candidate) });
+            }
+        };
+        updatePartyUI();
+    }
+
+    function endCall() {
+        if (pc) { pc.close(); pc = null; }
+        if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
+        document.querySelectorAll('audio[data-party-audio]').forEach(a => a.remove());
+        partyId = null;
+        partyPeerId = null;
+        partyPeerName = '';
+        pendingInviteTargetId = null;
+        micMuted = false;
+        document.getElementById('partyMuteBtn').textContent = 'Выключить микрофон';
+        updatePartyUI();
+    }
+
+    // --- Синхронизация плеера ---
+    function sendPlayerSync(paused) {
+        if (!partyId || applyingRemoteSync) return;
+        wsSend({ type: 'player_sync', party_id: partyId, playback_sec: player.currentTime(), paused: paused });
+    }
+    player.on('play', () => sendPlayerSync(false));
+    player.on('pause', () => sendPlayerSync(true));
+    player.on('seeked', () => sendPlayerSync(player.paused()));
+
+    function applyPlayerSync(msg) {
+        applyingRemoteSync = true;
+        const drift = Math.abs(player.currentTime() - msg.playback_sec);
+        if (drift > 1.5) player.currentTime(msg.playback_sec); // маленький дрейф не трогаем — иначе постоянные микро-рывки у обоих
+        if (msg.paused) player.pause(); else player.play();
+        setTimeout(() => { applyingRemoteSync = false; }, 300);
+    }
+
+    // --- Диспетчер party_*/rtc_*/player_sync сообщений с сервера ---
+    async function handlePartyWsMessage(msg) {
+        switch (msg.type) {
+            case 'party_invite':
+                showIncomingInvite(msg);
+                break;
+
+            case 'party_joined':
+                // Сервер шлёт party_joined всем участникам party при каждом join.
+                // Приглашённый уже настроил свою сторону в обработчике "Принять" —
+                // этот case важен только хосту: подтверждение, что приглашённый друг
+                // принял, и пора поднимать WebRTC-хендшейк первым (создавать offer).
+                if (pendingInviteTargetId !== null && msg.user_id === pendingInviteTargetId) {
+                    pendingInviteTargetId = null;
+                    partyId = msg.party_id;
+                    partyPeerId = msg.user_id;
+                    await setupCall();
+                    const offer = await pc.createOffer();
+                    await pc.setLocalDescription(offer);
+                    wsSend({ type: 'rtc_offer', party_id: partyId, target_user_id: partyPeerId, sdp: offer.sdp });
+                }
+                break;
+
+            case 'party_declined':
+                if (pendingInviteTargetId !== null) {
+                    if (typeof showToast === 'function') showToast({ icon: '🎧', title: 'Приглашение отклонено', body: partyPeerName + ' не смог(ла) присоединиться' });
+                    pendingInviteTargetId = null;
+                }
+                break;
+
+            case 'party_expired':
+                pendingInviteTargetId = null;
+                alert('Не удалось создать звонок — попробуйте пригласить ещё раз');
+                break;
+
+            case 'party_left':
+                if (typeof showToast === 'function') showToast({ icon: '🎧', title: 'Звонок завершён', body: (partyPeerName || 'Собеседник') + ' вышел из синхропросмотра' });
+                endCall();
+                break;
+
+            case 'rtc_offer':
+                if (!pc) { partyId = msg.party_id; partyPeerId = msg.user_id; await setupCall(); }
+                await pc.setRemoteDescription({ type: 'offer', sdp: msg.sdp });
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                wsSend({ type: 'rtc_answer', party_id: partyId, target_user_id: partyPeerId, sdp: answer.sdp });
+                break;
+
+            case 'rtc_answer':
+                if (pc) await pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp });
+                break;
+
+            case 'rtc_ice':
+                if (pc) {
+                    try { await pc.addIceCandidate(JSON.parse(msg.candidate)); }
+                    catch (err) { console.error('addIceCandidate error:', err); }
+                }
+                break;
+
+            case 'player_sync':
+                if (partyId) applyPlayerSync(msg);
+                break;
+        }
     }
 
     // --- Переход по таймкоду ---
