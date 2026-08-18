@@ -467,7 +467,17 @@
         .about-right .cta { align-self: stretch; padding: 4px 20px; }
         .top-card ul { list-style: none; margin: 0; padding: 0; display: flex; gap: 48px; }
         .top-card li { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; }
-        .top-card li img { width: 100px; height: 100px; border-radius: 10px; object-fit: cover; }
+        .top-card li img, .top-card .top-user-initial { width: 100px; height: 100px; border-radius: 10px; object-fit: cover; }
+        .top-card .top-user-initial {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--color-accent-gradient);
+            font-family: var(--font-display);
+            font-size: 32px;
+            text-transform: uppercase;
+            color: #fff;
+        }
         .top-card li div { display: flex; flex-direction: column; align-items: center; gap: 10px; }
         .top-card li .place { font-size: 16px; line-height: 23px; color: #fff; display: block; text-align: center; }
         .top-card li span:last-child { font-size: 16px; line-height: 23px; color: #fff; }
@@ -478,7 +488,7 @@
             .about-right .cta { width: 100%; }
             .top-card { width: 100%; box-sizing: border-box; }
             .top-card ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); justify-items: center; gap: 20px; width: 100%; }
-            .top-card li img { max-width: 100%; height: auto; }
+            .top-card li img, .top-card .top-user-initial { max-width: 100%; height: auto; aspect-ratio: 1 / 1; }
             .top-card ul li:first-child { grid-column: 1 / -1; }
         }
 
@@ -607,7 +617,7 @@
                     <ul>
                         {{range $i, $u := .TopUsers}}
                         <li>
-                            {{if $u.AvatarURL}}<img src="{{$u.AvatarURL}}" alt="{{$u.Username}}">{{else}}<img src="/static/img/home/icon_top.png" alt="{{$u.Username}}">{{end}}
+                            {{if $u.AvatarURL}}<img src="{{$u.AvatarURL}}" alt="{{$u.Username}}">{{else}}<span class="top-user-initial">{{slice $u.Username 0 1}}</span>{{end}}
                             <div><span class="place">{{if eq $i 0}}🥇{{else if eq $i 1}}🥈{{else}}🥉{{end}} {{add $i 1}} место</span><span>{{$u.Username}}</span></div>
                         </li>
                         {{else}}
