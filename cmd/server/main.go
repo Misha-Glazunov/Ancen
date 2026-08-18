@@ -2749,6 +2749,7 @@ type WsMessage struct {
 	Candidate    string  `json:"candidate,omitempty"` // JSON-строка ICE-кандидата, сервер не парсит содержимое
 	PlaybackSec  float64 `json:"playback_sec,omitempty"`
 	Paused       bool    `json:"paused,omitempty"`
+	Reason       string  `json:"reason,omitempty"` // party_invite_failed: "not_friend" | "offline"
 }
 
 // Клиент
@@ -3081,18 +3082,23 @@ func (p *partyHub) leave(userID int) (partyID string, remaining []int) {
 
 // sendToUser маршалит WsMessage и кладёт его в send-канал конкретного
 // пользователя, если он сейчас подключён — не бродкаст, адресная доставка.
-func sendToUser(userID int, msg WsMessage) {
+// sendToUser возвращает true, если сообщение реально поставлено в очередь
+// отправки — вызывающий код (party_invite) использует это, чтобы сразу
+// сказать пригласившему "друг сейчас не на сайте", а не молча промолчать.
+func sendToUser(userID int, msg WsMessage) bool {
 	client := hub.clientByUser(userID)
 	if client == nil {
-		return
+		return false
 	}
 	data, err := json.Marshal(msg)
 	if err != nil {
-		return
+		return false
 	}
 	select {
 	case client.send <- data:
+		return true
 	default:
+		return false
 	}
 }
 
@@ -3114,16 +3120,24 @@ func handlePartyMessage(msg WsMessage, senderID int, senderUsername string) {
 			}
 		}
 		if !isFriend || msg.TargetUserID == senderID {
+			sendToUser(senderID, WsMessage{Type: "party_invite_failed", TargetUserID: msg.TargetUserID, Reason: "not_friend"})
 			return
 		}
 		partyID := partyH.create(msg.EpisodeID, senderID)
-		sendToUser(msg.TargetUserID, WsMessage{
+		delivered := sendToUser(msg.TargetUserID, WsMessage{
 			Type:      "party_invite",
 			PartyID:   partyID,
 			EpisodeID: msg.EpisodeID,
 			UserID:    senderID,
 			Username:  senderUsername,
 		})
+		if !delivered {
+			// Друг сейчас не на watch.html (WS не подключен) — раньше это
+			// молча терялось: приглашающий видел "Приглашение отправлено" и
+			// ждал ответа, которого никогда не будет.
+			partyH.cancel(partyID)
+			sendToUser(senderID, WsMessage{Type: "party_invite_failed", TargetUserID: msg.TargetUserID, Reason: "offline"})
+		}
 
 	case "party_accept":
 		pt, ok := partyH.join(msg.PartyID, senderID)

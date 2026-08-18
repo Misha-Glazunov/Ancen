@@ -701,6 +701,17 @@
                 }
                 break;
 
+            case 'party_invite_failed':
+                pendingInviteTargetId = null;
+                if (msg.reason === 'not_friend') {
+                    alert('Пригласить можно только друга — сначала добавьте его в друзья и дождитесь принятия заявки');
+                } else if (msg.reason === 'offline') {
+                    alert((partyPeerName || 'Друг') + ' сейчас не на странице просмотра — попросите его открыть эту серию');
+                } else {
+                    alert('Не удалось отправить приглашение');
+                }
+                break;
+
             case 'party_declined':
                 if (pendingInviteTargetId !== null) {
                     if (typeof showToast === 'function') showToast({ icon: '🎧', title: 'Приглашение отклонено', body: partyPeerName + ' не смог(ла) присоединиться' });
