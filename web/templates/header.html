@@ -506,7 +506,7 @@
                 if (pendingParty) return;
                 pendingParty = { partyId: data.party_id, episodeId: data.episode_id, hostUserId: data.user_id };
                 document.getElementById('party-invite-text').textContent = data.username + ' зовёт смотреть аниме вместе';
-                partyBanner.hidden = false;
+                partyBanner.style.display = 'flex';
             };
             ws.onclose = function () { setTimeout(connectPartyDM, 3000); };
         }
@@ -526,7 +526,7 @@
                 body: JSON.stringify({ party_id: pendingParty.partyId })
             }).catch(function () {});
             pendingParty = null;
-            partyBanner.hidden = true;
+            partyBanner.style.display = 'none';
         });
     }
 
