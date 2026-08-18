@@ -165,7 +165,7 @@
         <div class="anime-grid" id="anime-grid">
             {{range .Results}}
             <a href="/anime/{{.ID}}" class="anime-card" data-animate>
-                <img src="{{.Poster}}" alt="{{.Title}}">
+                <img src="{{.Poster}}" alt="{{.Title}}" loading="lazy">
                 <div class="title">{{.Title}}</div>
                 {{if .Genres}}<span class="genre-tag">{{.Genres}}</span>{{end}}
             </a>

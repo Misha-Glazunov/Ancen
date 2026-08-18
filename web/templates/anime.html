@@ -37,6 +37,16 @@
         "url": "https://animemory.ru/anime/{{.Anime.ID}}"
     }
     </script>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+            {"@type": "ListItem", "position": 1, "name": "Главная", "item": "https://animemory.ru/"},
+            {"@type": "ListItem", "position": 2, "name": {{.Anime.Title}}, "item": "https://animemory.ru/anime/{{.Anime.ID}}"}
+        ]
+    }
+    </script>
     <style>
         * { box-sizing: border-box; }
         body { margin: 0; background: var(--color-bg); color: var(--color-text); font-family: var(--font-base); }

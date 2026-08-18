@@ -2110,6 +2110,9 @@ func watchHandler(w http.ResponseWriter, r *http.Request) {
 		emotionOptions[i] = EmotionOption{emotionPreset: p, Unlocked: levelInfo.Level >= p.MinLevel}
 	}
 
+	var animeTitle string
+	db.QueryRow("SELECT title FROM anime WHERE id = ?", episode.AnimeID).Scan(&animeTitle)
+
 	// Следующие серии этого же сезона — показываем под блоком реакций/комментариев
 	type NextEpisode struct {
 		ID    int
@@ -2138,6 +2141,7 @@ func watchHandler(w http.ResponseWriter, r *http.Request) {
 		ORDER BY episode_num ASC LIMIT 1`, episode.AnimeID, episode.Season, episode.EpisodeNum).Scan(&nextEpisodeID)
 
 	data := struct {
+		EpisodeID     int
 		EpisodeNum    int
 		VideoURL      string
 		Title         string
@@ -2145,6 +2149,7 @@ func watchHandler(w http.ResponseWriter, r *http.Request) {
 		Username      string
 		IsPremium     bool
 		AnimeID       int
+		AnimeTitle    string
 		PrevEpisodeID int
 		NextEpisodeID int
 		NextEpisodes  []NextEpisode
@@ -2159,6 +2164,7 @@ func watchHandler(w http.ResponseWriter, r *http.Request) {
 		ChartColorHover string
 		EmotionOptions  []EmotionOption
 	}{
+		EpisodeID:       episode.ID,
 		EpisodeNum:      episode.EpisodeNum,
 		VideoURL:        episode.VideoURL,
 		Title:           episode.Title,
@@ -2166,6 +2172,7 @@ func watchHandler(w http.ResponseWriter, r *http.Request) {
 		Username:        currentUsername(r),
 		IsPremium:       isPremiumUser(userID),
 		AnimeID:         episode.AnimeID,
+		AnimeTitle:      animeTitle,
 		PrevEpisodeID:   prevEpisodeID,
 		NextEpisodeID:   nextEpisodeID,
 		NextEpisodes:    nextEpisodes,
