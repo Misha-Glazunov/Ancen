@@ -335,7 +335,7 @@
             <button type="button" id="partyLeaveBtn" class="btn btn-sm">Завершить</button>
         </div>
     </div>
-    <p id="partyGuestNote" class="spoiler-note" hidden>Хост управляет воспроизведением — play/pause/перемотка синхронизируются автоматически.</p>
+    <p id="partyGuestNote" class="spoiler-note" hidden>Хост управляет воспроизведением (play/pause/перемотка) — синхронизируется автоматически. Звук и полноэкранный режим — на ваше усмотрение.</p>
 
     <!-- Кнопки эмоций -->
     <div class="emotion-buttons">
@@ -625,12 +625,20 @@
                 wsSend({ type: 'rtc_ice', party_id: partyId, target_user_id: partyPeerId, candidate: JSON.stringify(e.candidate) });
             }
         };
-        // Гость не управляет плеером — прячем нативные controls video.js, чтобы
-        // локальный клик play/pause/перемотку не создавал иллюзию контроля
-        // (событие всё равно не уйдёт дальше — см. sendPlayerSync ниже, но лучше
-        // не показывать элементы, которые ни на что не влияют).
+        // Гость управляет своей "картинкой" (звук, полноэкранный режим) — это
+        // локальные настройки просмотра, не часть синхронизации. А play/pause/
+        // перемотку прячем: это то, чем управляет хост. Полностью скрывать весь
+        // control bar (player.controls(false)) нельзя — тогда пропали бы и
+        // громкость с полноэкранным режимом. Известное ограничение: клик по
+        // самому видео у video.js всё ещё локально ставит на паузу (это не
+        // через playToggle, отдельный обработчик) — не блокируем, полагаемся
+        // на хартбит-коррекцию (см. applyPlayerSync), которая через ~4с вернёт
+        // как надо; блокировать и это не стоит усилий ради редкого случая.
         if (!isPartyHost) {
-            player.controls(false);
+            var playToggle = player.controlBar.getChild('playToggle');
+            var progressControl = player.controlBar.getChild('progressControl');
+            if (playToggle) playToggle.hide();
+            if (progressControl) progressControl.hide();
             document.getElementById('partyGuestNote').hidden = false;
         }
         updatePartyUI();
@@ -646,7 +654,10 @@
         pendingInviteTargetId = null;
         micMuted = false;
         isPartyHost = false;
-        player.controls(true);
+        var playToggle = player.controlBar.getChild('playToggle');
+        var progressControl = player.controlBar.getChild('progressControl');
+        if (playToggle) playToggle.show();
+        if (progressControl) progressControl.show();
         document.getElementById('partyGuestNote').hidden = true;
         document.getElementById('partyMuteBtn').textContent = 'Выключить микрофон';
         updatePartyUI();
