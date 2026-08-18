@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS comments (
     episode_id     INT NOT NULL,
     timestamp_sec  INT NOT NULL DEFAULT 0,
     text           VARCHAR(500) NOT NULL,
+    audio_url      VARCHAR(500) DEFAULT '',
     created_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     KEY idx_comments_episode (episode_id),
     KEY idx_comments_user (user_id),

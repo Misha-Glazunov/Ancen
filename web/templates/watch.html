@@ -387,8 +387,10 @@
             <div class="comment-form">
                 <input type="text" id="commentText" placeholder="Ваш комментарий">
                 <button id="sendCommentBtn" class="btn">Отправить</button>
+                <button type="button" id="voiceCommentBtn" class="btn btn-sm" title="Голосовой тикер">🎤</button>
                 <span class="timecode">Таймкод: <span id="currentTimeDisplay">0:00</span></span>
             </div>
+            <p id="voiceRecordingNote" class="spoiler-note" hidden>🔴 Запись... до <span id="voiceRecordingLeft">15</span>с (клик по 🎤 — остановить и отправить)</p>
             {{if .IsPremium}}
             <p class="spoiler-note">Premium: видны все комментарии, включая те, что впереди вашего прогресса.</p>
             {{else}}
@@ -1095,13 +1097,16 @@
         if (allComments.length === 0) {
             list.innerHTML = '<li>Пока нет комментариев. Будьте первым!</li>';
         } else {
-            list.innerHTML = allComments.map(c =>
-                `<li data-timestamp="${c.timestamp_sec}"${c.color ? ` style="color:${c.color}"` : ''}><strong>${escapeHtml(c.username)}${c.badge ? ' ' + c.badge : ''}</strong> [${formatTime(c.timestamp_sec)}]: ${escapeHtml(c.text)} ` +
-                `<button type="button" class="like-btn${c.liked_by_me ? ' liked' : ''}" data-comment-id="${c.id}">👍 <span class="like-count">${c.like_count}</span></button></li>`
-            ).join('');
+            list.innerHTML = allComments.map(c => {
+                const body = c.audio_url
+                    ? `<audio controls preload="none" src="${c.audio_url}"></audio>`
+                    : escapeHtml(c.text);
+                return `<li data-timestamp="${c.timestamp_sec}"${c.color ? ` style="color:${c.color}"` : ''}><strong>${escapeHtml(c.username)}${c.badge ? ' ' + c.badge : ''}</strong> [${formatTime(c.timestamp_sec)}]: ${body} ` +
+                    `<button type="button" class="like-btn${c.liked_by_me ? ' liked' : ''}" data-comment-id="${c.id}">👍 <span class="like-count">${c.like_count}</span></button></li>`;
+            }).join('');
             list.querySelectorAll('li[data-timestamp]').forEach(li => {
                 li.addEventListener('click', (e) => {
-                    if (e.target.closest('.like-btn')) return;
+                    if (e.target.closest('.like-btn') || e.target.closest('audio')) return;
                     seekTo(parseInt(li.dataset.timestamp, 10));
                 });
             });
@@ -1181,6 +1186,95 @@
             alert('Ошибка при отправке комментария');
         }
     };
+
+    // --- Голосовой тикер: запись через MediaRecorder, тот же таймкод-флоу,
+    // что текстовый комментарий, но отдельная кнопка/эндпоинт (multipart) ---
+    const VOICE_MAX_SEC = 15;
+    let voiceRecorder = null;
+    let voiceChunks = [];
+    let voiceStream = null;
+    let voiceTimer = null;
+
+    function pickVoiceMimeType() {
+        // Safari не умеет webm — берёт mp4/aac; Chrome/Firefox — наоборот
+        const candidates = ['audio/webm;codecs=opus', 'audio/mp4'];
+        return candidates.find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || '';
+    }
+
+    async function startVoiceRecording() {
+        if (!navigator.mediaDevices || !window.MediaRecorder) {
+            alert('Запись голоса не поддерживается этим браузером');
+            return;
+        }
+        let mimeType;
+        try {
+            voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mimeType = pickVoiceMimeType();
+            voiceRecorder = mimeType ? new MediaRecorder(voiceStream, { mimeType }) : new MediaRecorder(voiceStream);
+        } catch (err) {
+            console.error('Микрофон недоступен:', err);
+            alert('Не удалось получить доступ к микрофону');
+            return;
+        }
+        voiceChunks = [];
+        const startTimestamp = Math.floor(player.currentTime());
+        voiceRecorder.ondataavailable = (e) => { if (e.data.size > 0) voiceChunks.push(e.data); };
+        voiceRecorder.onstop = () => {
+            voiceStream.getTracks().forEach(t => t.stop());
+            clearInterval(voiceTimer);
+            document.getElementById('voiceRecordingNote').hidden = true;
+            document.getElementById('voiceCommentBtn').textContent = '🎤';
+            if (voiceChunks.length === 0) return;
+            sendVoiceComment(new Blob(voiceChunks, { type: voiceRecorder.mimeType || mimeType }), startTimestamp);
+        };
+        voiceRecorder.start();
+        document.getElementById('voiceCommentBtn').textContent = '⏹';
+        document.getElementById('voiceRecordingNote').hidden = false;
+        let left = VOICE_MAX_SEC;
+        document.getElementById('voiceRecordingLeft').textContent = left;
+        voiceTimer = setInterval(() => {
+            left--;
+            document.getElementById('voiceRecordingLeft').textContent = left;
+            if (left <= 0) stopVoiceRecording();
+        }, 1000);
+    }
+
+    function stopVoiceRecording() {
+        if (voiceRecorder && voiceRecorder.state !== 'inactive') voiceRecorder.stop();
+    }
+
+    async function sendVoiceComment(blob, timestampSec) {
+        const ext = (blob.type || '').includes('mp4') ? 'm4a' : 'webm';
+        const formData = new FormData();
+        formData.append('episode_id', episodeId);
+        formData.append('timestamp_sec', timestampSec);
+        formData.append('audio', blob, 'voice.' + ext);
+        try {
+            const response = await fetch('/api/comment/voice', { method: 'POST', body: formData });
+            if (response.ok) {
+                commentsPage = 1;
+                loadComments(false);
+                const data = await response.json();
+                showAchievementToasts(data.unlocked_achievements);
+            } else if (response.status === 429) {
+                alert('Слишком много комментариев подряд, подождите немного');
+            } else {
+                const errData = await response.json().catch(() => ({}));
+                alert('Ошибка: ' + (errData.error || 'не удалось отправить голосовой тикер'));
+            }
+        } catch (err) {
+            console.error(err);
+            alert('Ошибка при отправке голосового тикера');
+        }
+    }
+
+    document.getElementById('voiceCommentBtn').addEventListener('click', () => {
+        if (voiceRecorder && voiceRecorder.state === 'recording') {
+            stopVoiceRecording();
+        } else {
+            startVoiceRecording();
+        }
+    });
 
     let saveInterval = null;
     let lastSavedTimestamp = 0;

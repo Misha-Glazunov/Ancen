@@ -1550,6 +1550,13 @@ func createTables() {
 	if _, err := db.Exec("ALTER TABLE emotions ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"); err != nil {
 		log.Printf("ALTER TABLE emotions (created_at) может уже существовать: %v", err)
 	}
+	// Голосовые тикеры — короткие аудиокомментарии, та же таблица/лента, что
+	// текстовые: NULL/'' у text, заполнен audio_url, и наоборот. Не отдельная
+	// таблица — избегаем дублировать пагинацию/антиспойлер-фильтр/XP-логику,
+	// которые уже есть для apiCommentsGet/apiCommentPost.
+	if _, err := db.Exec("ALTER TABLE comments ADD COLUMN audio_url VARCHAR(500) DEFAULT ''"); err != nil {
+		log.Printf("ALTER TABLE comments (audio_url) может уже существовать: %v", err)
+	}
 }
 
 const defaultBackgroundURL = "/static/img/profile/default_bg.jpg"
@@ -3624,6 +3631,7 @@ type Comment struct {
 	Username     string `json:"username"`
 	TimestampSec int    `json:"timestamp_sec"`
 	Text         string `json:"text"`
+	AudioURL     string `json:"audio_url,omitempty"`
 	CreatedAt    string `json:"created_at"`
 	LikeCount    int    `json:"like_count"`
 	LikedByMe    bool   `json:"liked_by_me"`
@@ -3685,6 +3693,101 @@ func apiCommentPost(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// maxVoiceCommentBytes — с запасом покрывает даже случайно длинную запись
+// (короткий opus/aac-клип на десятки секунд весит десятки-сотни КБ);
+// реальный лимит длительности навязывается клиентом (таймер в watch.html),
+// это только защитный потолок на сервере.
+const maxVoiceCommentBytes = 3 << 20 // 3 MiB
+
+// apiVoiceCommentPost — голосовой тикер: та же лента/таблица, что текстовые
+// комментарии (apiCommentPost), только вместо text заполняется audio_url.
+// Одна антиспам-квота на двоих (ключ "comment:%d") — иначе спам голосом в
+// обход текстового лимитера.
+func apiVoiceCommentPost(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	if !actionLimiter.allow(fmt.Sprintf("comment:%d", userID), commentRateLimit, commentRateWindow) {
+		http.Error(w, `{"error":"Слишком много комментариев подряд, подождите немного"}`, http.StatusTooManyRequests)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxVoiceCommentBytes)
+	episodeID, errEp := strconv.Atoi(r.FormValue("episode_id"))
+	timestampSec, _ := strconv.Atoi(r.FormValue("timestamp_sec"))
+	if errEp != nil || episodeID == 0 {
+		http.Error(w, `{"error":"episode_id обязателен"}`, http.StatusBadRequest)
+		return
+	}
+
+	file, header, err := r.FormFile("audio")
+	if err != nil {
+		if err.Error() == "http: request body too large" {
+			http.Error(w, `{"error":"Запись превышает допустимый размер"}`, http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, `{"error":"Файл аудио (поле audio) обязателен"}`, http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	// Те же контейнеры (mp4/webm — EBML/ftyp magic bytes), что и у видео,
+	// только со звуковой дорожкой — sniffVideoContainer этому уже
+	// удовлетворяет, отдельная функция не нужна.
+	if err := sniffVideoContainer(file); err != nil {
+		http.Error(w, `{"error":"Файл не распознан как аудио/видео-контейнер (webm/mp4)"}`, http.StatusBadRequest)
+		return
+	}
+
+	ext, contentType := ".webm", "audio/webm"
+	if ct := header.Header.Get("Content-Type"); strings.Contains(ct, "mp4") {
+		ext, contentType = ".m4a", "audio/mp4"
+	}
+
+	tmpFile, err := os.CreateTemp("", "ancen-voice-*"+ext)
+	if err != nil {
+		http.Error(w, `{"error":"Ошибка временного файла"}`, http.StatusInternalServerError)
+		return
+	}
+	defer os.Remove(tmpFile.Name())
+	if _, err := io.Copy(tmpFile, file); err != nil {
+		tmpFile.Close()
+		http.Error(w, `{"error":"Ошибка записи файла"}`, http.StatusInternalServerError)
+		return
+	}
+	tmpFile.Close()
+
+	objectName := fmt.Sprintf("voice-comments/%d-%d%s", userID, time.Now().UnixNano(), ext)
+	url, err := uploadSingleFile(r.Context(), tmpFile.Name(), objectName, contentType)
+	if err != nil {
+		http.Error(w, `{"error":"Ошибка загрузки в хранилище"}`, http.StatusInternalServerError)
+		return
+	}
+
+	if _, err := db.Exec("INSERT INTO comments (user_id, episode_id, timestamp_sec, text, audio_url) VALUES (?, ?, ?, '', ?)",
+		userID, episodeID, timestampSec, url); err != nil {
+		http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	awardCommentXP(userID, episodeID)
+	newAchievements := checkAndUnlockAchievements(userID)
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":                "ok",
+		"audio_url":             url,
+		"unlocked_achievements": newAchievements,
+	})
+}
+
 func apiCommentsGet(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	episodeIDStr := r.URL.Query().Get("episode_id")
@@ -3717,7 +3820,7 @@ func apiCommentsGet(w http.ResponseWriter, r *http.Request) {
 
 	userID, _ := getUserIDFromSession(r)
 	query := `
-		SELECT c.id, u.username, c.timestamp_sec, c.text, c.created_at,
+		SELECT c.id, u.username, c.timestamp_sec, c.text, c.audio_url, c.created_at,
 			(SELECT COUNT(*) FROM comment_likes cl WHERE cl.comment_id = c.id) AS like_count,
 			EXISTS(SELECT 1 FROM comment_likes cl WHERE cl.comment_id = c.id AND cl.user_id = ?) AS liked_by_me,
 			COALESCE(ux.xp, 0)
@@ -3745,7 +3848,7 @@ func apiCommentsGet(w http.ResponseWriter, r *http.Request) {
 		var c Comment
 		var createdAt sql.NullTime
 		var xp int
-		if err := rows.Scan(&c.ID, &c.Username, &c.TimestampSec, &c.Text, &createdAt, &c.LikeCount, &c.LikedByMe, &xp); err != nil {
+		if err := rows.Scan(&c.ID, &c.Username, &c.TimestampSec, &c.Text, &c.AudioURL, &createdAt, &c.LikeCount, &c.LikedByMe, &xp); err != nil {
 			continue
 		}
 		if createdAt.Valid {
@@ -6391,6 +6494,7 @@ func main() {
 	secureHandle("/ws/dm", wsDMHandler)
 	secureHandle("/api/emotions/stats", apiEmotionsStats)
 	secureHandle("/api/comment", apiCommentPost)
+	secureHandle("/api/comment/voice", apiVoiceCommentPost)
 	secureHandle("/api/comments", apiCommentsGet)
 	secureHandle("/api/comments/like", apiCommentLikeToggle)
 	secureHandle("/search", searchHandler)
