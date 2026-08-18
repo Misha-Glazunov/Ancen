@@ -67,7 +67,7 @@
 
     <div class="nav-group-status">
       <div class="status-pill"><span class="status-dot">●</span> <span class="status-label">Online</span></div>
-      <a href="/" class="admin-avatar" title="{{.Username}}">{{.AdminInitial}}</a>
+      <a href="/" class="admin-avatar" title="{{.Username}}"{{if .AdminAvatarURL}} style="background-image:url('{{.AdminAvatarURL}}');background-size:cover;background-position:center;"{{end}}>{{if not .AdminAvatarURL}}{{.AdminInitial}}{{end}}</a>
     </div>
   </div>
 

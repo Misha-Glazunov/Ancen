@@ -593,6 +593,14 @@ func isUserAdmin(userID int) bool {
 	return isAdmin
 }
 
+// currentAvatarURL — для admin-хедера, показывает загруженную аватарку вместо
+// кружка с инициалом, если она есть.
+func currentAvatarURL(userID int) string {
+	var avatarURL string
+	db.QueryRow("SELECT avatar_url FROM users WHERE id = ?", userID).Scan(&avatarURL)
+	return avatarURL
+}
+
 // currentUsername возвращает имя пользователя для гостевого/авторизованного
 // хедера, либо "" для гостя. В режиме cookie берётся из сессии без похода в
 // БД; в режиме jwt — из access-токена по userID.
@@ -4242,12 +4250,14 @@ func adminDashboardHandler(w http.ResponseWriter, r *http.Request) {
 	data := struct {
 		Username          string
 		AdminInitial      string
+		AdminAvatarURL    string
 		Stats             []adminStatRow
 		OverallPercent    int
 		DashboardDataJSON template.JS
 	}{
 		Username:          username,
 		AdminInitial:      initial,
+		AdminAvatarURL:    currentAvatarURL(userID),
 		Stats:             stats,
 		OverallPercent:    overallPercent,
 		DashboardDataJSON: template.JS(dashboardJSON),
@@ -4430,23 +4440,25 @@ func adminUsersHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := struct {
-		Username     string
-		AdminInitial string
-		Users        []adminUserRow
-		PremiumUsers []adminUserRow
-		AdminUsers   []adminUserRow
-		Query        string
-		Level        string
-		Levels       []int
-		DateFrom     string
-		DateTo       string
-		Total        int
-		HasMore      bool
-		NextOffset   int
+		Username       string
+		AdminInitial   string
+		AdminAvatarURL string
+		Users          []adminUserRow
+		PremiumUsers   []adminUserRow
+		AdminUsers     []adminUserRow
+		Query          string
+		Level          string
+		Levels         []int
+		DateFrom       string
+		DateTo         string
+		Total          int
+		HasMore        bool
+		NextOffset     int
 	}{
-		Username:     username,
-		AdminInitial: initial,
-		Users:        users,
+		Username:       username,
+		AdminInitial:   initial,
+		AdminAvatarURL: currentAvatarURL(userID),
+		Users:          users,
 		PremiumUsers: premiumUsers,
 		AdminUsers:   adminUsers,
 		Query:        q,
@@ -4577,15 +4589,17 @@ func adminAnalyticsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := struct {
-		Username     string
-		AdminInitial string
-		Anime        []analyticsRow
-		Episodes     []analyticsRow
+		Username       string
+		AdminInitial   string
+		AdminAvatarURL string
+		Anime          []analyticsRow
+		Episodes       []analyticsRow
 	}{
-		Username:     username,
-		AdminInitial: initial,
-		Anime:        anime,
-		Episodes:     episodes,
+		Username:       username,
+		AdminInitial:   initial,
+		AdminAvatarURL: currentAvatarURL(userID),
+		Anime:          anime,
+		Episodes:       episodes,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -4616,10 +4630,12 @@ func adminSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	data := struct {
 		Username        string
 		AdminInitial    string
+		AdminAvatarURL  string
 		MaintenanceMode bool
 	}{
 		Username:        username,
 		AdminInitial:    initial,
+		AdminAvatarURL:  currentAvatarURL(userID),
 		MaintenanceMode: maintenanceMode.Load(),
 	}
 
@@ -4726,20 +4742,21 @@ func requireAdminPage(w http.ResponseWriter, r *http.Request) int {
 
 // adminInitial — первая буква имени залогиненного администратора, для
 // аватара-заглушки в шапке /admin/*.
-func adminInitial(r *http.Request) (string, string) {
+func adminInitial(r *http.Request, userID int) (string, string, string) {
 	username := currentUsername(r)
 	initial := "?"
 	if runes := []rune(username); len(runes) > 0 {
 		initial = strings.ToUpper(string(runes[:1]))
 	}
-	return username, initial
+	return username, initial, currentAvatarURL(userID)
 }
 
 // adminCatalogHandler — GET /admin/catalog. Список аниме с поиском по
 // названию, числом эпизодов и постером; добавление/редактирование/удаление —
 // через apiAdminAnimeUpsert/apiAdminAnimeDelete.
 func adminCatalogHandler(w http.ResponseWriter, r *http.Request) {
-	if requireAdminPage(w, r) == 0 {
+	adminUserID := requireAdminPage(w, r)
+	if adminUserID == 0 {
 		return
 	}
 
@@ -4789,17 +4806,18 @@ func adminCatalogHandler(w http.ResponseWriter, r *http.Request) {
 		totalPages = 1
 	}
 
-	username, initial := adminInitial(r)
+	username, initial, avatarURL := adminInitial(r, adminUserID)
 	data := struct {
-		Username     string
-		AdminInitial string
-		Anime        []adminAnimeRow
-		Query        string
-		Page         int
-		TotalPages   int
-		Total        int
+		Username       string
+		AdminInitial   string
+		AdminAvatarURL string
+		Anime          []adminAnimeRow
+		Query          string
+		Page           int
+		TotalPages     int
+		Total          int
 	}{
-		Username: username, AdminInitial: initial,
+		Username: username, AdminInitial: initial, AdminAvatarURL: avatarURL,
 		Anime: list, Query: q, Page: page, TotalPages: totalPages, Total: total,
 	}
 
@@ -4821,7 +4839,8 @@ type adminEpisodeRow struct {
 // adminAnimeDetailHandler — GET /admin/catalog/anime?id=. Метаданные аниме
 // (форма редактирования) + список его эпизодов с удалением/добавлением.
 func adminAnimeDetailHandler(w http.ResponseWriter, r *http.Request) {
-	if requireAdminPage(w, r) == 0 {
+	adminUserID := requireAdminPage(w, r)
+	if adminUserID == 0 {
 		return
 	}
 
@@ -4874,14 +4893,15 @@ func adminAnimeDetailHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	username, initial := adminInitial(r)
+	username, initial, avatarURL := adminInitial(r, adminUserID)
 	data := struct {
 		Username        string
 		AdminInitial    string
+		AdminAvatarURL  string
 		Anime           animeDetail
 		Episodes        []adminEpisodeRow
 		AvailableGenres []string
-	}{Username: username, AdminInitial: initial, Anime: a, Episodes: episodes, AvailableGenres: animeGenreList}
+	}{Username: username, AdminInitial: initial, AdminAvatarURL: avatarURL, Anime: a, Episodes: episodes, AvailableGenres: animeGenreList}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := templates.ExecuteTemplate(w, "admin_catalog_anime.html", data); err != nil {
@@ -5054,7 +5074,8 @@ const adminCommunityPageSize = 25
 // adminCommunityHandler — GET /admin/community. Процент разблокировки каждой
 // ачивки из каталога + список принятых дружб с поиском по имени и пагинацией.
 func adminCommunityHandler(w http.ResponseWriter, r *http.Request) {
-	if requireAdminPage(w, r) == 0 {
+	adminUserID := requireAdminPage(w, r)
+	if adminUserID == 0 {
 		return
 	}
 
@@ -5127,10 +5148,11 @@ func adminCommunityHandler(w http.ResponseWriter, r *http.Request) {
 		totalPages = 1
 	}
 
-	username, initial := adminInitial(r)
+	username, initial, avatarURL := adminInitial(r, adminUserID)
 	data := struct {
 		Username         string
 		AdminInitial     string
+		AdminAvatarURL   string
 		AchievementStats []adminAchievementStat
 		Friendships      []adminFriendshipRow
 		TotalFriendships int
@@ -5138,7 +5160,7 @@ func adminCommunityHandler(w http.ResponseWriter, r *http.Request) {
 		Page             int
 		TotalPages       int
 	}{
-		Username: username, AdminInitial: initial,
+		Username: username, AdminInitial: initial, AdminAvatarURL: avatarURL,
 		AchievementStats: achievementStats, Friendships: friendships,
 		TotalFriendships: totalFriendships, Query: q, Page: page, TotalPages: totalPages,
 	}
