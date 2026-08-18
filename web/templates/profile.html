@@ -336,7 +336,13 @@
         }
         .episode-card:hover { transform: translateY(-4px); }
         .episode-card .play-icon { font-size: 18px; line-height: 1; }
-        .episode-card .ep-title { font-size: var(--fs-small); font-weight: 400; text-align: center; line-height: 1.4; }
+        .episode-card .ep-title { display: block; font-size: var(--fs-small); font-weight: 400; text-align: center; line-height: 1.4; width: 100%; }
+        .episode-card .ep-title-name {
+            display: block;
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+        }
         .episode-favorite {
             position: absolute;
             top: 12px;
@@ -561,11 +567,9 @@
                     <div class="episode-card-wrap">
                         <a href="/watch?episode={{.EpisodeID}}" class="episode-card" style="background: linear-gradient(0deg, rgba(0,0,0,0.4), rgba(0,0,0,0.4)), url('{{.Poster}}') center/cover no-repeat;">
                             <span class="play-icon">▶</span>
-                            <span class="ep-title">Серия {{.EpisodeNum}}<br>{{.EpisodeTitle}}</span>
+                            <span class="ep-title">Серия {{.EpisodeNum}}<span class="ep-title-name">{{.EpisodeTitle}}</span></span>
                         </a>
-                        {{if .IsFavorite}}
-                        <button type="button" class="card-remove" data-remove-episode="{{.EpisodeID}}" aria-label="Убрать из списка">×</button>
-                        {{end}}
+                        <button type="button" class="card-remove" data-remove-episode="{{.EpisodeID}}" data-is-favorite="{{.IsFavorite}}" aria-label="Убрать из списка">×</button>
                     </div>
                     {{end}}
                 </div>
@@ -1064,12 +1068,24 @@
         btn.addEventListener('click', function (e) {
             e.preventDefault();
             var wrap = btn.closest('.episode-card-wrap');
+            var episodeId = parseInt(btn.dataset.removeEpisode, 10);
             btn.disabled = true;
-            fetch('/api/favorites/episode', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ episode_id: parseInt(btn.dataset.removeEpisode, 10) })
-            })
-                .then(function (r) { return r.ok ? r.json() : Promise.reject(r); })
+            // Карточка попадает в "Буду смотреть серию" из двух источников —
+            // реального прогресса просмотра (user_progress) и/или звёздочки
+            // "буду смотреть" (favorite_episodes) — убираем оба, иначе карточка
+            // тут же появится обратно из того источника, который не тронули.
+            var requests = [fetch('/api/progress', {
+                method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ episode_id: episodeId })
+            })];
+            if (btn.dataset.isFavorite === 'true') {
+                requests.push(fetch('/api/favorites/episode', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ episode_id: episodeId })
+                }));
+            }
+            Promise.all(requests)
+                .then(function (results) { return results.every(function (r) { return r.ok; }) ? null : Promise.reject(); })
                 .then(function () { wrap.remove(); })
                 .catch(function () { showToast({ icon: '⚠️', title: 'Ошибка сети', body: '' }); btn.disabled = false; });
         });
