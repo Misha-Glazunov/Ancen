@@ -62,8 +62,13 @@ services:
     # TURN_USER/TURN_PASSWORD — из корневого .env (как MYSQL_DATA_DIR выше),
     # не отдельный env_file: подстановка ${...} в command работает только
     # с переменными окружения хоста/корневого .env, не с env_file контейнера.
+    # Без -n: entrypoint-скрипт образа прогоняет каждый аргумент через
+    # `eval "echo $i"` — "-n" сам является флагом echo (подавляет перевод
+    # строки), поэтому eval "echo -n" схлопывается в пустую строку и
+    # turnserver получает пустой аргумент вместо "-n" ("Unknown argument: ").
+    # Не критично: -n лишь запрещает читать turnserver.conf, которого и так
+    # нет в контейнере.
     command:
-      - -n
       - --lt-cred-mech
       - --fingerprint
       - --realm=ancen.local
