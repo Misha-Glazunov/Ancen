@@ -193,5 +193,7 @@
 }
 .toast.in-view { transform: translateX(0); opacity: 1; }
 .toast .toast-icon { font-size: 28px; line-height: 1; flex-shrink: 0; }
+.toast .toast-content { min-width: 0; }
 .toast .toast-title { font-weight: 700; margin-bottom: 2px; }
 .toast .toast-body { color: var(--color-gray-300); }
+.toast .toast-actions { display: flex; gap: 8px; margin-top: 10px; }

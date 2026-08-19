@@ -487,42 +487,44 @@
         });
     });
 
+    // Бейдж на аватарке — сумма непрочитанных сообщений и заявок в друзья,
+    // одним числом (решено 2026-08-14), а не раздельными индикаторами.
+    // Вынесено в функцию, чтобы дёргать не только при загрузке страницы, но и
+    // сразу по приходу нового сообщения через /ws/dm — иначе счётчик отставал
+    // до следующей перезагрузки страницы.
+    var badge = document.getElementById('header-friend-badge');
+    function refreshFriendBadge() {
+        if (!badge) return;
+        Promise.all([
+            fetch('/api/friends/requests').then(function (r) { return r.ok ? r.json() : []; }).catch(function () { return []; }),
+            fetch('/api/messages/unread-count').then(function (r) { return r.ok ? r.json() : { count: 0 }; }).catch(function () { return { count: 0 }; })
+        ]).then(function (results) {
+            var friendRequests = (results[0] || []).length;
+            var unreadMessages = (results[1] || {}).count || 0;
+            var total = friendRequests + unreadMessages;
+            badge.hidden = total === 0;
+            if (total > 0) badge.textContent = total > 9 ? '9+' : String(total);
+        });
+    }
+    refreshFriendBadge();
+
     // Приглашение на синхропросмотр — глобально, видно на любой странице сайта
     // (не только на watch.html конкретной серии). Использует /ws/dm — тот же
     // push-канал по user_id, что и личные сообщения (messages.html открывает
     // его отдельно для своих целей, это независимое второе соединение).
+    // Этот же сокет теперь несёт и push обычных личных сообщений (type: 'dm') —
+    // тост + живое обновление бейджа, чтобы не пропустить сообщение, если
+    // получатель не находится прямо в этом диалоге на /messages.
     var partyBanner = document.getElementById('party-invite-banner');
     if (partyBanner) {
         var pendingParty = null; // { partyId, episodeId, hostUserId }
 
-        function connectPartyDM() {
-            var proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            var ws = new WebSocket(proto + '//' + window.location.host + '/ws/dm');
-            ws.onmessage = function (event) {
-                var data;
-                try { data = JSON.parse(event.data); } catch (e) { return; }
-                if (data.type !== 'party_invite') return;
-                // Уже ждём ответа на другое приглашение — новое просто игнорируем
-                // (MVP на двоих без очереди, как и раньше на watch.html).
-                if (pendingParty) return;
-                pendingParty = { partyId: data.party_id, episodeId: data.episode_id, hostUserId: data.user_id };
-                document.getElementById('party-invite-text').textContent = data.username + ' зовёт смотреть аниме вместе';
-                partyBanner.style.display = 'flex';
-                if (typeof window.showToast === 'function') {
-                    window.showToast({ icon: '🎬', title: 'Приглашение на синхропросмотр', body: data.username + ' зовёт смотреть аниме вместе' });
-                }
-            };
-            ws.onclose = function () { setTimeout(connectPartyDM, 3000); };
-        }
-        connectPartyDM();
-
-        document.getElementById('party-invite-accept').addEventListener('click', function () {
+        function acceptParty() {
             if (!pendingParty) return;
             var p = pendingParty;
             window.location.href = '/watch?episode=' + p.episodeId + '&party=' + encodeURIComponent(p.partyId) + '&host=' + p.hostUserId;
-        });
-
-        document.getElementById('party-invite-decline').addEventListener('click', function () {
+        }
+        function declineParty() {
             if (!pendingParty) return;
             fetch('/api/party/decline', {
                 method: 'POST',
@@ -531,25 +533,48 @@
             }).catch(function () {});
             pendingParty = null;
             partyBanner.style.display = 'none';
-        });
-    }
+        }
 
-    // Бейдж на аватарке — сумма непрочитанных сообщений и заявок в друзья,
-    // одним числом (решено 2026-08-14), а не раздельными индикаторами.
-    var badge = document.getElementById('header-friend-badge');
-    if (badge) {
-        Promise.all([
-            fetch('/api/friends/requests').then(function (r) { return r.ok ? r.json() : []; }).catch(function () { return []; }),
-            fetch('/api/messages/unread-count').then(function (r) { return r.ok ? r.json() : { count: 0 }; }).catch(function () { return { count: 0 }; })
-        ]).then(function (results) {
-            var friendRequests = (results[0] || []).length;
-            var unreadMessages = (results[1] || {}).count || 0;
-            var total = friendRequests + unreadMessages;
-            if (total > 0) {
-                badge.textContent = total > 9 ? '9+' : String(total);
-                badge.hidden = false;
-            }
-        });
+        function connectPartyDM() {
+            var proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            var ws = new WebSocket(proto + '//' + window.location.host + '/ws/dm');
+            ws.onmessage = function (event) {
+                var data;
+                try { data = JSON.parse(event.data); } catch (e) { return; }
+                if (data.type === 'party_invite') {
+                    // Уже ждём ответа на другое приглашение — новое просто игнорируем
+                    // (MVP на двоих без очереди, как и раньше на watch.html).
+                    if (pendingParty) return;
+                    pendingParty = { partyId: data.party_id, episodeId: data.episode_id, hostUserId: data.user_id };
+                    document.getElementById('party-invite-text').textContent = data.username + ' зовёт смотреть аниме вместе';
+                    partyBanner.style.display = 'flex';
+                    if (typeof window.showToast === 'function') {
+                        window.showToast({
+                            icon: '🎬', title: 'Приглашение на синхропросмотр',
+                            body: data.username + ' зовёт смотреть аниме вместе',
+                            actions: [
+                                { label: 'Принять', onClick: acceptParty },
+                                { label: 'Отклонить', onClick: declineParty }
+                            ]
+                        });
+                    }
+                } else if (data.type === 'dm') {
+                    var m = data.message;
+                    // Если получатель прямо сейчас смотрит именно этот диалог на
+                    // /messages — там сообщение и так появится живьём (свой сокет
+                    // messages.html), тост здесь будет только шумом.
+                    if (window.__ancenActiveWithID !== m.sender_id && typeof window.showToast === 'function') {
+                        window.showToast({ icon: '💬', title: m.sender_username + ' написал(а) вам', body: m.text });
+                    }
+                    refreshFriendBadge();
+                }
+            };
+            ws.onclose = function () { setTimeout(connectPartyDM, 3000); };
+        }
+        connectPartyDM();
+
+        document.getElementById('party-invite-accept').addEventListener('click', acceptParty);
+        document.getElementById('party-invite-decline').addEventListener('click', declineParty);
     }
 
     var avatarInitial = document.getElementById('header-avatar-initial');

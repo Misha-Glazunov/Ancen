@@ -136,6 +136,10 @@
 
     async function openThread(withID, withUsername) {
         activeWithID = withID;
+        // Читается в header.html: если пришедшее сообщение — от собеседника
+        // из уже открытого здесь диалога, тост в шапке не нужен, оно и так
+        // появится живьём в самой ленте (см. connectDM ниже).
+        window.__ancenActiveWithID = withID;
         history.replaceState(null, '', `/messages?with=${withID}`);
         document.querySelectorAll('.conv-item').forEach(el => el.classList.toggle('active', parseInt(el.dataset.userId, 10) === withID));
 
