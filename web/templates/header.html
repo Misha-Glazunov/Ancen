@@ -391,6 +391,7 @@
     .header-nav a { font-size: var(--fs-small); }
 }
 </style>
+<script src="/static/js/toast.js"></script>
 <script>
 (function () {
     function levelColor(l) { return l >= 8 ? 'var(--color-warm-red)' : l >= 4 ? 'var(--color-warm-orange)' : '#fff'; }
@@ -507,6 +508,9 @@
                 pendingParty = { partyId: data.party_id, episodeId: data.episode_id, hostUserId: data.user_id };
                 document.getElementById('party-invite-text').textContent = data.username + ' зовёт смотреть аниме вместе';
                 partyBanner.style.display = 'flex';
+                if (typeof window.showToast === 'function') {
+                    window.showToast({ icon: '🎬', title: 'Приглашение на синхропросмотр', body: data.username + ' зовёт смотреть аниме вместе' });
+                }
             };
             ws.onclose = function () { setTimeout(connectPartyDM, 3000); };
         }

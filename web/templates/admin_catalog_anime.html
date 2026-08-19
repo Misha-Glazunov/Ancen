@@ -41,7 +41,8 @@
 
   table{width:100%;border-collapse:collapse;}
   th{text-align:left;font-family:var(--font-secondary);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700;padding:10px 12px;}
-  td{padding:10px 12px;font-family:var(--font-secondary);font-size:13px;border-top:1px solid rgba(255,255,255,.06);}
+  td{padding:10px 12px;font-family:var(--font-secondary);font-size:13px;border-top:1px solid rgba(255,255,255,.06);color:var(--text);}
+  .ep-poster-preview{width:40px;height:56px;border-radius:6px;background:var(--card2) center/cover no-repeat;flex-shrink:0;}
   .ep-video-badge{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);}
   .ep-video-badge.on{color:var(--green);}
   .ep-upload-progress{width:120px;height:4px;background:var(--card2);border-radius:2px;margin-top:6px;overflow:hidden;}
@@ -140,7 +141,7 @@
       <h2>Эпизоды ({{len .Episodes}})</h2>
       <table>
         <thead>
-          <tr><th>#</th><th>Сезон</th><th>Название</th><th>Видео</th><th></th></tr>
+          <tr><th>#</th><th>Сезон</th><th>Название</th><th>Картинка</th><th>Видео</th><th></th></tr>
         </thead>
         <tbody id="episodesBody">
           {{if .Episodes}}
@@ -149,6 +150,12 @@
               <td>{{.EpisodeNum}}</td>
               <td>{{.Season}}</td>
               <td>{{.Title}}</td>
+              <td>
+                <div class="image-upload-row">
+                  <div class="ep-poster-preview" style="{{if .Poster}}background-image:url('{{.Poster}}'){{end}}"></div>
+                  <label class="btn-ghost-sm">Загрузить<input type="file" accept="image/*" class="ep-poster-input" hidden></label>
+                </div>
+              </td>
               <td>
                 <span class="ep-video-badge{{if .HasVideo}} on{{end}}">{{if .HasVideo}}● загружено{{else}}○ нет видео{{end}}</span>
                 <div class="ep-upload-progress" hidden><div class="ep-upload-progress-bar"></div></div>
@@ -163,7 +170,7 @@
             </tr>
             {{end}}
           {{else}}
-            <tr class="empty-row"><td colspan="5">Пока нет эпизодов</td></tr>
+            <tr class="empty-row"><td colspan="6">Пока нет эпизодов</td></tr>
           {{end}}
         </tbody>
       </table>
@@ -243,6 +250,19 @@
     const data = await res.json();
     if (!res.ok) { alert(data.error || 'Ошибка'); return; }
     window.location.reload();
+  });
+
+  document.getElementById('episodesBody').addEventListener('change', async (e) => {
+    const input = e.target.closest('.ep-poster-input');
+    if (!input || !input.files.length) return;
+    const row = input.closest('tr');
+    const fd = new FormData();
+    fd.append('episode_id', row.dataset.episodeId);
+    fd.append('image', input.files[0]);
+    const res = await fetch('/api/admin/episode/image', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) { alert(data.error || 'Ошибка загрузки'); return; }
+    row.querySelector('.ep-poster-preview').style.backgroundImage = `url('${data.url}')`;
   });
 
   document.getElementById('episodesBody').addEventListener('click', async (e) => {

@@ -1526,6 +1526,10 @@ func createTables() {
 	if _, err := db.Exec("ALTER TABLE episodes ADD COLUMN season INT NOT NULL DEFAULT 1"); err != nil {
 		log.Printf("ALTER TABLE episodes (season) может уже существовать: %v", err)
 	}
+	// Превью-картинка эпизода (админка) — отдельно от poster_url аниме
+	if _, err := db.Exec("ALTER TABLE episodes ADD COLUMN poster_url VARCHAR(500) DEFAULT ''"); err != nil {
+		log.Printf("ALTER TABLE episodes (poster_url) может уже существовать: %v", err)
+	}
 	// Метаданные для карточки аниме (страна/первоисточник/студия/автор/режиссёр) — из Figma
 	for _, col := range []string{"country", "source_type", "studio", "author", "director"} {
 		if _, err := db.Exec("ALTER TABLE anime ADD COLUMN " + col + " VARCHAR(255) DEFAULT ''"); err != nil {
@@ -5290,6 +5294,7 @@ type adminEpisodeRow struct {
 	EpisodeNum int
 	Season     int
 	Title      string
+	Poster     string
 	HasVideo   bool
 }
 
@@ -5336,7 +5341,7 @@ func adminAnimeDetailHandler(w http.ResponseWriter, r *http.Request) {
 
 	var episodes []adminEpisodeRow
 	rows, err := db.Query(`
-		SELECT id, episode_num, season, title, video_url
+		SELECT id, episode_num, season, title, video_url, poster_url
 		FROM episodes WHERE anime_id = ? ORDER BY season, episode_num
 	`, animeID)
 	if err == nil {
@@ -5344,7 +5349,7 @@ func adminAnimeDetailHandler(w http.ResponseWriter, r *http.Request) {
 		for rows.Next() {
 			var e adminEpisodeRow
 			var videoURL string
-			if rows.Scan(&e.ID, &e.EpisodeNum, &e.Season, &e.Title, &videoURL) == nil {
+			if rows.Scan(&e.ID, &e.EpisodeNum, &e.Season, &e.Title, &videoURL, &e.Poster) == nil {
 				e.HasVideo = videoURL != ""
 				episodes = append(episodes, e)
 			}
@@ -5469,6 +5474,56 @@ func apiAdminAnimeImageUpload(w http.ResponseWriter, r *http.Request) {
 	url, err := uploadSingleFile(r.Context(), tmpPath, objectName, "image/jpeg")
 	if err != nil {
 		http.Error(w, `{"error":"Ошибка загрузки в хранилище"}`, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "url": url})
+}
+
+// apiAdminEpisodeImageUpload — POST /api/admin/episode/image, multipart с
+// полями episode_id и image. Та же схема, что apiAdminAnimeImageUpload, но
+// пишет сразу в episodes.poster_url (без промежуточного save-запроса).
+func apiAdminEpisodeImageUpload(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	adminID, err := getUserIDFromSession(r)
+	if err != nil || !isUserAdmin(adminID) {
+		http.Error(w, `{"error":"Доступ запрещён"}`, http.StatusForbidden)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxAvatarBytes)
+	episodeID, err := strconv.Atoi(r.FormValue("episode_id"))
+	if err != nil || episodeID == 0 {
+		http.Error(w, `{"error":"episode_id обязателен"}`, http.StatusBadRequest)
+		return
+	}
+	file, _, err := r.FormFile("image")
+	if err != nil {
+		if err.Error() == "http: request body too large" {
+			http.Error(w, `{"error":"Файл превышает 5 МБ"}`, http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, `{"error":"Файл (поле image) обязателен"}`, http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	tmpPath, err := normalizeUploadedImage(file, animeImageMaxDim["poster"])
+	if err != nil {
+		http.Error(w, `{"error":"Файл не распознан как изображение (jpg/png/webp)"}`, http.StatusBadRequest)
+		return
+	}
+	defer os.Remove(tmpPath)
+
+	objectName := fmt.Sprintf("episodes/poster-%d-%d.jpg", episodeID, time.Now().UnixNano())
+	url, err := uploadSingleFile(r.Context(), tmpPath, objectName, "image/jpeg")
+	if err != nil {
+		http.Error(w, `{"error":"Ошибка загрузки в хранилище"}`, http.StatusInternalServerError)
+		return
+	}
+
+	if _, err := db.Exec("UPDATE episodes SET poster_url = ? WHERE id = ?", url, episodeID); err != nil {
+		http.Error(w, `{"error":"Ошибка сохранения"}`, http.StatusInternalServerError)
 		return
 	}
 
@@ -6639,6 +6694,7 @@ func main() {
 	secureHandle("/admin/community", adminCommunityHandler)
 	secureHandle("/api/admin/anime/save", apiAdminAnimeUpsert)
 	secureHandle("/api/admin/anime/image", apiAdminAnimeImageUpload)
+	secureHandle("/api/admin/episode/image", apiAdminEpisodeImageUpload)
 	secureHandle("/api/admin/anime/delete", apiAdminAnimeDelete)
 	secureHandle("/api/admin/episode/save", apiAdminEpisodeUpsert)
 	secureHandle("/api/admin/episode/delete", apiAdminEpisodeDelete)
