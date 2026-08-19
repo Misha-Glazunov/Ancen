@@ -382,7 +382,7 @@
     const row = input.closest('tr');
     const file = input.files[0];
     input.value = '';
-    openCropModal(file, 900, 1286, async (blob) => {
+    openCropModal(file, 960, 720, async (blob) => {
       const fd = new FormData();
       fd.append('episode_id', row.dataset.episodeId);
       fd.append('image', blob, 'image.jpg');
