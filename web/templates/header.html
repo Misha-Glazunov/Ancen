@@ -503,6 +503,9 @@
     // сразу по приходу нового сообщения через /ws/dm — иначе счётчик отставал
     // до следующей перезагрузки страницы.
     var badge = document.getElementById('header-friend-badge');
+    // На window — чтобы messages.html мог дёрнуть пересчёт сразу после того,
+    // как своей логикой (наведение/появление строки на экране) отметит
+    // диалог прочитанным, не дожидаясь следующего dm-пуша.
     function refreshFriendBadge() {
         if (!badge) return;
         Promise.all([
@@ -516,6 +519,7 @@
             if (total > 0) badge.textContent = total > 9 ? '9+' : String(total);
         });
     }
+    window.refreshFriendBadge = refreshFriendBadge;
     refreshFriendBadge();
 
     // Приглашение на синхропросмотр — глобально, видно на любой странице сайта

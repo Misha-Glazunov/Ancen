@@ -198,3 +198,4 @@
 .toast .toast-body { color: var(--color-gray-300); }
 .toast .toast-actions { display: flex; gap: 8px; margin-top: 10px; }
 .toast.is-clickable { cursor: pointer; }
+.toast.is-clickable:hover { box-shadow: 0 0 0 2px var(--color-accent), 0 8px 24px rgba(0, 0, 0, 0.5); }

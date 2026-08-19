@@ -126,12 +126,45 @@
                 </div>` + html;
             }
             list.innerHTML = html || '<div class="empty-hint">Пока нет диалогов</div>';
+
+            // Отметка "прочитано" ещё до открытия диалога — по наведению курсора
+            // (desktop) или по факту появления строки на экране (мобильный, где
+            // hover нет). matchMedia решает один раз для всей пачки: у сенсорных
+            // устройств hover либо отсутствует, либо ненадёжен (long-press).
+            const isHoverCapable = window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+            const sightObserver = isHoverCapable ? null : new IntersectionObserver((entries) => {
+                entries.forEach((entry) => {
+                    if (entry.isIntersecting) {
+                        markConvRead(entry.target);
+                        sightObserver.unobserve(entry.target);
+                    }
+                });
+            }, { threshold: 0.5 });
+
             list.querySelectorAll('.conv-item').forEach(el => {
                 el.addEventListener('click', () => openThread(parseInt(el.dataset.userId, 10), el.dataset.username));
+                if (el.querySelector('.unread-badge')) {
+                    if (isHoverCapable) {
+                        el.addEventListener('mouseenter', () => markConvRead(el), { once: true });
+                    } else {
+                        sightObserver.observe(el);
+                    }
+                }
             });
         } catch (err) {
             list.innerHTML = '<div class="empty-hint">Ошибка загрузки</div>';
         }
+    }
+
+    function markConvRead(el) {
+        const badgeEl = el.querySelector('.unread-badge');
+        if (!badgeEl) return;
+        const withID = parseInt(el.dataset.userId, 10);
+        fetch('/api/messages/read', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({with: withID}) })
+            .then(() => {
+                badgeEl.remove();
+                if (typeof window.refreshFriendBadge === 'function') window.refreshFriendBadge();
+            });
     }
 
     async function openThread(withID, withUsername) {
