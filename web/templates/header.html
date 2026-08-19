@@ -76,7 +76,11 @@
 <style>
 /* Неисчезающий баннер приглашения на синхропросмотр — виден на любой
    странице сайта (в отличие от toast.js, который сам прячется через 5с и
-   не годится для действия, требующего решения пользователя). */
+   не годится для действия, требующего решения пользователя).
+   position:fixed (не sticky) — баннер должен быть виден независимо от того,
+   где по странице проскроллен пользователь, а не только когда верх страницы
+   виден в вьюпорте. Выше z-index шапки (которая тоже sticky/top:0), чтобы
+   лежать поверх неё, а не прятаться под ней при одинаковом top:0. */
 #party-invite-banner {
     display: none;
     align-items: center;
@@ -85,9 +89,11 @@
     padding: 12px 140px;
     background: var(--color-gray-950);
     border-bottom: 1px solid var(--color-accent);
-    position: sticky;
+    position: fixed;
     top: 0;
-    z-index: 999;
+    left: 0;
+    right: 0;
+    z-index: 1001;
 }
 .party-invite-actions { display: flex; gap: 8px; flex-shrink: 0; }
 @media (max-width: 768px) {
@@ -154,11 +160,15 @@
     color: #fff;
     font-family: var(--font-base);
     font-size: 10px;
-    display: flex;
     align-items: center;
     justify-content: center;
     box-shadow: 0 0 0 2px var(--color-bg);
 }
+/* display:flex безусловно на .header-friend-badge перебивал бы атрибут
+   hidden (author-стиль побеждает UA [hidden]{display:none} независимо от
+   specificity) — бейдж навсегда оставался бы видимым с "0" внутри.
+   :not([hidden]) возвращает элементу нормальное поведение hidden. */
+.header-friend-badge:not([hidden]) { display: flex; }
 .header-logout {
     font-family: var(--font-base);
     font-size: var(--fs-small);
@@ -564,7 +574,10 @@
                     // /messages — там сообщение и так появится живьём (свой сокет
                     // messages.html), тост здесь будет только шумом.
                     if (window.__ancenActiveWithID !== m.sender_id && typeof window.showToast === 'function') {
-                        window.showToast({ icon: '💬', title: m.sender_username + ' написал(а) вам', body: m.text });
+                        window.showToast({
+                            icon: '💬', title: m.sender_username + ' написал(а) вам', body: m.text,
+                            onClick: function () { window.location.href = '/messages?with=' + m.sender_id; }
+                        });
                     }
                     refreshFriendBadge();
                 }

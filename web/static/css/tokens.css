@@ -197,3 +197,4 @@
 .toast .toast-title { font-weight: 700; margin-bottom: 2px; }
 .toast .toast-body { color: var(--color-gray-300); }
 .toast .toast-actions { display: flex; gap: 8px; margin-top: 10px; }
+.toast.is-clickable { cursor: pointer; }

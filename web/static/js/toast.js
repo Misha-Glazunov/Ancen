@@ -3,6 +3,8 @@
 // С кнопками действия (не гаснет по клику мимо, только по кнопке/таймауту):
 //   window.showToast({ icon: '🎬', title: '...', body: '...',
 //     actions: [{ label: 'Принять', onClick: fn }, { label: 'Отклонить', onClick: fn }] })
+// Кликабельный целиком (например, переход к диалогу по клику на тост о сообщении):
+//   window.showToast({ icon: '💬', title: '...', body: '...', onClick: fn })
 (function () {
     function ensureContainer() {
         var el = document.getElementById('toast-container');
@@ -38,11 +40,19 @@
             setTimeout(function () { toast.remove(); }, 350);
         }
         toast.querySelectorAll('.toast-action-btn').forEach(function (btn, i) {
-            btn.addEventListener('click', function () {
+            btn.addEventListener('click', function (e) {
+                e.stopPropagation(); // не даём всплыть до обработчика клика по всему тосту
                 actions[i].onClick();
                 dismiss();
             });
         });
+        if (opts.onClick) {
+            toast.classList.add('is-clickable');
+            toast.addEventListener('click', function () {
+                opts.onClick();
+                dismiss();
+            });
+        }
 
         container.appendChild(toast);
         requestAnimationFrame(function () { toast.classList.add('in-view'); });
