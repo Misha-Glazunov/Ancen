@@ -507,14 +507,17 @@
     // как своей логикой (наведение/появление строки на экране) отметит
     // диалог прочитанным, не дожидаясь следующего dm-пуша.
     function refreshFriendBadge() {
+        console.log('[badge] refreshFriendBadge() called, badge el:', badge);
         if (!badge) return;
         Promise.all([
             fetch('/api/friends/requests').then(function (r) { return r.ok ? r.json() : []; }).catch(function () { return []; }),
             fetch('/api/messages/unread-count').then(function (r) { return r.ok ? r.json() : { count: 0 }; }).catch(function () { return { count: 0 }; })
         ]).then(function (results) {
+            console.log('[badge] friends/requests:', results[0], 'unread-count:', results[1]);
             var friendRequests = (results[0] || []).length;
             var unreadMessages = (results[1] || {}).count || 0;
             var total = friendRequests + unreadMessages;
+            console.log('[badge] total:', total, '-> textContent/hidden update');
             badge.hidden = total === 0;
             if (total > 0) badge.textContent = total > 9 ? '9+' : String(total);
         });
@@ -552,9 +555,12 @@
         function connectPartyDM() {
             var proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             var ws = new WebSocket(proto + '//' + window.location.host + '/ws/dm');
+            ws.onopen = function () { console.log('[header dm] /ws/dm OPEN'); };
+            ws.onclose = function () { console.log('[header dm] /ws/dm CLOSE, reconnecting in 3s'); setTimeout(connectPartyDM, 3000); };
             ws.onmessage = function (event) {
+                console.log('[header dm] message received:', event.data);
                 var data;
-                try { data = JSON.parse(event.data); } catch (e) { return; }
+                try { data = JSON.parse(event.data); } catch (e) { console.log('[header dm] JSON.parse failed', e); return; }
                 if (data.type === 'party_invite') {
                     // Уже ждём ответа на другое приглашение — новое просто игнорируем
                     // (MVP на двоих без очереди, как и раньше на watch.html).
@@ -583,10 +589,10 @@
                             onClick: function () { window.location.href = '/messages?with=' + m.sender_id; }
                         });
                     }
+                    console.log('[header dm] dm message, activeWithID:', window.__ancenActiveWithID, 'sender_id:', m.sender_id, '-> refreshFriendBadge()');
                     refreshFriendBadge();
                 }
             };
-            ws.onclose = function () { setTimeout(connectPartyDM, 3000); };
         }
         connectPartyDM();
 
