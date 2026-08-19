@@ -23,6 +23,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -709,6 +710,11 @@ type UserLevelInfo struct {
 	NextLevelXP int `json:"next_level_xp"`
 	XPPercent   int `json:"xp_percent"` // процент до следующего уровня (0-100)
 }
+
+// Логин: заглавная латинская буква, затем латиница/цифры/подчёркивание —
+// защита от визуально путающихся пар вроде "Misha"/"Миша" (Safari путал
+// сохранённые пароли между двумя разными аккаунтами одного пользователя).
+var usernameRe = regexp.MustCompile(`^[A-Z][A-Za-z0-9_]{2,19}$`)
 
 // Все доступные ачивки
 var achievements = []Achievement{
@@ -1865,6 +1871,11 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 
 		if username == "" || password == "" {
 			render(w, "register.html", PageData{Title: "Регистрация", Error: "Заполните все поля"})
+			return
+		}
+
+		if !usernameRe.MatchString(username) {
+			render(w, "register.html", PageData{Title: "Регистрация", Error: "Логин: только латиница и цифры, начинается с заглавной буквы, без пробелов (3-20 символов)"})
 			return
 		}
 

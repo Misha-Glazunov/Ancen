@@ -339,7 +339,9 @@
             <form class="form" method="POST" action="/register">
                 <div class="form-field">
                     <label for="username"></label>
-                    <input type="text" id="username" name="username" placeholder="Логин" required>
+                    <input type="text" id="username" name="username" placeholder="Логин" required
+                        pattern="[A-Z][A-Za-z0-9_]{2,19}"
+                        title="Латиница, начинается с заглавной буквы, без пробелов, 3-20 символов">
                 </div>
 
                 <div class="form-field">
