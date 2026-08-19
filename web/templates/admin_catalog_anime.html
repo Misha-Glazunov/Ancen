@@ -55,6 +55,18 @@
   .add-episode-form{display:grid;grid-template-columns:90px 90px 1fr auto;gap:8px;margin-top:16px;align-items:end;}
   .add-episode-form .field{margin-bottom:0;}
 
+  /* ===== Кроп картинки перед загрузкой (общий для постера/баннера/эпизода) ===== */
+  .crop-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:2000;align-items:center;justify-content:center;}
+  .crop-modal-overlay.is-open{display:flex;}
+  .crop-modal{background:var(--card);border-radius:20px;padding:24px;display:flex;flex-direction:column;align-items:center;gap:16px;max-width:90vw;}
+  .crop-modal h3{margin:0;font-family:var(--font-secondary);font-weight:800;font-size:15px;color:var(--text);}
+  .crop-canvas-wrap{border-radius:10px;overflow:hidden;touch-action:none;cursor:grab;max-width:80vw;max-height:70vh;}
+  .crop-canvas-wrap canvas{max-width:100%;height:auto;display:block;}
+  .crop-canvas-wrap:active{cursor:grabbing;}
+  .crop-zoom-row{display:flex;align-items:center;gap:10px;width:280px;}
+  .crop-zoom-row input[type="range"]{flex:1;accent-color:var(--accent);}
+  .crop-modal-actions{display:flex;gap:12px;}
+
   @media (max-width: 1024px){ .layout{grid-template-columns:1fr;} }
   @media (max-width: 640px){
     .add-episode-form{grid-template-columns:1fr 1fr;}
@@ -188,6 +200,21 @@
     </div>
   </div>
 
+  <div class="crop-modal-overlay" id="crop-overlay">
+    <div class="crop-modal">
+      <h3>Выберите область картинки</h3>
+      <div class="crop-canvas-wrap"><canvas id="crop-canvas"></canvas></div>
+      <div class="crop-zoom-row">
+        <span>🔍</span>
+        <input type="range" id="crop-zoom" min="1" max="3" step="0.01" value="1">
+      </div>
+      <div class="crop-modal-actions">
+        <button type="button" class="btn-ghost-sm" id="crop-cancel">Отмена</button>
+        <button type="button" class="btn-pink" id="crop-save">Сохранить</button>
+      </div>
+    </div>
+  </div>
+
 <script src="/static/js/admin-nav.js"></script>
 <script>
   const animeID = {{.Anime.ID}};
@@ -200,25 +227,111 @@
     if (existingGenres.includes(cb.value)) cb.checked = true;
   });
 
-  // Постер/баннер грузятся сразу по выбору файла (как аватар в профиле) —
-  // сервер декодирует/ресайзит/перекодирует в JPEG, возвращённый URL кладём
-  // в скрытый инпут, который уходит вместе с остальной формой на save.
-  function wireImageUpload(inputId, previewId, hiddenId, kind) {
-    document.getElementById(inputId).addEventListener('change', async (e) => {
+  // ===== Кроп картинки перед загрузкой (общая модалка, см. profile.html —
+  // тот же принцип: перетаскивание + зум на canvas, отправляем на сервер уже
+  // обрезанный кадр вместо оригинала целиком, чтобы отдать выбор области
+  // кадрирования админу, а не полагаться на слепой object-fit:cover). =====
+  const cropOverlay = document.getElementById('crop-overlay');
+  const cropCanvas = document.getElementById('crop-canvas');
+  const cropCtx = cropCanvas.getContext('2d');
+  const cropZoom = document.getElementById('crop-zoom');
+  let cropImg = null, cropMinScale = 1, cropScale = 1, cropOffsetX = 0, cropOffsetY = 0;
+  let cropDragging = false, cropLastX = 0, cropLastY = 0;
+  let cropOnDone = null;
+
+  function cropClamp() {
+    const w = cropImg.width * cropScale, h = cropImg.height * cropScale;
+    cropOffsetX = Math.min(0, Math.max(cropCanvas.width - w, cropOffsetX));
+    cropOffsetY = Math.min(0, Math.max(cropCanvas.height - h, cropOffsetY));
+  }
+  function cropDraw() {
+    cropCtx.clearRect(0, 0, cropCanvas.width, cropCanvas.height);
+    cropCtx.drawImage(cropImg, cropOffsetX, cropOffsetY, cropImg.width * cropScale, cropImg.height * cropScale);
+  }
+  cropCanvas.addEventListener('pointerdown', (e) => {
+    cropDragging = true; cropLastX = e.clientX; cropLastY = e.clientY;
+    cropCanvas.setPointerCapture(e.pointerId);
+  });
+  cropCanvas.addEventListener('pointermove', (e) => {
+    if (!cropDragging || !cropImg) return;
+    const rect = cropCanvas.getBoundingClientRect();
+    cropOffsetX += (e.clientX - cropLastX) * (cropCanvas.width / rect.width);
+    cropOffsetY += (e.clientY - cropLastY) * (cropCanvas.height / rect.height);
+    cropLastX = e.clientX; cropLastY = e.clientY;
+    cropClamp();
+    cropDraw();
+  });
+  cropCanvas.addEventListener('pointerup', () => { cropDragging = false; });
+  cropCanvas.addEventListener('pointercancel', () => { cropDragging = false; });
+  cropZoom.addEventListener('input', () => {
+    if (!cropImg) return;
+    const cx = cropCanvas.width / 2, cy = cropCanvas.height / 2;
+    const imgX = (cx - cropOffsetX) / cropScale, imgY = (cy - cropOffsetY) / cropScale;
+    cropScale = cropMinScale * parseFloat(cropZoom.value);
+    cropOffsetX = cx - imgX * cropScale;
+    cropOffsetY = cy - imgY * cropScale;
+    cropClamp();
+    cropDraw();
+  });
+  document.getElementById('crop-cancel').addEventListener('click', () => {
+    cropOverlay.classList.remove('is-open');
+    cropOnDone = null;
+  });
+  document.getElementById('crop-save').addEventListener('click', () => {
+    cropCanvas.toBlob((blob) => {
+      cropOverlay.classList.remove('is-open');
+      const done = cropOnDone;
+      cropOnDone = null;
+      if (done) done(blob);
+    }, 'image/jpeg', 0.92);
+  });
+
+  // aspectW/aspectH задают форму рамки кропа (900x1286 ~ узкий постер,
+  // 1920x1035 ~ широкий баннер) — сам canvas масштабируется под эти
+  // пропорции, сервер потом ещё раз впишет присланный кадр в свой лимит.
+  function openCropModal(file, aspectW, aspectH, onDone) {
+    cropCanvas.width = aspectW;
+    cropCanvas.height = aspectH;
+    const reader = new FileReader();
+    reader.onload = () => {
+      cropImg = new Image();
+      cropImg.onload = () => {
+        cropMinScale = Math.max(cropCanvas.width / cropImg.width, cropCanvas.height / cropImg.height);
+        cropScale = cropMinScale;
+        cropOffsetX = (cropCanvas.width - cropImg.width * cropScale) / 2;
+        cropOffsetY = (cropCanvas.height - cropImg.height * cropScale) / 2;
+        cropZoom.value = '1';
+        cropDraw();
+        cropOnDone = onDone;
+        cropOverlay.classList.add('is-open');
+      };
+      cropImg.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  // Постер/баннер: после кропа отправляем уже обрезанный кадр — сервер
+  // декодирует/ресайзит/перекодирует в JPEG, возвращённый URL кладём в
+  // скрытый инпут, который уходит вместе с остальной формой на save.
+  function wireImageUpload(inputId, previewId, hiddenId, kind, aspectW, aspectH) {
+    document.getElementById(inputId).addEventListener('change', (e) => {
       const file = e.target.files[0];
+      e.target.value = '';
       if (!file) return;
-      const fd = new FormData();
-      fd.append('kind', kind);
-      fd.append('image', file);
-      const res = await fetch('/api/admin/anime/image', { method: 'POST', body: fd });
-      const data = await res.json();
-      if (!res.ok) { alert(data.error || 'Ошибка загрузки'); return; }
-      document.getElementById(hiddenId).value = data.url;
-      document.getElementById(previewId).style.backgroundImage = `url('${data.url}')`;
+      openCropModal(file, aspectW, aspectH, async (blob) => {
+        const fd = new FormData();
+        fd.append('kind', kind);
+        fd.append('image', blob, 'image.jpg');
+        const res = await fetch('/api/admin/anime/image', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (!res.ok) { alert(data.error || 'Ошибка загрузки'); return; }
+        document.getElementById(hiddenId).value = data.url;
+        document.getElementById(previewId).style.backgroundImage = `url('${data.url}')`;
+      });
     });
   }
-  wireImageUpload('posterInput', 'posterPreview', 'posterUrl', 'poster');
-  wireImageUpload('bannerInput', 'bannerPreview', 'bannerUrl', 'banner');
+  wireImageUpload('posterInput', 'posterPreview', 'posterUrl', 'poster', 900, 1286);
+  wireImageUpload('bannerInput', 'bannerPreview', 'bannerUrl', 'banner', 1920, 1035);
 
   document.getElementById('anime-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -252,17 +365,21 @@
     window.location.reload();
   });
 
-  document.getElementById('episodesBody').addEventListener('change', async (e) => {
+  document.getElementById('episodesBody').addEventListener('change', (e) => {
     const input = e.target.closest('.ep-poster-input');
     if (!input || !input.files.length) return;
     const row = input.closest('tr');
-    const fd = new FormData();
-    fd.append('episode_id', row.dataset.episodeId);
-    fd.append('image', input.files[0]);
-    const res = await fetch('/api/admin/episode/image', { method: 'POST', body: fd });
-    const data = await res.json();
-    if (!res.ok) { alert(data.error || 'Ошибка загрузки'); return; }
-    row.querySelector('.ep-poster-preview').style.backgroundImage = `url('${data.url}')`;
+    const file = input.files[0];
+    input.value = '';
+    openCropModal(file, 900, 1286, async (blob) => {
+      const fd = new FormData();
+      fd.append('episode_id', row.dataset.episodeId);
+      fd.append('image', blob, 'image.jpg');
+      const res = await fetch('/api/admin/episode/image', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || 'Ошибка загрузки'); return; }
+      row.querySelector('.ep-poster-preview').style.backgroundImage = `url('${data.url}')`;
+    });
   });
 
   document.getElementById('episodesBody').addEventListener('click', async (e) => {

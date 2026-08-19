@@ -32,6 +32,8 @@
   td{padding:14px 16px;font-family:var(--font-secondary);font-size:14px;border-top:1px solid rgba(255,255,255,.06);color:var(--text);}
   tr:hover td{background:rgba(255,255,255,.02);}
   .t-name{font-weight:600;}
+  .t-name-link{color:inherit;text-decoration:none;display:block;}
+  .t-name-link:hover{text-decoration:underline;}
   .t-sub{color:var(--muted);font-size:12px;}
   .t-total{color:var(--accent);font-weight:700;}
   .empty-row td{text-align:center;color:var(--muted);padding:40px;}
@@ -91,7 +93,7 @@
         {{if .Anime}}
           {{range .Anime}}
           <tr>
-            <td class="t-name">{{.Title}}</td>
+            <td class="t-name"><a href="/admin/catalog/anime?id={{.AnimeID}}" class="t-name-link">{{.Title}}</a></td>
             <td class="num">{{.Views}}</td>
             <td class="num">{{.Reactions}}</td>
             <td class="num">{{.Comments}}</td>
@@ -121,7 +123,7 @@
         {{if .Episodes}}
           {{range .Episodes}}
           <tr>
-            <td><div class="t-name">{{.Title}}</div><div class="t-sub">{{.Sub}}</div></td>
+            <td><a href="/admin/catalog/anime?id={{.AnimeID}}" class="t-name-link"><div class="t-name">{{.Title}}</div><div class="t-sub">{{.Sub}}</div></a></td>
             <td class="num">{{.Views}}</td>
             <td class="num">{{.Reactions}}</td>
             <td class="num">{{.Comments}}</td>

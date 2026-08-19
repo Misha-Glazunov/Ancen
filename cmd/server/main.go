@@ -3322,16 +3322,44 @@ func (h *dmHub) unregister(userID int, conn *websocket.Conn) {
 	}
 }
 
-// push возвращает true, если у получателя было хоть одно активное соединение —
-// используется приглашением в party, чтобы понять, дошло ли оно вообще
-// (пользователь может быть просто не в сети, а не только не на этой странице).
+// push возвращает true, только если запись хотя бы в одно соединение
+// получателя реально прошла без ошибки — используется приглашением в party,
+// чтобы понять, дошло ли оно вообще (пользователь может быть просто не в
+// сети, а не только не на этой странице). Раньше ошибка WriteMessage
+// игнорировалась и delivered ставился в true по одному факту наличия
+// соединения в мапе — если вкладка друга зависла/уснула и TCP-соединение
+// стало "мёртвым" без явного close, push всё равно рапортовал успех, и
+// приглашение молча терялось без "оффлайн"-уведомления отправителю.
 func (h *dmHub) push(userID int, data []byte) bool {
 	h.mu.RLock()
-	defer h.mu.RUnlock()
-	delivered := false
+	conns := make([]*websocket.Conn, 0, len(h.clients[userID]))
 	for conn := range h.clients[userID] {
-		conn.WriteMessage(websocket.TextMessage, data)
+		conns = append(conns, conn)
+	}
+	h.mu.RUnlock()
+
+	delivered := false
+	var dead []*websocket.Conn
+	for _, conn := range conns {
+		conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+			dead = append(dead, conn)
+			continue
+		}
 		delivered = true
+	}
+	if len(dead) > 0 {
+		h.mu.Lock()
+		for _, conn := range dead {
+			if conns, ok := h.clients[userID]; ok {
+				delete(conns, conn)
+				if len(conns) == 0 {
+					delete(h.clients, userID)
+				}
+			}
+			conn.Close()
+		}
+		h.mu.Unlock()
 	}
 	return delivered
 }
@@ -4979,6 +5007,7 @@ func apiAdminUsersList(w http.ResponseWriter, r *http.Request) {
 type analyticsRow struct {
 	Title     string
 	Sub       string
+	AnimeID   int
 	Views     int
 	Reactions int
 	Comments  int
@@ -4999,7 +5028,7 @@ func adminAnalyticsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	episodeRows, err := db.Query(`
-		SELECT a.title, CONCAT('Эп. ', e.episode_num, ' — ', e.title),
+		SELECT a.title, CONCAT('Эп. ', e.episode_num, ' — ', e.title), a.id,
 			COALESCE(v.views,0), COALESCE(rc.reactions,0), COALESCE(c.comments,0)
 		FROM episodes e
 		JOIN anime a ON a.id = e.anime_id
@@ -5014,14 +5043,14 @@ func adminAnalyticsHandler(w http.ResponseWriter, r *http.Request) {
 		defer episodeRows.Close()
 		for episodeRows.Next() {
 			var row analyticsRow
-			if episodeRows.Scan(&row.Title, &row.Sub, &row.Views, &row.Reactions, &row.Comments) == nil {
+			if episodeRows.Scan(&row.Title, &row.Sub, &row.AnimeID, &row.Views, &row.Reactions, &row.Comments) == nil {
 				episodes = append(episodes, row)
 			}
 		}
 	}
 
 	animeRows, err := db.Query(`
-		SELECT a.title,
+		SELECT a.title, a.id,
 			COALESCE(SUM(v.views),0), COALESCE(SUM(rc.reactions),0), COALESCE(SUM(c.comments),0)
 		FROM anime a
 		JOIN episodes e ON e.anime_id = a.id
@@ -5037,7 +5066,7 @@ func adminAnalyticsHandler(w http.ResponseWriter, r *http.Request) {
 		defer animeRows.Close()
 		for animeRows.Next() {
 			var row analyticsRow
-			if animeRows.Scan(&row.Title, &row.Views, &row.Reactions, &row.Comments) == nil {
+			if animeRows.Scan(&row.Title, &row.AnimeID, &row.Views, &row.Reactions, &row.Comments) == nil {
 				anime = append(anime, row)
 			}
 		}
