@@ -3412,6 +3412,7 @@ type Message struct {
 	SenderName  string `json:"sender_username"`
 	Text        string `json:"text"`
 	CreatedAt   string `json:"created_at"`
+	IsRead      bool   `json:"is_read"`
 }
 
 // canMessage проверяет, может ли senderID написать recipientID — учитывает
@@ -3461,7 +3462,7 @@ func apiMessagesGet(w http.ResponseWriter, r *http.Request) {
 	offset := (page - 1) * pageSize
 
 	rows, err := db.Query(`
-		SELECT m.id, m.sender_id, m.recipient_id, u.username, m.text, m.created_at
+		SELECT m.id, m.sender_id, m.recipient_id, u.username, m.text, m.created_at, m.read_at
 		FROM messages m
 		JOIN users u ON u.id = m.sender_id
 		WHERE (m.sender_id = ? AND m.recipient_id = ?) OR (m.sender_id = ? AND m.recipient_id = ?)
@@ -3476,13 +3477,16 @@ func apiMessagesGet(w http.ResponseWriter, r *http.Request) {
 	messages := []Message{}
 	for rows.Next() {
 		var m Message
-		var createdAt sql.NullTime
-		if err := rows.Scan(&m.ID, &m.SenderID, &m.RecipientID, &m.SenderName, &m.Text, &createdAt); err != nil {
+		var createdAt, readAt sql.NullTime
+		if err := rows.Scan(&m.ID, &m.SenderID, &m.RecipientID, &m.SenderName, &m.Text, &createdAt, &readAt); err != nil {
 			continue
 		}
 		if createdAt.Valid {
 			m.CreatedAt = createdAt.Time.Format("2006-01-02 15:04:05")
 		}
+		// Свои же отправленные сообщения нечего "читать по наведению" —
+		// непрочитанным для UI считается только чужое входящее.
+		m.IsRead = readAt.Valid || m.SenderID == userID
 		messages = append(messages, m)
 	}
 	json.NewEncoder(w).Encode(messages)
@@ -3633,6 +3637,35 @@ func apiMessagesMarkRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := db.Exec("UPDATE messages SET read_at = NOW() WHERE sender_id = ? AND recipient_id = ? AND read_at IS NULL", req.With, userID); err != nil {
+		http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// apiMessageReadOne — POST /api/messages/read-one {message_id} — помечает
+// прочитанным ровно одно сообщение (наведение на конкретную реплику в
+// открытом диалоге), в отличие от apiMessagesReadHandler выше, который
+// разом закрывает всю переписку с собеседником.
+func apiMessageReadOne(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	userID, err := getUserIDFromSession(r)
+	if err != nil {
+		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	var req struct {
+		MessageID int `json:"message_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MessageID == 0 {
+		http.Error(w, `{"error":"message_id required"}`, http.StatusBadRequest)
+		return
+	}
+	if _, err := db.Exec("UPDATE messages SET read_at = NOW() WHERE id = ? AND recipient_id = ? AND read_at IS NULL", req.MessageID, userID); err != nil {
 		http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
 		return
 	}
@@ -6749,6 +6782,7 @@ func main() {
 	secureHandle("/api/messages", apiMessagesGet)
 	secureHandle("/api/messages/send", apiMessageSend)
 	secureHandle("/api/messages/read", apiMessagesMarkRead)
+	secureHandle("/api/messages/read-one", apiMessageReadOne)
 	secureHandle("/api/messages/unread-count", apiUnreadMessagesCount)
 	secureHandle("/api/conversations", apiConversationsList)
 	secureHandle("/api/retention-progress", apiRetentionProgressHandler)

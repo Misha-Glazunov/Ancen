@@ -61,6 +61,7 @@
         .msg-row { max-width: 70%; padding: 8px 14px; border-radius: var(--radius-lg); background: rgba(255,255,255,0.06); }
         .msg-row.mine { align-self: flex-end; background: var(--color-accent); }
         .msg-row .time { display: block; font-size: 11px; color: var(--color-gray-500); margin-top: 4px; }
+        .msg-row.unread { box-shadow: inset 3px 0 0 var(--color-accent); }
         .thread-compose { display: flex; gap: 10px; padding: 16px 20px; border-top: 1px solid var(--color-gray-800); }
         .thread-compose input { flex: 1; background: var(--color-gray-950); border: 1px solid var(--color-gray-800); border-radius: var(--radius-lg); padding: 10px 14px; color: inherit; font-family: inherit; }
         .no-thread { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--color-gray-500); }
@@ -189,9 +190,10 @@
         try {
             const res = await fetch(`/api/messages?with=${withID}&pageSize=50`);
             const messages = await res.json();
+            // Открытие диалога больше не отмечает всё прочитанным разом —
+            // каждое сообщение помечается по наведению/появлению на экране,
+            // см. renderMessages -> wireReadOnSightForMessages.
             renderMessages(messages.slice().reverse());
-            fetch('/api/messages/read', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({with: withID}) })
-                .then(loadConversations);
         } catch (err) {
             document.getElementById('threadMessages').innerHTML = '<div class="empty-hint">Ошибка загрузки</div>';
         }
@@ -226,6 +228,53 @@
         input.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
     }
 
+    // Сообщение считается непрочитанным, пока получатель на него явно не
+    // навёл курсор (desktop) или оно не появилось на экране (мобильный,
+    // hover ненадёжен/отсутствует) — как в Telegram/Slack: открытие диалога
+    // само по себе больше не отмечает всё прочитанным.
+    function msgRowHtml(m) {
+        const incoming = m.sender_id === activeWithID;
+        const unread = incoming && !m.is_read;
+        return `
+            <div class="msg-row${incoming ? '' : ' mine'}${unread ? ' unread' : ''}" data-message-id="${m.id}">
+                ${escapeHtml(m.text)}
+                <span class="time">${formatTime(m.created_at)}</span>
+            </div>
+        `;
+    }
+
+    function wireReadOnSightForMessages(box) {
+        const isHoverCapable = window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+        const rows = box.querySelectorAll('.msg-row.unread');
+        if (!rows.length) return;
+        const sightObserver = isHoverCapable ? null : new IntersectionObserver((entries) => {
+            entries.forEach((entry) => {
+                if (entry.isIntersecting) {
+                    markMessageRead(entry.target);
+                    sightObserver.unobserve(entry.target);
+                }
+            });
+        }, { threshold: 0.6 });
+        rows.forEach((el) => {
+            if (isHoverCapable) {
+                el.addEventListener('mouseenter', () => markMessageRead(el), { once: true });
+            } else {
+                sightObserver.observe(el);
+            }
+        });
+    }
+
+    function markMessageRead(el) {
+        if (!el.classList.contains('unread')) return;
+        el.classList.remove('unread');
+        const messageId = parseInt(el.dataset.messageId, 10);
+        fetch('/api/messages/read-one', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({message_id: messageId}) })
+            .then(() => {
+                loadConversations();
+                if (typeof window.refreshFriendBadge === 'function') window.refreshFriendBadge();
+            });
+    }
+
     function renderMessages(messages) {
         const box = document.getElementById('threadMessages');
         if (!box) return;
@@ -233,26 +282,18 @@
             box.innerHTML = '<div class="empty-hint">Пока нет сообщений — напишите первым</div>';
             return;
         }
-        box.innerHTML = messages.map(m => `
-            <div class="msg-row${m.sender_id === activeWithID ? '' : ' mine'}">
-                ${escapeHtml(m.text)}
-                <span class="time">${formatTime(m.created_at)}</span>
-            </div>
-        `).join('');
+        box.innerHTML = messages.map(msgRowHtml).join('');
         box.scrollTop = box.scrollHeight;
+        wireReadOnSightForMessages(box);
     }
 
     function appendMessage(m) {
         const box = document.getElementById('threadMessages');
         if (!box) return;
         if (box.querySelector('.empty-hint')) box.innerHTML = '';
-        box.insertAdjacentHTML('beforeend', `
-            <div class="msg-row${m.sender_id === activeWithID ? '' : ' mine'}">
-                ${escapeHtml(m.text)}
-                <span class="time">${formatTime(m.created_at)}</span>
-            </div>
-        `);
+        box.insertAdjacentHTML('beforeend', msgRowHtml(m));
         box.scrollTop = box.scrollHeight;
+        wireReadOnSightForMessages(box);
     }
 
     // --- Живые сообщения через отдельный WS-хаб по user_id (не по эпизоду) ---
@@ -265,16 +306,10 @@
                 if (data.type === 'dm') {
                     const m = data.message;
                     if (activeWithID && m.sender_id === activeWithID) {
+                        // Прочитанным сообщение станет по наведению/появлению на
+                        // экране (см. wireReadOnSightForMessages) — appendMessage
+                        // сама навешивает эти обработчики на новую строку.
                         appendMessage(m);
-                        // header.html слушает тот же push через свой отдельный сокет и
-                        // может дёрнуть /api/messages/unread-count РАНЬШЕ, чем здесь
-                        // успеет отработать /api/messages/read (гонка двух независимых
-                        // соединений, порядок ответов не гарантирован) — тогда бейдж
-                        // на аватарке зафиксирует ещё непрочитанный счётчик и зависнет
-                        // на нём, пока страницу не перезагрузят. Пересчитываем бейдж
-                        // ЕЩЁ РАЗ уже после того, как read гарантированно применился.
-                        fetch('/api/messages/read', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({with: activeWithID}) })
-                            .then(() => { if (typeof window.refreshFriendBadge === 'function') window.refreshFriendBadge(); });
                     }
                     loadConversations();
                 }
