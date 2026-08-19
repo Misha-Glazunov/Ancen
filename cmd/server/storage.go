@@ -73,7 +73,19 @@ func uploadDir(ctx context.Context, localDir, objectPrefix string) (string, erro
 			return err
 		}
 		objectName := objectPrefix + "/" + filepath.ToSlash(rel)
-		if _, err := minioClient.FPutObject(ctx, minioBucket, objectName, path, minio.PutObjectOptions{}); err != nil {
+		// objectPrefix (anime/{id}/episode/{num}) не включает время загрузки —
+		// при переливке видео тем же путём объекты перезапишутся, поэтому не
+		// immutable/год: недельный кэш даёт браузеру не перекачивать сегменты
+		// при перемотке назад/повторном просмотре, но переливка долетит в
+		// разумный срок, а не через год у уже закэшировавших зрителей.
+		opts := minio.PutObjectOptions{CacheControl: "public, max-age=604800"}
+		switch filepath.Ext(path) {
+		case ".m3u8":
+			opts.ContentType = "application/vnd.apple.mpegurl"
+		case ".ts":
+			opts.ContentType = "video/mp2t"
+		}
+		if _, err := minioClient.FPutObject(ctx, minioBucket, objectName, path, opts); err != nil {
 			return err
 		}
 		if rel == "master.m3u8" {
