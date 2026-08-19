@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Пользовательское соглашение — AniMemory</title>
+    <meta name="robots" content="index, follow">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;700&family=Manrope:wght@400;500;600&family=MuseoModerno:wght@400;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/tokens.css?v=2">
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; background: var(--color-bg); color: var(--color-text); font-family: var(--font-base); }
+        .container { max-width: 800px; margin: 0 auto; padding: 50px 20px 80px; line-height: 1.6; }
+        h1 { font-family: var(--font-base); font-weight: 400; font-size: var(--fs-display-md); margin-bottom: 10px; }
+        h2 { font-size: var(--fs-heading); border-bottom: 1px solid var(--color-gray-700); padding-bottom: 8px; margin-top: 40px; }
+        p, li { color: var(--color-gray-300); }
+        .updated { color: var(--color-gray-500); font-size: var(--fs-small); margin-bottom: 30px; }
+        .draft-notice {
+            background: rgba(216, 45, 126, 0.1);
+            border: 1px solid var(--color-accent);
+            border-radius: var(--radius-lg);
+            padding: 20px;
+            margin-bottom: 40px;
+            color: var(--color-text);
+        }
+        .draft-notice strong { color: var(--color-accent); }
+    </style>
+</head>
+<body>
+{{template "header" .}}
+<div class="container">
+    <h1>Пользовательское соглашение</h1>
+    <p class="updated">Последнее обновление: черновик, требует юридической проверки перед коммерческим запуском</p>
+
+    <div class="draft-notice">
+        <strong>Это черновик для внутреннего использования, не юридический документ (оферта).</strong>
+        Он честно описывает, как сайт технически работает сейчас. Перед официальным запуском,
+        особенно перед приёмом платежей, документ должен проверить и оформить юрист как полноценную
+        публичную оферту — в частности, привязать её к конкретному оператору (ИП/ООО/самозанятый),
+        который фактически принимает оплату. Это не может определить и оформить сам код.
+    </div>
+
+    <h2>Что такое AniMemory</h2>
+    <p>AniMemory — сайт для просмотра аниме с синхронными реакциями и комментариями зрителей на таймкодах, системой XP/достижений и (опционально) подпиской Premium с расширенными возможностями.</p>
+
+    <h2>Регистрация и аккаунт</h2>
+    <ul>
+        <li>Один аккаунт — один пользователь. Логин указывается латиницей, без пробелов</li>
+        <li>Вы отвечаете за сохранность своего пароля и за действия, совершённые под вашим аккаунтом</li>
+        <li>Администрация вправе заблокировать аккаунт при нарушении правил (спам, оскорбления в комментариях/чате, попытки взлома)</li>
+    </ul>
+
+    <h2>Контент пользователей</h2>
+    <ul>
+        <li>Комментарии, реакции и голосовые тикеры видны другим зрителям того же эпизода — не публикуйте то, что не готовы показать публично</li>
+        <li>Запрещены: оскорбления, спам, незаконный контент. Модерация контента сейчас делается вручную, без выделенной системы жалоб (это известное ограничение, см. внутренний бэклог)</li>
+    </ul>
+
+    <h2>Подписка Premium</h2>
+    <ul>
+        <li>Расширяет функциональность (снятие ограничений на просмотр реакций/комментариев вперёд по прогрессу и т.д.), не влияет на бесплатный доступ к самому просмотру</li>
+        <li><strong>Приём платежей на сайте пока не подключён</strong> — раздел актуализируется, когда появится реальный платёжный провайдер и оформленная оферта на оплату</li>
+    </ul>
+
+    <h2>Ограничение ответственности</h2>
+    <p>Сайт предоставляется «как есть». Мы стараемся поддерживать доступность и сохранность данных (в т.ч. регулярные резервные копии), но не гарантируем бесперебойную работу на 100% времени.</p>
+
+    <h2>Контакты</h2>
+    <p>По вопросам, связанным с этим соглашением: <a href="mailto:mishgun.gl@gmail.com" style="color: var(--color-accent);">mishgun.gl@gmail.com</a></p>
+</div>
+{{template "footer" .}}
+</body>
+</html>

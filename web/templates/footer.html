@@ -9,6 +9,7 @@
             <div class="footer-copy-row">
                 <span class="footer-copy">© 2026 AniMemory</span>
                 <a href="/privacy-policy" class="policy-button" data-swap-word>Политика конфиденциальности</a>
+                <a href="/terms" class="policy-button" data-swap-word>Пользовательское соглашение</a>
             </div>
             <a href="/premium" class="btn btn-sm footer-premium-btn">✨ Premium</a>
         </div>
@@ -55,6 +56,11 @@
         </div>
     </div>
 </footer>
+
+<div id="cookie-banner" hidden>
+    <p>Сайт использует cookie для входа и работы личного кабинета. Продолжая пользоваться сайтом, вы соглашаетесь с этим — подробнее в <a href="/privacy-policy">политике конфиденциальности</a>.</p>
+    <button type="button" id="cookie-banner-accept" class="btn btn-sm">Понятно</button>
+</div>
 
 <style>
 /* ===== FOOTER STYLES (из Figma) ===== */
@@ -212,7 +218,44 @@
     }
     .footer-copy-row { flex-wrap: wrap; }
 }
+
+/* ===== Cookie-баннер ===== */
+#cookie-banner {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 16px;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1003;
+    padding: 16px 140px;
+    background: var(--color-gray-950);
+    border-top: 1px solid var(--color-accent);
+}
+#cookie-banner:not([hidden]) { display: flex; }
+#cookie-banner p { margin: 0; color: var(--color-gray-300); font-size: var(--fs-small); max-width: 700px; }
+#cookie-banner a { color: var(--color-accent); }
+@media (max-width: 768px) {
+    #cookie-banner { padding: 16px 20px; }
+}
 </style>
 </footer>
 <script src="/static/js/letter-swap.js"></script>
+<script>
+(function () {
+    var banner = document.getElementById('cookie-banner');
+    var accept = document.getElementById('cookie-banner-accept');
+    if (!banner || !accept) return;
+    try {
+        if (!localStorage.getItem('cookie_consent_seen')) banner.hidden = false;
+    } catch (e) { banner.hidden = false; }
+    accept.addEventListener('click', function () {
+        banner.hidden = true;
+        try { localStorage.setItem('cookie_consent_seen', '1'); } catch (e) {}
+    });
+})();
+</script>
 {{end}}

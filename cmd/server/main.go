@@ -2551,6 +2551,14 @@ func privacyPolicyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func termsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	data := struct{ Username string }{Username: currentUsername(r)}
+	if err := templates.ExecuteTemplate(w, "terms.html", data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
 func apiEmotionPost(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if r.Method != http.MethodPost {
@@ -6736,6 +6744,7 @@ func main() {
 	secureHandle("/profile", profileHandler)
 	secureHandle("/premium", premiumHandler)
 	secureHandle("/privacy-policy", privacyPolicyHandler)
+	secureHandle("/terms", termsHandler)
 	secureHandle("/api/emotion", apiEmotionPost)
 	secureHandle("/api/emotions", apiEmotionsGet)
 	secureHandle("/ws", wsHandler)
