@@ -4,9 +4,9 @@
 # deploy/minio/.env через --env-file. BACKUP_ENCRYPTION_PASSWORD — отдельная
 # машинная переменная окружения (setx /M), не хранится в репозитории.
 #
-# ponytail: без ретеншна/автоочистки старых бэкапов в MinIO — увеличить, если
-# место в MinIO станет проблемой (см. 16_Текущий_статус.md).
+# Ротация: бэкапы старше $backupRetentionDays удаляются после каждой загрузки.
 $ErrorActionPreference = "Stop"
+$backupRetentionDays = 30
 
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
@@ -31,5 +31,9 @@ Write-Host "Uploading to MinIO..."
 docker run --rm --entrypoint sh --network ancen_default --env-file "$root\deploy\minio\.env" -v "${workDir}:/data" minio/mc -c `
     "mc alias set local http://minio:9000 `$MINIO_ROOT_USER `$MINIO_ROOT_PASSWORD >/dev/null && mc mb --ignore-existing local/ancen-backups >/dev/null && mc cp /data/$encFile local/ancen-backups/$encFile"
 Remove-Item (Join-Path $workDir $encFile)
+
+Write-Host "Rotating backups older than $backupRetentionDays days..."
+docker run --rm --entrypoint sh --network ancen_default --env-file "$root\deploy\minio\.env" minio/mc -c `
+    "mc alias set local http://minio:9000 `$MINIO_ROOT_USER `$MINIO_ROOT_PASSWORD >/dev/null && mc rm --recursive --force --older-than ${backupRetentionDays}d local/ancen-backups"
 
 Write-Host "Backup done: $encFile"
