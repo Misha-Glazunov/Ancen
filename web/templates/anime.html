@@ -251,7 +251,7 @@
             <h2>Сезон {{.Season}}</h2>
             <div class="episode-grid">
                 {{range .Episodes}}
-                <a href="/watch?episode={{.ID}}" class="episode-card">
+                <a href="/watch?episode={{.ID}}" class="episode-card"{{if .PosterURL}} style="background-image: linear-gradient(0deg, rgba(0,0,0,0.4), rgba(0,0,0,0.4)), url('{{.PosterURL}}')"{{end}}>
                     <button type="button" class="episode-favorite{{if .IsFavorite}} active{{end}}" data-episode-favorite data-episode-id="{{.ID}}" aria-label="Буду смотреть">{{if .IsFavorite}}★{{else}}☆{{end}}</button>
                     <span class="play-icon">▶</span>
                     <span class="ep-title">Серия {{.Num}}. {{.Title}}</span>

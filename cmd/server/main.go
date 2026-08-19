@@ -1999,7 +1999,7 @@ func animeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := db.Query("SELECT id, episode_num, season, title FROM episodes WHERE anime_id = ? ORDER BY season, episode_num", id)
+	rows, err := db.Query("SELECT id, episode_num, season, title, poster_url FROM episodes WHERE anime_id = ? ORDER BY season, episode_num", id)
 	if err != nil {
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
@@ -2011,6 +2011,7 @@ func animeHandler(w http.ResponseWriter, r *http.Request) {
 		Num        int
 		Season     int
 		Title      string
+		PosterURL  string
 		IsFavorite bool
 	}
 	type SeasonGroup struct {
@@ -2040,7 +2041,7 @@ func animeHandler(w http.ResponseWriter, r *http.Request) {
 	var seasons []SeasonGroup
 	for rows.Next() {
 		var ep Episode
-		if err := rows.Scan(&ep.ID, &ep.Num, &ep.Season, &ep.Title); err != nil {
+		if err := rows.Scan(&ep.ID, &ep.Num, &ep.Season, &ep.Title, &ep.PosterURL); err != nil {
 			continue
 		}
 		ep.IsFavorite = favoriteEpisodes[ep.ID]
