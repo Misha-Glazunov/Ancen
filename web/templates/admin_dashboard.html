@@ -53,9 +53,7 @@
   .card-me-bg img{width:100%;height:100%;object-fit:cover;display:block;}
   .card-me-shade{
     position:absolute;inset:0;
-    /* Фото — рисунок на белом фоне, без сплошной затемняющей заливки плашка
-       выглядит светлой на фоне остальных тёмных карточек дашборда. */
-    background:linear-gradient(180deg, rgba(9,9,9,.75) 0%, rgba(15,15,15,.55) 47%, rgba(5,5,5,.75) 85%);
+    background:linear-gradient(180deg, rgba(9,9,9,.5) 0%, rgba(40,40,40,0) 47%, rgba(5,5,5,.5) 85%);
   }
   .card-me-content{position:relative;z-index:1;width:100%;}
   .card-me-title{font-size:24px;line-height:1;}
@@ -205,7 +203,7 @@
   <!-- ===== Row 1 ===== -->
   <div class="dash-row dash-row-1">
     <div class="dash-card card-me">
-      <div class="card-me-bg"><img src="/static/img/admin/dev-photo.jpg" alt="" onerror="this.style.display='none'"></div>
+      <div class="card-me-bg"><img src="/static/img/admin/dev-photo.png" alt="" onerror="this.style.display='none'"></div>
       <div class="card-me-shade"></div>
       <div class="card-me-content">
         <div class="card-me-title"><span class="who">I am</span><span class="name">{{.Username}}</span></div>

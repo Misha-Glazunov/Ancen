@@ -60,8 +60,8 @@
   .crop-modal-overlay.is-open{display:flex;}
   .crop-modal{background:var(--card);border-radius:20px;padding:24px;display:flex;flex-direction:column;align-items:center;gap:16px;max-width:90vw;}
   .crop-modal h3{margin:0;font-family:var(--font-secondary);font-weight:800;font-size:15px;color:var(--text);}
-  .crop-canvas-wrap{border-radius:10px;overflow:hidden;touch-action:none;cursor:grab;max-width:80vw;max-height:70vh;}
-  .crop-canvas-wrap canvas{max-width:100%;height:auto;display:block;}
+  .crop-canvas-wrap{border-radius:10px;overflow:hidden;touch-action:none;cursor:grab;}
+  .crop-canvas-wrap canvas{display:block;}
   .crop-canvas-wrap:active{cursor:grabbing;}
   .crop-zoom-row{display:flex;align-items:center;gap:10px;width:280px;}
   .crop-zoom-row input[type="range"]{flex:1;accent-color:var(--accent);}
@@ -292,6 +292,17 @@
   function openCropModal(file, aspectW, aspectH, onDone) {
     cropCanvas.width = aspectW;
     cropCanvas.height = aspectH;
+    // Резолюция canvas (aspectW/aspectH) — это и есть выходной размер кропа,
+    // на экране его нужно лишь вписать в окно с сохранением пропорций. Раньше
+    // это делал CSS (max-width:100%;height:auto) вместе с max-height на
+    // обёртке — комбинация обрезала высокие/узкие кропы (постер) сверху и
+    // снизу через overflow:hidden, отчего рамка визуально выглядела широкой,
+    // как у баннера. Считаем размер на экране явно, без CSS-догадок.
+    const maxW = Math.min(560, window.innerWidth * 0.8);
+    const maxH = Math.min(700, window.innerHeight * 0.7);
+    const fit = Math.min(maxW / aspectW, maxH / aspectH, 1);
+    cropCanvas.style.width = Math.round(aspectW * fit) + 'px';
+    cropCanvas.style.height = Math.round(aspectH * fit) + 'px';
     const reader = new FileReader();
     reader.onload = () => {
       cropImg = new Image();
