@@ -259,23 +259,28 @@
     function connectDM() {
         const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const ws = new WebSocket(`${proto}//${window.location.host}/ws/dm`);
-        ws.onopen = () => console.log('[messages dm] /ws/dm OPEN');
         ws.onmessage = (event) => {
-            console.log('[messages dm] message received:', event.data);
             try {
                 const data = JSON.parse(event.data);
                 if (data.type === 'dm') {
                     const m = data.message;
-                    console.log('[messages dm] dm, activeWithID:', activeWithID, 'sender_id:', m.sender_id);
                     if (activeWithID && m.sender_id === activeWithID) {
                         appendMessage(m);
-                        fetch('/api/messages/read', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({with: activeWithID}) });
+                        // header.html слушает тот же push через свой отдельный сокет и
+                        // может дёрнуть /api/messages/unread-count РАНЬШЕ, чем здесь
+                        // успеет отработать /api/messages/read (гонка двух независимых
+                        // соединений, порядок ответов не гарантирован) — тогда бейдж
+                        // на аватарке зафиксирует ещё непрочитанный счётчик и зависнет
+                        // на нём, пока страницу не перезагрузят. Пересчитываем бейдж
+                        // ЕЩЁ РАЗ уже после того, как read гарантированно применился.
+                        fetch('/api/messages/read', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({with: activeWithID}) })
+                            .then(() => { if (typeof window.refreshFriendBadge === 'function') window.refreshFriendBadge(); });
                     }
-                    loadConversations().then(() => console.log('[messages dm] loadConversations() done'));
+                    loadConversations();
                 }
-            } catch (e) { console.log('[messages dm] handler error:', e); }
+            } catch (e) {}
         };
-        ws.onclose = () => { console.log('[messages dm] /ws/dm CLOSE, reconnecting in 3s'); setTimeout(connectDM, 3000); };
+        ws.onclose = () => setTimeout(connectDM, 3000);
     }
 
     loadConversations().then(() => {
