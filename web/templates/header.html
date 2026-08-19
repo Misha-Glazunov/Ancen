@@ -26,12 +26,27 @@
         <a href="/#new-anime" data-swap-word>Новое</a>
         <a href="/#popular-anime" data-swap-word>Популярное</a>
         <a href="/profile" data-swap-word>Избранное</a>
-        <a href="/messages" data-swap-word>Сообщения</a>
         <a href="/premium" data-swap-word>Premium</a>
     </nav>
     <div class="header-account">
-        <a href="/profile" class="header-avatar" id="header-avatar" title="{{.Username}}"><span id="header-avatar-initial">{{initial .Username}}</span><span class="header-friend-badge" id="header-friend-badge" hidden>0</span></a>
-        <a href="/logout" class="header-logout" title="Выйти" data-swap-word>Выход</a>
+        <button type="button" class="header-avatar" id="header-avatar" title="{{.Username}}" aria-haspopup="true" aria-expanded="false">
+            <span id="header-avatar-initial">{{initial .Username}}</span>
+            <span class="header-friend-badge" id="header-friend-badge" hidden>0</span>
+        </button>
+        <div class="header-account-menu" id="header-account-menu" hidden>
+            <a href="/profile" class="header-account-menu-item">
+                <span>Личный кабинет</span>
+            </a>
+            <a href="/messages" class="header-account-menu-item">
+                <span>Сообщения</span>
+                <span class="header-account-menu-count" id="header-menu-messages-count" hidden>0</span>
+            </a>
+            <a href="/profile#friend-requests-panel" class="header-account-menu-item">
+                <span>Друзья</span>
+                <span class="header-account-menu-count" id="header-menu-friends-count" hidden>0</span>
+            </a>
+            <a href="/logout" class="header-account-menu-item header-account-menu-logout" data-swap-word>Выход</a>
+        </div>
     </div>
 </header>
 <div id="party-invite-banner" hidden>
@@ -126,7 +141,7 @@
 }
 
 /* ===== Header (авторизованный пользователь), из Figma ===== */
-.header-account { display: flex; align-items: center; gap: 14px; flex-shrink: 0; max-width: 200px; white-space: nowrap; }
+.header-account { display: flex; align-items: center; gap: 14px; flex-shrink: 0; max-width: 200px; white-space: nowrap; position: relative; }
 .header-avatar {
     display: flex;
     align-items: center;
@@ -142,9 +157,70 @@
     transition: opacity 0.2s;
     position: relative;
     overflow: hidden;
+    border: none;
+    padding: 0;
+    cursor: pointer;
 }
 .header-avatar:hover { opacity: 0.85; }
 .header-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
+
+.header-account-menu {
+    /* fixed, не absolute — .header-account держит overflow:hidden ради
+       анимации сворачивания при активном поиске, и обрезал бы абсолютно
+       спозиционированное меню. top/right проставляются в JS от rect
+       аватарки при каждом открытии. */
+    position: fixed;
+    min-width: 220px;
+    display: flex;
+    flex-direction: column;
+    padding: 10px;
+    background: #000;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+    z-index: 1002;
+    /* Скрыто и через [hidden], и через opacity/transform — [hidden] снимается
+       сразу при открытии, а анимация появления/сворачивания идёт по классу
+       .open (transitionend ждём перед повторной простановкой [hidden] в JS). */
+    opacity: 0;
+    transform: translateY(-8px) scaleY(0.96);
+    transform-origin: top right;
+    pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.25s cubic-bezier(0.19, 1, 0.22, 1);
+}
+.header-account-menu.open {
+    opacity: 1;
+    transform: translateY(0) scaleY(1);
+    pointer-events: auto;
+}
+.header-account-menu-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 14px;
+    border-radius: var(--radius-sm);
+    color: var(--color-text);
+    font-family: var(--font-base);
+    font-size: var(--fs-small);
+    text-decoration: none;
+    transition: background 0.15s ease;
+}
+.header-account-menu-item:hover { background: rgba(255, 255, 255, 0.06); }
+.header-account-menu-logout { color: var(--color-gray-300); }
+.header-account-menu-count {
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 10px;
+    background: var(--color-accent);
+    color: #fff;
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.header-account-menu-count[hidden] { display: none; }
 .header-friend-badge {
     /* .header-account (родитель) держит overflow:hidden для анимации
        сворачивания при поиске — бейдж не может вылезать за край аватарки,
@@ -503,6 +579,13 @@
     // сразу по приходу нового сообщения через /ws/dm — иначе счётчик отставал
     // до следующей перезагрузки страницы.
     var badge = document.getElementById('header-friend-badge');
+    var menuMessagesCount = document.getElementById('header-menu-messages-count');
+    var menuFriendsCount = document.getElementById('header-menu-friends-count');
+    function setCount(el, n) {
+        if (!el) return;
+        el.hidden = n === 0;
+        if (n > 0) el.textContent = n > 9 ? '9+' : String(n);
+    }
     // На window — чтобы messages.html мог дёрнуть пересчёт сразу после того,
     // как своей логикой (наведение/появление строки на экране) отметит
     // диалог прочитанным, не дожидаясь следующего dm-пуша.
@@ -517,10 +600,47 @@
             var total = friendRequests + unreadMessages;
             badge.hidden = total === 0;
             if (total > 0) badge.textContent = total > 9 ? '9+' : String(total);
+            setCount(menuMessagesCount, unreadMessages);
+            setCount(menuFriendsCount, friendRequests);
         });
     }
     window.refreshFriendBadge = refreshFriendBadge;
     refreshFriendBadge();
+
+    // Выпадающее меню аккаунта — клик по аватарке вместо перехода на /profile.
+    var accountMenu = document.getElementById('header-account-menu');
+    var avatarBtn = document.getElementById('header-avatar');
+    if (accountMenu && avatarBtn) {
+        function closeMenu() {
+            accountMenu.classList.remove('open');
+            avatarBtn.setAttribute('aria-expanded', 'false');
+            setTimeout(function () { accountMenu.hidden = true; }, 250);
+        }
+        function openMenu() {
+            var rect = avatarBtn.getBoundingClientRect();
+            accountMenu.style.top = (rect.bottom + 10) + 'px';
+            accountMenu.style.right = (window.innerWidth - rect.right) + 'px';
+            accountMenu.hidden = false;
+            // Снять [hidden] и дать браузеру один кадр перед добавлением .open,
+            // иначе transition не сыграет (opacity/transform уже были бы применены).
+            requestAnimationFrame(function () {
+                accountMenu.classList.add('open');
+                avatarBtn.setAttribute('aria-expanded', 'true');
+            });
+        }
+        avatarBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            if (accountMenu.classList.contains('open')) closeMenu(); else openMenu();
+        });
+        document.addEventListener('click', function (e) {
+            if (accountMenu.classList.contains('open') && !accountMenu.contains(e.target) && e.target !== avatarBtn) {
+                closeMenu();
+            }
+        });
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && accountMenu.classList.contains('open')) closeMenu();
+        });
+    }
 
     // Приглашение на синхропросмотр — глобально, видно на любой странице сайта
     // (не только на watch.html конкретной серии). Использует /ws/dm — тот же
