@@ -499,7 +499,19 @@ func gzipMiddleware(next http.Handler) http.Handler {
 		// /static/ уже раздаёт бинарные файлы (картинки/видео) через
 		// http.ServeContent, который поддерживает Range-запросы (перемотка
 		// видео) — gzip-обёртка это сломает, поэтому пропускаем её.
-		if strings.HasPrefix(r.URL.Path, "/static/") || !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+		//
+		// WebSocket-апгрейды (Connection: Upgrade) тоже нужно пропускать не
+		// обёрнутыми: gorilla/websocket требует от http.ResponseWriter
+		// интерфейс http.Hijacker, а gzipResponseWriter его не реализует.
+		// Если клиент шлёт Accept-Encoding: gzip на хендшейк (это делает
+		// Safari, но не все браузеры/клиенты — отсюда нестабильность бага),
+		// апгрейд получал "500 websocket: response does not implement
+		// http.Hijacker" вместо 101 Switching Protocols, и /ws/dm-пуш
+		// (сообщения, приглашения в синхропросмотр) молча переставал
+		// доставляться именно в тех браузерах, что это делают.
+		if strings.HasPrefix(r.URL.Path, "/static/") ||
+			strings.EqualFold(r.Header.Get("Upgrade"), "websocket") ||
+			!strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
 			next.ServeHTTP(w, r)
 			return
 		}
