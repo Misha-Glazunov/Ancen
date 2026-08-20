@@ -27,7 +27,7 @@ groups:
             model:
               refId: C
               type: threshold
-              expr: ""
+              expression: A
               conditions:
                 - evaluator:
                     type: gt
@@ -62,7 +62,7 @@ groups:
             model:
               refId: C
               type: threshold
-              expr: ""
+              expression: A
               conditions:
                 - evaluator:
                     type: gt
