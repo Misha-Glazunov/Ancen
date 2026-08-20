@@ -751,6 +751,8 @@
                     alert('Пригласить можно только друга — сначала добавьте его в друзья и дождитесь принятия заявки');
                 } else if (msg.reason === 'offline') {
                     alert((partyPeerName || 'Друг') + ' сейчас не в сети');
+                } else if (msg.reason === 'premium_required') {
+                    alert('Синхропросмотр доступен только с Premium');
                 } else {
                     alert('Не удалось отправить приглашение');
                 }

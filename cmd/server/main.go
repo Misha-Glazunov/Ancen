@@ -2900,11 +2900,23 @@ func deleteUserData(userID int) error {
 	tables := []string{
 		"emotions", "comments", "user_xp", "user_xp_daily",
 		"user_achievements", "user_progress", "password_resets", "refresh_tokens",
+		"favorites", "favorite_episodes", "comment_likes", "user_daily_visits",
 	}
 	for _, table := range tables {
 		if _, err := tx.Exec("DELETE FROM "+table+" WHERE user_id = ?", userID); err != nil {
 			return err
 		}
+	}
+	// Пары столбцов — таблицы, где пользователь может быть любой из двух сторон
+	for _, cols := range [][2]string{{"friendships", "requester_id"}, {"friendships", "addressee_id"}, {"messages", "sender_id"}, {"messages", "recipient_id"}} {
+		if _, err := tx.Exec("DELETE FROM "+cols[0]+" WHERE "+cols[1]+" = ?", userID); err != nil {
+			return err
+		}
+	}
+	// admin_visits.user_id — nullable, без FK на users, но всё равно персональные
+	// данные (лог посещений) — обезличиваем вместо удаления строк лога целиком.
+	if _, err := tx.Exec("UPDATE admin_visits SET user_id = NULL WHERE user_id = ?", userID); err != nil {
+		return err
 	}
 	if _, err := tx.Exec("DELETE FROM users WHERE id = ?", userID); err != nil {
 		return err
@@ -3337,6 +3349,12 @@ func pushToUser(userID int, msg WsMessage) bool {
 func handlePartyMessage(msg WsMessage, senderID int, senderUsername string) {
 	switch msg.Type {
 	case "party_invite":
+		// Синхропросмотр — Premium-перк (см. 18_Монетизация_и_уровни.md),
+		// гейтится по инициатору звонка, а не по приглашённому.
+		if !isPremiumUser(senderID) {
+			sendToUser(senderID, WsMessage{Type: "party_invite_failed", TargetUserID: msg.TargetUserID, Reason: "premium_required"})
+			return
+		}
 		// Приглашать можно только друга — переиспользуем уже посчитанный
 		// при коннекте client.friendIDs было бы удобнее, но handlePartyMessage
 		// не имеет доступа к конкретному *Client отправителя, поэтому здесь
@@ -4018,6 +4036,11 @@ func apiVoiceCommentPost(w http.ResponseWriter, r *http.Request) {
 	userID, err := getUserIDFromSession(r)
 	if err != nil {
 		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	// Голосовые тикеры — Premium-перк (см. 18_Монетизация_и_уровни.md).
+	if !isPremiumUser(userID) {
+		http.Error(w, `{"error":"Голосовые тикеры доступны только с Premium"}`, http.StatusForbidden)
 		return
 	}
 	if !actionLimiter.allow(fmt.Sprintf("comment:%d", userID), commentRateLimit, commentRateWindow) {
