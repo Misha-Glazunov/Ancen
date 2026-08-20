@@ -160,6 +160,7 @@ services:
       # GRAFANA_DATA_DIR — та же логика, что PROMETHEUS_DATA_DIR выше.
       - ${GRAFANA_DATA_DIR:-./deploy/grafana/data}:/var/lib/grafana
       - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/etc/grafana/dashboards:ro
     ports:
       - "3000:3000"
     depends_on:
