@@ -4906,14 +4906,19 @@ func adminDashboardHandler(w http.ResponseWriter, r *http.Request) {
 	overallPercent /= len(stats)
 
 	// Визиты и средняя сессия по дням за последние 14 дней — для линейных графиков.
+	// Соединение с БД открыто с parseTime=true (см. sql.Open в main()) — MySQL-драйвер
+	// возвращает DATE(...)-колонки как time.Time, а не []byte/string. Scan в *string
+	// в таком случае молча возвращает ошибку на КАЖДОЙ строке (без parseTime было бы
+	// наоборот) — карта дней оставалась пустой, из-за чего visits14/sessions14 всегда
+	// уходили в JS-фоллбэк с тестовыми числами, даже когда в БД реальные визиты были.
 	visitsByDay := make(map[string]int)
 	if rows, err := db.Query(`SELECT DATE(created_at) d, COUNT(*) c FROM admin_visits
 		WHERE created_at >= NOW() - INTERVAL 14 DAY GROUP BY d`); err == nil {
 		for rows.Next() {
-			var d string
+			var d time.Time
 			var c int
 			if rows.Scan(&d, &c) == nil {
-				visitsByDay[d] = c
+				visitsByDay[d.Format("2006-01-02")] = c
 			}
 		}
 		rows.Close()
@@ -4925,10 +4930,10 @@ func adminDashboardHandler(w http.ResponseWriter, r *http.Request) {
 		GROUP BY session_id, d HAVING COUNT(*) > 1
 	) t GROUP BY d`); err == nil {
 		for rows.Next() {
-			var d string
+			var d time.Time
 			var m float64
 			if rows.Scan(&d, &m) == nil {
-				sessionByDay[d] = m
+				sessionByDay[d.Format("2006-01-02")] = m
 			}
 		}
 		rows.Close()
