@@ -1102,13 +1102,18 @@ func getUserAchievements(userID int) []UserAchievement {
 	}
 	defer rows.Close()
 
+	// unlocked_at сканировался в string при parseTime=true (см. фикс visits14/
+	// sessions14 в adminDashboardHandler) — сам разблокирован/заблокирован статус
+	// это не ломало (ключ карты ниже — achievement_id, не дата), но UnlockedAt
+	// приходил в сыром RFC3339 ("2026-08-16T00:00:00Z") вместо читаемой даты.
 	unlocked := make(map[string]string)
 	for rows.Next() {
-		var id, unlockedAt string
+		var id string
+		var unlockedAt time.Time
 		if err := rows.Scan(&id, &unlockedAt); err != nil {
 			continue
 		}
-		unlocked[id] = unlockedAt
+		unlocked[id] = unlockedAt.Format("2006-01-02 15:04:05")
 	}
 
 	var result []UserAchievement
@@ -4907,10 +4912,11 @@ func adminDashboardHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Визиты и средняя сессия по дням за последние 14 дней — для линейных графиков.
 	// Соединение с БД открыто с parseTime=true (см. sql.Open в main()) — MySQL-драйвер
-	// возвращает DATE(...)-колонки как time.Time, а не []byte/string. Scan в *string
-	// в таком случае молча возвращает ошибку на КАЖДОЙ строке (без parseTime было бы
-	// наоборот) — карта дней оставалась пустой, из-за чего visits14/sessions14 всегда
-	// уходили в JS-фоллбэк с тестовыми числами, даже когда в БД реальные визиты были.
+	// возвращает DATE(...)-колонки как time.Time. Scan в *string при этом НЕ падает
+	// с ошибкой (конвертирует в RFC3339, напр. "2026-08-16T00:00:00Z"), поэтому баг
+	// был тихим: карта заполнялась ключами не в том формате, что при обратном
+	// поиске (time.Format("2006-01-02")) — совпадений не было никогда, visits14/
+	// sessions14 оставались нулевыми и уходили в JS-фоллбэк с тестовыми числами.
 	visitsByDay := make(map[string]int)
 	if rows, err := db.Query(`SELECT DATE(created_at) d, COUNT(*) c FROM admin_visits
 		WHERE created_at >= NOW() - INTERVAL 14 DAY GROUP BY d`); err == nil {
