@@ -110,7 +110,7 @@ services:
   # Метрики MySQL — креды берёт из корневого .env (те же DB_USER/DB_PASS,
   # что и app), не отдельный секрет.
   mysqld-exporter:
-    image: prom/mysqld-exporter:v0.15.1
+    image: prom/mysqld-exporter:v0.14.0
     restart: unless-stopped
     environment:
       DATA_SOURCE_NAME: "${DB_USER}:${DB_PASS}@tcp(mysql:3306)/"
