@@ -2,15 +2,40 @@ apiVersion: 1
 
 # Скопировать в contactpoints.yml (без .example) и подставить реальные
 # значения — сам contactpoints.yml гитигнорится (секрет, как .env-файлы).
-# bottoken/chatid — из @BotFather и https://api.telegram.org/bot<TOKEN>/getUpdates
+#
+# MAX Bot API не входит в список встроенных интеграций Grafana — заведён
+# через generic "webhook" контакт (custom payload + headers, появились в
+# Grafana 12.0/12.1, поэтому образ grafana поднят до 13.x в docker-compose.yml).
+#
+# MAX требует токен именно в заголовке Authorization: "<token>" (без схемы
+# "Bearer "), а Grafana жёстко блокирует ручную установку заголовка
+# Authorization через extraHeaders/"headers" (см. restrictedHeaders в
+# github.com/grafana/alerting/receivers/webhook/v1). Обход — единственный
+# доступный: authorization_scheme = один пробел, тогда итоговый заголовок
+# "  <token>" (два ведущих пробела из "%s %s"-склейки), а любой RFC7230-
+# совместимый HTTP-парсер (в т.ч. у MAX) обрезает ведущий OWS при разборе
+# заголовка — на стороне сервера значение приходит уже без пробелов.
+# ponytail: заголовок с ведущими пробелами — не единственный правильный
+# путь (в API появится нативный тип "max", когда/если Grafana его добавит),
+# но рабочий и не требует отдельного прокси-сервиса.
+#
+# token — из @MasterBot в MAX ("/create")
+# user_id — свой numeric id, из GET https://platform-api2.max.ru/updates
+#           (Authorization: <token>) после того, как боту написали любое сообщение
 contactPoints:
   - orgId: 1
-    name: telegram
+    name: max
     receivers:
-      - uid: telegram-default
-        type: telegram
+      - uid: max-default
+        type: webhook
         settings:
-          bottoken: "REPLACE_ME_BOT_TOKEN"
-          chatid: "REPLACE_ME_CHAT_ID"
-          parse_mode: "HTML"
+          url: "https://platform-api2.max.ru/messages?user_id=REPLACE_ME_USER_ID"
+          httpMethod: POST
+          authorization_scheme: " "
+          authorization_credentials: "REPLACE_ME_BOT_TOKEN"
+          headers:
+            Content-Type: "application/json"
+          payload:
+            template: |
+              {"text": "{{ .CommonAnnotations.summary }}"}
         disableResolveMessage: false

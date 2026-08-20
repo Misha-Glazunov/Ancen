@@ -152,7 +152,9 @@ services:
       - mysqld-exporter
 
   grafana:
-    image: grafana/grafana:11.2.0
+    # 13.x (не 11.2.0) — нужны extra headers/custom payload в webhook-контакте
+    # (новое в 12.0/12.1), без них не завести алерты в MAX (см. rules.yml).
+    image: grafana/grafana:13.1.4
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
