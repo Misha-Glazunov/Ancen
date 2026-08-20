@@ -220,10 +220,12 @@
             border-radius: var(--radius-lg);
             box-shadow: 0 30px 100px 15px #d82d7e;
         }
-        .hero-rail li {
+        .hero-rail li a {
             display: flex;
             align-items: center;
             gap: 18px;
+            color: inherit;
+            text-decoration: none;
         }
         .hero-rail .num {
             font-family: var(--font-base);
@@ -533,6 +535,8 @@
             align-self: center;
             cursor: pointer;
         }
+        .feedback-status { margin: 0; text-align: center; color: #6fcf97; }
+        .feedback-status.error { color: #eb5757; }
 
         @media (max-width: 900px) {
             .hero-featured, .catalog, .about-section { margin-left: 20px; margin-right: 20px; }
@@ -638,106 +642,45 @@
 
         <!-- ===== Hero: featured anime (текст поверх картинки) + рейка "смотрите также" ===== -->
         <section class="hero-featured">
+            {{if .NewAnime}}
             <div class="hero-featured-col" data-animate id="new-anime">
                 <span class="hero-caption">🪄 Новое</span>
                 <div class="hero-featured-visual">
-                                        <div class="hero-slide active" style="background-image: url('/static/img/home/hero_banner.jpg')">
+                    {{range $i, $a := .NewAnime}}
+                    <div class="hero-slide{{if eq $i 0}} active{{end}}" style="background-image: url('{{$a.Banner}}')">
                         <div class="hero-featured-content">
-                            <h1>Demon Slayer</h1>
-                            <span class="genre-tag">Приключение / драма</span>
-                            <p class="description">Это аниме, основанное на манге Коёхару Готогэ, рассказывающее о подростке по имени Тандзиро Камадо, который становится истребителем демонов после того, как его семья была убита демоном.</p>
+                            <h1>{{$a.Title}}</h1>
+                            {{if $a.Genres}}<span class="genre-tag">{{$a.Genres}}</span>{{end}}
+                            <p class="description">{{$a.Description}}</p>
                             <div>
-                                <a href="/anime/1" class="cta">Смотреть аниме</a>
+                                <a href="/anime/{{$a.ID}}" class="cta">Смотреть аниме</a>
                             </div>
                         </div>
                         <ul class="hero-dots">
-                            <li class="active" data-slide="0"></li>
-                            <li data-slide="1"></li>
-                            <li data-slide="2"></li>
-                            <li data-slide="3"></li>
+                            {{range $j, $b := $.NewAnime}}<li{{if eq $j $i}} class="active"{{end}} data-slide="{{$j}}"></li>{{end}}
                         </ul>
                     </div>
-                    <div class="hero-slide" style="background-image: url('/static/img/home/catalog_1_1.jpg')">
-                        <div class="hero-featured-content">
-                            <h1>Ван-пис</h1>
-                            <span class="genre-tag">Приключение / драма</span>
-                            <p class="description">История Монки Д. Луффи и его команды пиратов, отправившихся на поиски величайшего сокровища в мире — Ван-Писа, чтобы найти его и стать новым королём пиратов.</p>
-                            <div>
-                                <a href="/anime/2" class="cta">Смотреть аниме</a>
-                            </div>
-                        </div>
-                        <ul class="hero-dots">
-                            <li data-slide="0"></li>
-                            <li class="active" data-slide="1"></li>
-                            <li data-slide="2"></li>
-                            <li data-slide="3"></li>
-                        </ul>
-                    </div>
-                    <div class="hero-slide" style="background-image: url('/static/img/home/catalog_1_2.jpg')">
-                        <div class="hero-featured-content">
-                            <h1>Легенда о героях галактики</h1>
-                            <span class="genre-tag">Приключение / драма</span>
-                            <p class="description">Эпическая космическая опера о противостоянии двух держав — Империи и Альянса Свободных Планет — и о полководцах, чьи решения меняют ход истории целой галактики.</p>
-                            <div>
-                                <a href="/anime/3" class="cta">Смотреть аниме</a>
-                            </div>
-                        </div>
-                        <ul class="hero-dots">
-                            <li data-slide="0"></li>
-                            <li data-slide="1"></li>
-                            <li class="active" data-slide="2"></li>
-                            <li data-slide="3"></li>
-                        </ul>
-                    </div>
-                    <div class="hero-slide" style="background-image: url('/static/img/home/catalog_1_3.jpg')">
-                        <div class="hero-featured-content">
-                            <h1>Охотник и Охотник</h1>
-                            <span class="genre-tag">Приключение / драма</span>
-                            <p class="description">Юный Гон Фрикс отправляется сдавать экзамен на охотника, чтобы найти своего отца и раскрыть тайны огромного мира, полного опасностей и удивительных способностей.</p>
-                            <div>
-                                <a href="/anime/4" class="cta">Смотреть аниме</a>
-                            </div>
-                        </div>
-                        <ul class="hero-dots">
-                            <li data-slide="0"></li>
-                            <li data-slide="1"></li>
-                            <li data-slide="2"></li>
-                            <li class="active" data-slide="3"></li>
-                        </ul>
-                    </div>
+                    {{end}}
                 </div>
             </div>
+            {{end}}
 
+            {{if .TrendingToday}}
             <div class="hero-rail-col" data-animate id="popular-anime">
                 <span class="hero-caption">🔥 Обсуждаемые сегодня</span>
                 <ul class="hero-rail">
-                                        <li>
-                        <span class="num">01</span>
-                        <img src="/static/img/home/carousel_thumb_1.png" alt="Тетрадь смерти">
-                        <div><span class="title">Тетрадь смерти</span><span class="year">2006</span></div>
-                    </li>
+                    {{range .TrendingToday}}
                     <li>
-                        <span class="num">02</span>
-                        <img src="/static/img/home/carousel_thumb_2.png" alt="Атака титанов">
-                        <div><span class="title">Атака титанов</span><span class="year">2013 - 2023</span></div>
+                        <a href="/anime/{{.ID}}">
+                            <span class="num">{{.Rank}}</span>
+                            <img src="{{.Poster}}" alt="{{.Title}}">
+                            <div><span class="title">{{.Title}}</span><span class="year">{{.Year}}</span></div>
+                        </a>
                     </li>
-                    <li>
-                        <span class="num">03</span>
-                        <img src="/static/img/home/carousel_thumb_3.png" alt="Гинтама">
-                        <div><span class="title">Гинтама</span><span class="year">2005 - 2021</span></div>
-                    </li>
-                    <li>
-                        <span class="num">04</span>
-                        <img src="/static/img/home/carousel_thumb_4.png" alt="Монстр">
-                        <div><span class="title">Монстр</span><span class="year">2004</span></div>
-                    </li>
-                    <li>
-                        <span class="num">05</span>
-                        <img src="/static/img/home/carousel_thumb_4.png" alt="Монстр">
-                        <div><span class="title">Монстр</span><span class="year">2004</span></div>
-                    </li>
+                    {{end}}
                 </ul>
             </div>
+            {{end}}
         </section>
 
         {{if .Username}}
@@ -807,66 +750,13 @@
             </div>
 
             <div class="catalog-grid">
-                <div class="catalog-card" data-animate data-genre="Приключение,Драма">
-                    <img src="/static/img/home/catalog_1_1.jpg" alt="Ван-пис" loading="lazy">
-                    <div class="title">Ван-пис</div>
-                    <span class="genre-tag">Приключение / драма</span>
-                </div>
-                <div class="catalog-card" data-animate data-genre="Драма,Экшен">
-                    <img src="/static/img/home/catalog_1_2.jpg" alt="Легенда о героях галактики" loading="lazy">
-                    <div class="title">Легенда о героях галактики</div>
-                    <span class="genre-tag">Драма / экшен</span>
-                </div>
-                <div class="catalog-card" data-animate data-genre="Приключение,Фэнтези">
-                    <img src="/static/img/home/catalog_1_3.jpg" alt="Охотник и Охотник" loading="lazy">
-                    <div class="title">Охотник и Охотник</div>
-                    <span class="genre-tag">Приключение / фэнтези</span>
-                </div>
-                <div class="catalog-card" data-animate data-genre="Экшен,Фэнтези">
-                    <img src="/static/img/home/catalog_1_4.jpg" alt="Берсерк" loading="lazy">
-                    <div class="title">Берсерк</div>
-                    <span class="genre-tag">Экшен / фэнтези</span>
-                </div>
-                <div class="catalog-card" data-animate data-genre="Комедия,Приключение">
-                    <img src="/static/img/home/catalog_2_1.jpg" alt="Ван-пис" loading="lazy">
-                    <div class="title">Ван-пис</div>
-                    <span class="genre-tag">Комедия / приключение</span>
-                </div>
-                <div class="catalog-card" data-animate data-genre="Драма">
-                    <img src="/static/img/home/catalog_2_2.jpg" alt="Легенда о героях галактики" loading="lazy">
-                    <div class="title">Легенда о героях галактики</div>
-                    <span class="genre-tag">Драма</span>
-                </div>
-                <div class="catalog-card" data-animate data-genre="Приключение,Экшен">
-                    <img src="/static/img/home/catalog_2_3.jpg" alt="Охотник и Охотник" loading="lazy">
-                    <div class="title">Охотник и Охотник</div>
-                    <span class="genre-tag">Приключение / экшен</span>
-                </div>
-                <div class="catalog-card" data-animate data-genre="Экшен,Драма">
-                    <img src="/static/img/home/catalog_2_4.jpg" alt="Берсерк" loading="lazy">
-                    <div class="title">Берсерк</div>
-                    <span class="genre-tag">Экшен / драма</span>
-                </div>
-                <div class="catalog-card" data-animate data-genre="Приключение,Комедия">
-                    <img src="/static/img/home/catalog_3_1.jpg" alt="Ван-пис" loading="lazy">
-                    <div class="title">Ван-пис</div>
-                    <span class="genre-tag">Приключение / комедия</span>
-                </div>
-                <div class="catalog-card" data-animate data-genre="Драма,Фэнтези">
-                    <img src="/static/img/home/catalog_3_2.jpg" alt="Легенда о героях галактики" loading="lazy">
-                    <div class="title">Легенда о героях галактики</div>
-                    <span class="genre-tag">Драма / фэнтези</span>
-                </div>
-                <div class="catalog-card" data-animate data-genre="Приключение,Фэнтези">
-                    <img src="/static/img/home/catalog_3_3.jpg" alt="Охотник и Охотник" loading="lazy">
-                    <div class="title">Охотник и Охотник</div>
-                    <span class="genre-tag">Приключение / фэнтези</span>
-                </div>
-                <div class="catalog-card" data-animate data-genre="Экшен,Фэнтези">
-                    <img src="/static/img/home/catalog_3_4.jpg" alt="Берсерк" loading="lazy">
-                    <div class="title">Берсерк</div>
-                    <span class="genre-tag">Экшен / фэнтези</span>
-                </div>
+                {{range .CatalogAnime}}
+                <a class="catalog-card" data-animate data-genre="{{.Genres}}" href="/anime/{{.ID}}">
+                    <img src="{{.Poster}}" alt="{{.Title}}" loading="lazy">
+                    <div class="title">{{.Title}}</div>
+                    {{if .Genres}}<span class="genre-tag">{{.Genres}}</span>{{end}}
+                </a>
+                {{end}}
             </div>
 
             <a href="/search" class="see-all">Смотреть весь список аниме</a>
@@ -876,12 +766,13 @@
         <section class="feedback">
             <h2>Открыты к вашим предложениям</h2>
             <p>Напишите, что вы хотели бы видеть на сайте, какого функционала не хватает</p>
-            <form class="feedback-form" onsubmit="return false;">
+            <form class="feedback-form" id="feedback-form">
                 <div class="feedback-form-row">
-                    <input type="text" placeholder="Ваше имя">
-                    <input type="text" placeholder="Telegram для связи, чтобы уточнить вашу идею">
+                    <input type="text" name="name" placeholder="Ваше имя">
+                    <input type="text" name="contact" placeholder="Telegram для связи, чтобы уточнить вашу идею">
                 </div>
-                <textarea rows="3" placeholder="Ваше предложение для улучшения"></textarea>
+                <textarea name="message" rows="3" placeholder="Ваше предложение для улучшения" required></textarea>
+                <p class="feedback-status" id="feedback-status" hidden></p>
                 <button type="submit" class="cta">Предложить фичу / сообщить о баге</button>
             </form>
         </section>
@@ -949,6 +840,43 @@
                         var match = genre === 'all' || genres.indexOf(genre) !== -1;
                         card.classList.toggle('filtered-out', !match);
                     });
+                });
+            });
+        })();
+
+        // Форма обратной связи
+        (function () {
+            var form = document.getElementById('feedback-form');
+            if (!form) return;
+            var status = document.getElementById('feedback-status');
+            form.addEventListener('submit', function (e) {
+                e.preventDefault();
+                var fd = new FormData(form);
+                var body = Object.fromEntries(fd.entries());
+                var submitBtn = form.querySelector('button[type="submit"]');
+                submitBtn.disabled = true;
+                fetch('/api/feedback', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                }).then(function (res) {
+                    return res.json().then(function (data) { return { ok: res.ok, data: data }; });
+                }).then(function (result) {
+                    status.hidden = false;
+                    if (result.ok) {
+                        status.textContent = 'Спасибо! Мы получили ваше предложение.';
+                        status.classList.remove('error');
+                        form.reset();
+                    } else {
+                        status.textContent = result.data.error || 'Не удалось отправить, попробуйте позже.';
+                        status.classList.add('error');
+                    }
+                }).catch(function () {
+                    status.hidden = false;
+                    status.textContent = 'Не удалось отправить, попробуйте позже.';
+                    status.classList.add('error');
+                }).finally(function () {
+                    submitBtn.disabled = false;
                 });
             });
         })();

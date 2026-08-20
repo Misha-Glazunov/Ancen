@@ -141,6 +141,9 @@ const (
 
 	forgotPasswordRateLimit  = 3
 	forgotPasswordRateWindow = time.Hour
+
+	feedbackRateLimit  = 3
+	feedbackRateWindow = time.Hour
 )
 
 // emotionPreset — тип реакции. Базовые (MinLevel 1) доступны всем, эксклюзивные
@@ -1474,6 +1477,15 @@ func createTables() {
 			id TINYINT PRIMARY KEY DEFAULT 1,
 			maintenance_mode BOOLEAN NOT NULL DEFAULT 0
 		)`,
+		// Форма обратной связи на главной ("Открыты к вашим предложениям") —
+		// доступна и гостям, поэтому user_id не привязан.
+		`CREATE TABLE IF NOT EXISTS feedback (
+			id INT AUTO_INCREMENT PRIMARY KEY,
+			name VARCHAR(255) DEFAULT '',
+			contact VARCHAR(255) DEFAULT '',
+			message VARCHAR(2000) NOT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
 		`CREATE TABLE IF NOT EXISTS comment_likes (
 			user_id INT NOT NULL,
 			comment_id INT NOT NULL,
@@ -1562,6 +1574,11 @@ func createTables() {
 	if _, err := db.Exec("ALTER TABLE anime ADD COLUMN banner_url VARCHAR(500) DEFAULT ''"); err != nil {
 		log.Printf("ALTER TABLE anime (banner_url) может уже существовать: %v", err)
 	}
+	// Дата выхода (для сортировки блока "Новое" на главной по реальной дате
+	// издания, а не по моменту добавления записи в каталог админом).
+	if _, err := db.Exec("ALTER TABLE anime ADD COLUMN release_date DATE DEFAULT NULL"); err != nil {
+		log.Printf("ALTER TABLE anime (release_date) может уже существовать: %v", err)
+	}
 	// Premium-подписка: без неё реакции/комментарии видны только до текущего прогресса
 	// просмотра (анти-спойлер), см. isPremiumUser/watchedUpToSec
 	if _, err := db.Exec("ALTER TABLE users ADD COLUMN is_premium TINYINT(1) NOT NULL DEFAULT 0"); err != nil {
@@ -1643,6 +1660,86 @@ type recommendedAnimeCard struct {
 	Title  string
 	Poster string
 	Genres string
+}
+
+// newAnimeCard — карточка аниме для hero-карусели "Новое" на главной.
+type newAnimeCard struct {
+	ID          int
+	Title       string
+	Banner      string
+	Genres      string
+	Description string
+}
+
+// getNewAnime — последние по дате выхода (release_date), а не по моменту
+// добавления записи в каталог: админ может залить старое аниме сегодня, это
+// не делает его "новым". Аниме без выставленной даты выхода в блок не
+// попадают (сортировать их было бы всё равно нечем).
+func getNewAnime(limit int) []newAnimeCard {
+	rows, err := db.Query(`
+		SELECT id, title, banner_url, genres, description
+		FROM anime
+		WHERE release_date IS NOT NULL AND banner_url != ''
+		ORDER BY release_date DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		log.Printf("getNewAnime: %v", err)
+		return nil
+	}
+	defer rows.Close()
+
+	var results []newAnimeCard
+	for rows.Next() {
+		var c newAnimeCard
+		if rows.Scan(&c.ID, &c.Title, &c.Banner, &c.Genres, &c.Description) == nil {
+			results = append(results, c)
+		}
+	}
+	return results
+}
+
+// trendingAnimeCard — карточка аниме для рейки "Обсуждаемые сегодня".
+type trendingAnimeCard struct {
+	ID     int
+	Title  string
+	Poster string
+	Year   string
+	Rank   string
+}
+
+// getTrendingToday — топ аниме по реакциям+комментариям за последние 24
+// часа: полностью на статистике, без ручного управления списком.
+func getTrendingToday(limit int) []trendingAnimeCard {
+	rows, err := db.Query(`
+		SELECT a.id, a.title, a.poster_url, a.year
+		FROM anime a
+		JOIN (
+			SELECT e.anime_id, COUNT(*) c FROM emotions em JOIN episodes e ON e.id = em.episode_id
+			WHERE em.created_at >= NOW() - INTERVAL 1 DAY GROUP BY e.anime_id
+			UNION ALL
+			SELECT e.anime_id, COUNT(*) c FROM comments cm JOIN episodes e ON e.id = cm.episode_id
+			WHERE cm.created_at >= NOW() - INTERVAL 1 DAY GROUP BY e.anime_id
+		) t ON t.anime_id = a.id
+		GROUP BY a.id, a.title, a.poster_url, a.year
+		ORDER BY SUM(t.c) DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		log.Printf("getTrendingToday: %v", err)
+		return nil
+	}
+	defer rows.Close()
+
+	var results []trendingAnimeCard
+	for rows.Next() {
+		var c trendingAnimeCard
+		if rows.Scan(&c.ID, &c.Title, &c.Poster, &c.Year) == nil {
+			c.Rank = fmt.Sprintf("%02d", len(results)+1)
+			results = append(results, c)
+		}
+	}
+	return results
 }
 
 // getRecommendedAnime — простая рекомендательная система без ML (решено
@@ -1776,13 +1873,19 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 	data := struct {
 		Title            string
 		Username         string
+		NewAnime         []newAnimeCard
+		TrendingToday    []trendingAnimeCard
 		RecommendedAnime []recommendedAnimeCard
+		CatalogAnime     []recommendedAnimeCard
 		FriendsWatching  []FriendWatchingInfo
 		TopUsers         []TopUserInfo
 	}{
 		Title:            "AniMemory — смотри аниме и делись эмоциями в реальном времени",
 		Username:         currentUsername(r),
+		NewAnime:         getNewAnime(4),
+		TrendingToday:    getTrendingToday(5),
 		RecommendedAnime: getRecommendedAnime(userID, 6),
+		CatalogAnime:     getRecommendedAnimeFallback(12),
 		FriendsWatching:  friendsWatching,
 		TopUsers:         getTopUsers(3),
 	}
@@ -3795,6 +3898,53 @@ type Comment struct {
 	Color        string `json:"color"`
 }
 
+// apiFeedbackPost — POST /api/feedback, форма "Открыты к вашим предложениям"
+// на главной. Доступна гостям (не требует сессии), ограничена по IP.
+func apiFeedbackPost(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	if !actionLimiter.allow("feedback:"+clientIP(r), feedbackRateLimit, feedbackRateWindow) {
+		http.Error(w, `{"error":"Слишком много обращений подряд, попробуйте позже"}`, http.StatusTooManyRequests)
+		return
+	}
+	var req struct {
+		Name    string `json:"name"`
+		Contact string `json:"contact"`
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"Invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+	req.Message = strings.TrimSpace(req.Message)
+	if req.Message == "" {
+		http.Error(w, `{"error":"Сообщение не может быть пустым"}`, http.StatusBadRequest)
+		return
+	}
+	if len(req.Name) > 255 {
+		req.Name = req.Name[:255]
+	}
+	if len(req.Contact) > 255 {
+		req.Contact = req.Contact[:255]
+	}
+	if len(req.Message) > 2000 {
+		req.Message = req.Message[:2000]
+	}
+	req.Name = strings.ReplaceAll(strings.ReplaceAll(req.Name, "<", "&lt;"), ">", "&gt;")
+	req.Contact = strings.ReplaceAll(strings.ReplaceAll(req.Contact, "<", "&lt;"), ">", "&gt;")
+	req.Message = strings.ReplaceAll(strings.ReplaceAll(req.Message, "<", "&lt;"), ">", "&gt;")
+
+	if _, err := db.Exec("INSERT INTO feedback (name, contact, message) VALUES (?, ?, ?)",
+		req.Name, req.Contact, req.Message); err != nil {
+		http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
 func apiCommentPost(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if r.Method != http.MethodPost {
@@ -5419,12 +5569,17 @@ func adminAnimeDetailHandler(w http.ResponseWriter, r *http.Request) {
 		Studio      string
 		Author      string
 		Director    string
+		ReleaseDate string
 	}
 	var a animeDetail
+	var releaseDate sql.NullTime
 	err = db.QueryRow(`
-		SELECT id, title, description, poster_url, banner_url, genres, year, country, source_type, studio, author, director
+		SELECT id, title, description, poster_url, banner_url, genres, year, country, source_type, studio, author, director, release_date
 		FROM anime WHERE id = ?
-	`, animeID).Scan(&a.ID, &a.Title, &a.Description, &a.Poster, &a.Banner, &a.Genres, &a.Year, &a.Country, &a.SourceType, &a.Studio, &a.Author, &a.Director)
+	`, animeID).Scan(&a.ID, &a.Title, &a.Description, &a.Poster, &a.Banner, &a.Genres, &a.Year, &a.Country, &a.SourceType, &a.Studio, &a.Author, &a.Director, &releaseDate)
+	if releaseDate.Valid {
+		a.ReleaseDate = releaseDate.Time.Format("2006-01-02")
+	}
 	if err == sql.ErrNoRows {
 		http.NotFound(w, r)
 		return
@@ -5480,6 +5635,7 @@ type animeUpsertBody struct {
 	Studio      string `json:"studio"`
 	Author      string `json:"author"`
 	Director    string `json:"director"`
+	ReleaseDate string `json:"release_date"`
 }
 
 // apiAdminAnimeUpsert — POST /api/admin/anime/save. body.ID == 0 создаёт
@@ -5497,11 +5653,16 @@ func apiAdminAnimeUpsert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var releaseDate interface{}
+	if strings.TrimSpace(b.ReleaseDate) != "" {
+		releaseDate = b.ReleaseDate
+	}
+
 	if b.ID == 0 {
 		res, err := db.Exec(`
-			INSERT INTO anime (title, description, poster_url, banner_url, genres, year, country, source_type, studio, author, director)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, b.Title, b.Description, b.Poster, b.Banner, b.Genres, b.Year, b.Country, b.SourceType, b.Studio, b.Author, b.Director)
+			INSERT INTO anime (title, description, poster_url, banner_url, genres, year, country, source_type, studio, author, director, release_date)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, b.Title, b.Description, b.Poster, b.Banner, b.Genres, b.Year, b.Country, b.SourceType, b.Studio, b.Author, b.Director, releaseDate)
 		if err != nil {
 			http.Error(w, `{"error":"ошибка сохранения"}`, http.StatusInternalServerError)
 			return
@@ -5512,9 +5673,9 @@ func apiAdminAnimeUpsert(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = db.Exec(`
-		UPDATE anime SET title=?, description=?, poster_url=?, banner_url=?, genres=?, year=?, country=?, source_type=?, studio=?, author=?, director=?
+		UPDATE anime SET title=?, description=?, poster_url=?, banner_url=?, genres=?, year=?, country=?, source_type=?, studio=?, author=?, director=?, release_date=?
 		WHERE id = ?
-	`, b.Title, b.Description, b.Poster, b.Banner, b.Genres, b.Year, b.Country, b.SourceType, b.Studio, b.Author, b.Director, b.ID)
+	`, b.Title, b.Description, b.Poster, b.Banner, b.Genres, b.Year, b.Country, b.SourceType, b.Studio, b.Author, b.Director, releaseDate, b.ID)
 	if err != nil {
 		http.Error(w, `{"error":"ошибка сохранения"}`, http.StatusInternalServerError)
 		return
@@ -6751,6 +6912,7 @@ func main() {
 	secureHandle("/ws/dm", wsDMHandler)
 	secureHandle("/api/emotions/stats", apiEmotionsStats)
 	secureHandle("/api/comment", apiCommentPost)
+	secureHandle("/api/feedback", apiFeedbackPost)
 	secureHandle("/api/comment/voice", apiVoiceCommentPost)
 	secureHandle("/api/comments", apiCommentsGet)
 	secureHandle("/api/comments/like", apiCommentLikeToggle)
