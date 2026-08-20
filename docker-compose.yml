@@ -95,15 +95,27 @@ services:
   # снаружи напрямую (провайдер блокирует входящие), доступ только по
   # Tailscale, поэтому порт 3000 открыт напрямую на хосте.
 
-  # Метрики контейнеров (CPU/память/сеть на каждый сервис compose)
+  # Метрики контейнеров (CPU/память/сеть на каждый сервис compose).
+  # ВАЖНО: Docker Desktop (Windows/WSL2) использует containerd-снапшоттер,
+  # из-за которого штатная докер-интеграция cadvisor не может сопоставить
+  # контейнеры ("failed to identify the read-write layer ID" — legacy
+  # overlay2-graphdriver путей просто нет). Обход — говорить с containerd
+  # напрямую (-containerd + -docker_only=true), проверено вживую 2026-08-20.
+  # Метки контейнеров при этом приходят как "image", не "name" (id — хеш).
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.49.1
     restart: unless-stopped
+    privileged: true
+    command:
+      - -docker_only=true
+      - -containerd=/run/containerd/containerd.sock
+      - -containerd-namespace=moby
     volumes:
       - /:/rootfs:ro
       - /var/run:/var/run:ro
       - /sys:/sys:ro
       - /var/lib/docker/:/var/lib/docker:ro
+      - /run/containerd/containerd.sock:/run/containerd/containerd.sock:ro
     expose:
       - "8080"
 

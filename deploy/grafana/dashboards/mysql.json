@@ -1,0 +1,93 @@
+{
+  "title": "Ancen — MySQL",
+  "uid": "ancen-mysql",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "MySQL доступен",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ]
+        },
+        "overrides": []
+      },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "mysql_up" }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Открытые соединения",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 9, "w": 12, "x": 6, "y": 0 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "mysql_global_status_threads_connected",
+          "legendFormat": "connected"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "mysql_global_variables_max_connections",
+          "legendFormat": "max_connections"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Аптайм",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "mysql_global_status_uptime" }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Запросы в секунду",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 9 },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(mysql_global_status_queries[5m])",
+          "legendFormat": "queries/s"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(mysql_global_status_slow_queries[5m])",
+          "legendFormat": "slow queries/s"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "InnoDB buffer pool — использование, %",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 9 },
+      "fieldConfig": { "defaults": { "unit": "percent", "max": 100, "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "mysql_global_status_buffer_pool_pages{state=\"data\"} / sum(mysql_global_status_buffer_pool_pages) * 100",
+          "legendFormat": "used"
+        }
+      ]
+    }
+  ]
+}
