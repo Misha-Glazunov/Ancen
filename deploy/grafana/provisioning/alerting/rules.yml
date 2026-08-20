@@ -1,0 +1,77 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: infra-down
+    folder: Ancen
+    interval: 1m
+    rules:
+      - uid: target-down
+        title: "Prometheus target недоступен"
+        condition: C
+        for: 2m
+        noDataState: OK
+        execErrState: Alerting
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: up == 0
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expr: ""
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: ["A"]
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }} ({{ $labels.instance }}) не отвечает Prometheus'у"
+
+      - uid: mysql-down
+        title: "MySQL недоступен"
+        condition: C
+        for: 1m
+        noDataState: OK
+        execErrState: Alerting
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: mysql_up == 0
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expr: ""
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: ["A"]
+        labels:
+          severity: critical
+        annotations:
+          summary: "mysqld-exporter не может достучаться до MySQL"

@@ -29,6 +29,7 @@ deploy:
     - Copy-Item "C:\Users\mishg\Desktop\Ancen\.env" ".env" -Force
     - Copy-Item "C:\Users\mishg\Desktop\Ancen\deploy\mysql\.env" "deploy\mysql\.env" -Force
     - Copy-Item "C:\Users\mishg\Desktop\Ancen\deploy\minio\.env" "deploy\minio\.env" -Force
+    - Copy-Item "C:\Users\mishg\Desktop\Ancen\deploy\grafana\provisioning\alerting\contactpoints.yml" "deploy\grafana\provisioning\alerting\contactpoints.yml" -Force
     - docker build -t ancen-app:latest .
     - docker compose up -d
     - docker restart ancen-nginx-1

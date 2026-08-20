@@ -30,6 +30,9 @@ deploy/mysql/data/
 deploy/minio/data/
 deploy/backup/tmp/
 
+# Grafana Telegram-бот для алертов (bot token) — секрет, только .example в git
+deploy/grafana/provisioning/alerting/contactpoints.yml
+
 # Claude Code / claude-flow tool state (belongs one level up, in Ancen_web/)
 /.claude/
 .claude-flow/
