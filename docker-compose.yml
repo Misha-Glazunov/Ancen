@@ -100,7 +100,13 @@ services:
   # из-за которого штатная докер-интеграция cadvisor не может сопоставить
   # контейнеры ("failed to identify the read-write layer ID" — legacy
   # overlay2-graphdriver путей просто нет). Обход — говорить с containerd
-  # напрямую (-containerd + -docker_only=true), проверено вживую 2026-08-20.
+  # напрямую (-containerd), проверено вживую 2026-08-20. НЕ монтируем
+  # /var/run целиком (там лежит docker.sock) — если cadvisor видит и
+  # docker.sock, и containerd.sock, оба фактори регистрируются и порядок
+  # между ними произвольный (рандомизация Go при старте), из-за чего
+  # docker-фактори иногда "побеждает" за контейнер и падает с той же
+  # ошибкой. Без docker.sock регистрация docker-фактори гарантированно
+  # проваливается, остаётся только containerd — детерминированно.
   # Метки контейнеров при этом приходят как "image", не "name" (id — хеш).
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.49.1
@@ -112,7 +118,6 @@ services:
       - -containerd-namespace=moby
     volumes:
       - /:/rootfs:ro
-      - /var/run:/var/run:ro
       - /sys:/sys:ro
       - /var/lib/docker/:/var/lib/docker:ro
       - /run/containerd/containerd.sock:/run/containerd/containerd.sock:ro
