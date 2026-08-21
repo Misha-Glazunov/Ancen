@@ -112,7 +112,7 @@
             }
             let html = (conversations || []).map(c => `
                 <div class="conv-item${c.user_id === activeWithID ? ' active' : ''}" data-user-id="${c.user_id}" data-username="${escapeHtml(c.username)}">
-                    ${c.avatar_url ? `<img src="${c.avatar_url}" alt="">` : `<span class="initial">${escapeHtml((c.username||'?')[0])}</span>`}
+                    ${c.avatar_url ? `<img src="${c.avatar_url}" alt="" loading="lazy">` : `<span class="initial">${escapeHtml((c.username||'?')[0])}</span>`}
                     <div class="meta">
                         <div class="name"><span>${escapeHtml(c.username)}</span>${c.unread_count ? `<span class="unread-badge">${c.unread_count > 9 ? '9+' : c.unread_count}</span>` : ''}</div>
                         <div class="last">${escapeHtml(c.last_text || '')}</div>

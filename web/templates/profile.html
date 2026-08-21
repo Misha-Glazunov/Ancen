@@ -585,7 +585,7 @@
                     {{range .FavoriteAnime}}
                     <div class="catalog-card-wrap">
                         <a href="/anime/{{.AnimeID}}" class="catalog-card">
-                            <img src="{{.Poster}}" alt="{{.Title}}">
+                            <img src="{{.Poster}}" alt="{{.Title}}" loading="lazy">
                             <div class="title">{{.Title}}</div>
                         </a>
                         <button type="button" class="card-remove" data-remove-anime="{{.AnimeID}}" aria-label="Убрать из избранного">×</button>
@@ -607,7 +607,7 @@
                 <div class="friends-list">
                     {{range .PendingRequests}}
                     <div class="friend-item request-item" data-request-id="{{.RequestID}}">
-                        <div class="friend-avatar">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="{{.Username}}">{{else}}{{initial .Username}}{{end}}</div>
+                        <div class="friend-avatar">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="{{.Username}}" loading="lazy">{{else}}{{initial .Username}}{{end}}</div>
                         <div style="flex:1;">
                             <div class="friend-name">{{.Username}}</div>
                             <span class="friend-level">Уровень <b>{{.Level}}</b></span>
@@ -629,7 +629,7 @@
                     {{range $i, $f := .Friends}}
                     <div class="friend-item{{if ge $i 6}} friend-extra{{end}}" data-friend-id="{{$f.UserID}}"{{if ge $i 6}} hidden{{end}}>
                         <a class="friend-item-link" href="/profile/{{$f.Username}}">
-                            <div class="friend-avatar" style="border-color: {{$f.AvatarFrameColor}}">{{if $f.AvatarURL}}<img src="{{$f.AvatarURL}}" alt="{{$f.Username}}">{{else}}{{initial $f.Username}}{{end}}</div>
+                            <div class="friend-avatar" style="border-color: {{$f.AvatarFrameColor}}">{{if $f.AvatarURL}}<img src="{{$f.AvatarURL}}" alt="{{$f.Username}}" loading="lazy">{{else}}{{initial $f.Username}}{{end}}</div>
                             <div>
                                 <div class="friend-name">{{$f.Username}}</div>
                                 <span class="friend-level">Уровень <b>{{$f.Level}}</b></span>

@@ -623,7 +623,7 @@
                         {{range $i, $u := .TopUsers}}
                         <li>
                             <a href="/profile/{{$u.Username}}" class="top-user-link">
-                                {{if $u.AvatarURL}}<img src="{{$u.AvatarURL}}" alt="{{$u.Username}}">{{else}}<span class="top-user-initial">{{slice $u.Username 0 1}}</span>{{end}}
+                                {{if $u.AvatarURL}}<img src="{{$u.AvatarURL}}" alt="{{$u.Username}}" loading="lazy">{{else}}<span class="top-user-initial">{{slice $u.Username 0 1}}</span>{{end}}
                                 <div><span class="place">{{if eq $i 0}}🥇{{else if eq $i 1}}🥈{{else}}🥉{{end}} {{add $i 1}} место</span><span>{{$u.Username}}</span></div>
                             </a>
                         </li>
@@ -673,7 +673,7 @@
                     <li>
                         <a href="/anime/{{.ID}}">
                             <span class="num">{{.Rank}}</span>
-                            <img src="{{.Poster}}" alt="{{.Title}}">
+                            <img src="{{.Poster}}" alt="{{.Title}}" loading="lazy">
                             <div><span class="title">{{.Title}}</span><span class="year">{{.Year}}</span></div>
                         </a>
                     </li>
@@ -689,7 +689,7 @@
             <h2>Продолжить просмотр</h2>
             <div class="continue-watching-grid">
                 <a class="catalog-card" data-animate href="/anime/1">
-                    <img src="/static/img/home/carousel_thumb_1.png" alt="Тетрадь смерти">
+                    <img src="/static/img/home/carousel_thumb_1.png" alt="Тетрадь смерти" loading="lazy">
                     <div class="title">Тетрадь смерти</div>
                     <span class="genre-tag">Приключение /драма</span>
                 </a>
@@ -707,7 +707,7 @@
                 {{range .FriendsWatching}}
                 <li>
                     <a href="/watch?episode={{.EpisodeID}}" class="friend-watching-row">
-                        {{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="{{.Username}}">{{else}}<span class="friend-watching-initial">{{slice .Username 0 1}}</span>{{end}}
+                        {{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="{{.Username}}" loading="lazy">{{else}}<span class="friend-watching-initial">{{slice .Username 0 1}}</span>{{end}}
                         <span><strong>{{.Username}}</strong> смотрит «{{.AnimeTitle}}», серия {{.EpisodeNum}}</span>
                     </a>
                 </li>
@@ -725,7 +725,7 @@
             <div class="catalog-grid">
                 {{range .RecommendedAnime}}
                 <a class="catalog-card" data-animate href="/anime/{{.ID}}">
-                    <img src="{{.Poster}}" alt="{{.Title}}">
+                    <img src="{{.Poster}}" alt="{{.Title}}" loading="lazy">
                     <div class="title">{{.Title}}</div>
                     {{if .Genres}}<span class="genre-tag">{{.Genres}}</span>{{end}}
                 </a>
