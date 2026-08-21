@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
@@ -22,6 +23,7 @@ import (
 	"net/smtp"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -29,6 +31,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -7030,6 +7033,38 @@ func main() {
 	secureHandle("/api/favorites/anime", apiFavoriteAnimeToggle)
 	secureHandle("/api/favorites/episode", apiFavoriteEpisodeToggle)
 
-	log.Println("Сервер Ancen запущен на http://localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", gzipMiddleware(http.DefaultServeMux)))
+	http.HandleFunc("/healthz", healthzHandler)
+
+	srv := &http.Server{Addr: ":8080", Handler: gzipMiddleware(http.DefaultServeMux)}
+
+	go func() {
+		log.Println("Сервер Ancen запущен на http://localhost:8080")
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatal(err)
+		}
+	}()
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	<-stop
+	log.Println("Получен сигнал остановки, завершаем текущие запросы...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Println("Ошибка при остановке сервера:", err)
+	}
+	log.Println("Сервер остановлен")
+}
+
+// healthzHandler — для docker-compose healthcheck / внешнего мониторинга.
+// Проверяет саму БД, а не просто "процесс жив" — если MySQL недоступен,
+// сервер всё равно отвечает на HTTP, но реально не работоспособен.
+func healthzHandler(w http.ResponseWriter, r *http.Request) {
+	if err := db.Ping(); err != nil {
+		http.Error(w, "db unreachable", http.StatusServiceUnavailable)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("ok"))
 }

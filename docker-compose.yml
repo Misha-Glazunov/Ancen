@@ -49,6 +49,11 @@ services:
         condition: service_healthy
     expose:
       - "8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # TURN/STUN-сервер для синхропросмотра (WebRTC). ВАЖНО: на домашнем ПК
   # входящие соединения извне блокирует провайдер (см. 22_Доступы_и_секреты
