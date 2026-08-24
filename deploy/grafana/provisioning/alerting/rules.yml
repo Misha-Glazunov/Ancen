@@ -30,8 +30,8 @@ groups:
               expression: A
               conditions:
                 - evaluator:
-                    type: gt
-                    params: [0]
+                    type: lt
+                    params: [1]
                   operator:
                     type: and
                   query:
@@ -65,8 +65,8 @@ groups:
               expression: A
               conditions:
                 - evaluator:
-                    type: gt
-                    params: [0]
+                    type: lt
+                    params: [1]
                   operator:
                     type: and
                   query:
