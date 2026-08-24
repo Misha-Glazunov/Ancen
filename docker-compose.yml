@@ -159,7 +159,12 @@ services:
   grafana:
     # 13.x (не 11.2.0) — нужны extra headers/custom payload в webhook-контакте
     # (новое в 12.0/12.1), без них не завести алерты в MAX (см. rules.yml).
-    image: grafana/grafana:13.1.4
+    # Собственный образ поверх grafana/grafana:13.1.4 — добавляет корневой
+    # сертификат Минцифры (deploy/grafana/ca-certs/), без которого webhook
+    # в MAX API падает с "x509: certificate signed by unknown authority"
+    # (MAX использует российский национальный УЦ, его нет в базовом образе).
+    image: ancen-grafana:13.1.4-max-ca
+    build: ./deploy/grafana
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
