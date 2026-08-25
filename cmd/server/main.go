@@ -2057,7 +2057,7 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 				smtpHost := os.Getenv("SMTP_HOST")
 				smtpPort := os.Getenv("SMTP_PORT")
 				if from != "" && pass != "" {
-					confirmLink := fmt.Sprintf("http://localhost:8080/confirm-email?token=%s", "confirm_"+token)
+					confirmLink := fmt.Sprintf("%s/confirm-email?token=%s", siteBaseURL(), "confirm_"+token)
 					subject := "Subject: Подтверждение почты на AniMemory\r\n"
 					mime := "MIME-version: 1.0;\r\nContent-Type: text/html; charset=\"UTF-8\";\r\n\r\n"
 					body := fmt.Sprintf(`
@@ -4442,6 +4442,16 @@ func sitemapHandler(w http.ResponseWriter, r *http.Request) {
 // ponytail: захардкожено, вынести в конфиг/env, если понадобится другой лимит.
 const maxUploadBytes = 2 << 30 // 2 GiB
 
+// siteBaseURL — базовый URL сайта для ссылок в письмах (подтверждение email,
+// сброс пароля). Задаётся SITE_BASE_URL в .env; без домена (сейчас) остаётся
+// дефолтом для локальной разработки.
+func siteBaseURL() string {
+	if v := os.Getenv("SITE_BASE_URL"); v != "" {
+		return strings.TrimRight(v, "/")
+	}
+	return "http://localhost:8080"
+}
+
 // sniffVideoContainer проверяет первые байты файла на сигнатуру известного
 // видео-контейнера — расширение имени файла легко подделать, а вот magic bytes
 // подделать так, чтобы ffmpeg всё равно смог декодировать файл, уже не тривиально.
@@ -6770,7 +6780,7 @@ func sendPasswordResetEmail(userID int, email string) error {
 	smtpHost := os.Getenv("SMTP_HOST")
 	smtpPort := os.Getenv("SMTP_PORT")
 
-	resetLink := fmt.Sprintf("http://localhost:8080/new-password?token=%s", token)
+	resetLink := fmt.Sprintf("%s/new-password?token=%s", siteBaseURL(), token)
 	subject := "Subject: Смена пароля на AniMemory\r\n"
 	mime := "MIME-version: 1.0;\r\nContent-Type: text/html; charset=\"UTF-8\";\r\n\r\n"
 	body := fmt.Sprintf(`
@@ -6873,7 +6883,7 @@ func forgotPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		smtpHost := os.Getenv("SMTP_HOST")
 		smtpPort := os.Getenv("SMTP_PORT")
 
-		resetLink := fmt.Sprintf("http://localhost:8080/new-password?token=%s", token)
+		resetLink := fmt.Sprintf("%s/new-password?token=%s", siteBaseURL(), token)
 		subject := "Subject: Восстановление пароля на AniMemory\r\n"
 		mime := "MIME-version: 1.0;\r\nContent-Type: text/html; charset=\"UTF-8\";\r\n\r\n"
 		body := fmt.Sprintf(`
