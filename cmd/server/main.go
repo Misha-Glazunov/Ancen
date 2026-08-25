@@ -1422,6 +1422,16 @@ func createTables() {
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY (user_id) REFERENCES users(id)
 		)`,
+		`CREATE TABLE IF NOT EXISTS episode_dubs (
+			id INT AUTO_INCREMENT PRIMARY KEY,
+			episode_id INT NOT NULL,
+			label VARCHAR(100) NOT NULL,
+			video_url VARCHAR(500) NOT NULL DEFAULT '',
+			is_default TINYINT(1) NOT NULL DEFAULT 0,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE KEY uniq_episode_label (episode_id, label),
+			FOREIGN KEY (episode_id) REFERENCES episodes(id)
+		)`,
 		`CREATE TABLE IF NOT EXISTS user_progress (
 			user_id INT NOT NULL,
 			episode_id INT NOT NULL,
@@ -2279,10 +2289,29 @@ func watchHandler(w http.ResponseWriter, r *http.Request) {
 	db.QueryRow(`SELECT id FROM episodes WHERE anime_id = ? AND season = ? AND episode_num > ?
 		ORDER BY episode_num ASC LIMIT 1`, episode.AnimeID, episode.Season, episode.EpisodeNum).Scan(&nextEpisodeID)
 
+	type Dub struct {
+		ID       int
+		Label    string
+		VideoURL string
+	}
+	var dubs []Dub
+	dubRows, err := db.Query(`SELECT id, label, video_url FROM episode_dubs
+		WHERE episode_id = ? ORDER BY is_default DESC, id ASC`, episode.ID)
+	if err == nil {
+		defer dubRows.Close()
+		for dubRows.Next() {
+			var d Dub
+			if dubRows.Scan(&d.ID, &d.Label, &d.VideoURL) == nil {
+				dubs = append(dubs, d)
+			}
+		}
+	}
+
 	data := struct {
 		EpisodeID     int
 		EpisodeNum    int
 		VideoURL      string
+		Dubs          []Dub
 		Title         string
 		UserLevel     UserLevelInfo
 		Username      string
@@ -2306,6 +2335,7 @@ func watchHandler(w http.ResponseWriter, r *http.Request) {
 		EpisodeID:       episode.ID,
 		EpisodeNum:      episode.EpisodeNum,
 		VideoURL:        episode.VideoURL,
+		Dubs:            dubs,
 		Title:           episode.Title,
 		UserLevel:       levelInfo,
 		Username:        currentUsername(r),
@@ -5577,6 +5607,13 @@ type adminEpisodeRow struct {
 	Title      string
 	Poster     string
 	HasVideo   bool
+	Dubs       []adminDubBadge
+}
+
+// adminDubBadge — озвучка эпизода, показывается бейджем в таблице /admin/catalog/anime.
+type adminDubBadge struct {
+	Label    string
+	HasVideo bool
 }
 
 // adminAnimeDetailHandler — GET /admin/catalog/anime?id=. Метаданные аниме
@@ -5626,6 +5663,7 @@ func adminAnimeDetailHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var episodes []adminEpisodeRow
+	episodeIdx := make(map[int]int) // episode_id -> индекс в episodes, для раскладки дублей ниже
 	rows, err := db.Query(`
 		SELECT id, episode_num, season, title, video_url, poster_url
 		FROM episodes WHERE anime_id = ? ORDER BY season, episode_num
@@ -5637,7 +5675,24 @@ func adminAnimeDetailHandler(w http.ResponseWriter, r *http.Request) {
 			var videoURL string
 			if rows.Scan(&e.ID, &e.EpisodeNum, &e.Season, &e.Title, &videoURL, &e.Poster) == nil {
 				e.HasVideo = videoURL != ""
+				episodeIdx[e.ID] = len(episodes)
 				episodes = append(episodes, e)
+			}
+		}
+	}
+	if len(episodes) > 0 {
+		dubRows, err := db.Query(`SELECT episode_id, label, video_url FROM episode_dubs
+			WHERE episode_id IN (SELECT id FROM episodes WHERE anime_id = ?) ORDER BY is_default DESC, id ASC`, animeID)
+		if err == nil {
+			defer dubRows.Close()
+			for dubRows.Next() {
+				var episodeID int
+				var label, videoURL string
+				if dubRows.Scan(&episodeID, &label, &videoURL) == nil {
+					if idx, ok := episodeIdx[episodeID]; ok {
+						episodes[idx].Dubs = append(episodes[idx].Dubs, adminDubBadge{Label: label, HasVideo: videoURL != ""})
+					}
+				}
 			}
 		}
 	}
@@ -6060,6 +6115,10 @@ func adminUploadVideoHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"anime_id, episode_num и title обязательны"}`, http.StatusBadRequest)
 		return
 	}
+	dubLabel := strings.TrimSpace(r.FormValue("dub_label"))
+	if dubLabel == "" {
+		dubLabel = "Оригинал"
+	}
 
 	file, header, err := r.FormFile("video")
 	if err != nil {
@@ -6103,25 +6162,12 @@ func adminUploadVideoHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Транскодирую видео anime_id=%d episode_num=%d...", animeID, episodeNum)
-	if err := transcodeToHLS(inputPath, outDir); err != nil {
-		log.Println("ffmpeg error:", err)
-		http.Error(w, `{"error":"Ошибка транскодирования"}`, http.StatusInternalServerError)
-		return
-	}
-
-	objectPrefix := fmt.Sprintf("anime/%d/episode/%d", animeID, episodeNum)
-	masterURL, err := uploadDir(r.Context(), outDir, objectPrefix)
-	if err != nil {
-		log.Println("MinIO upload error:", err)
-		http.Error(w, `{"error":"Ошибка загрузки в MinIO"}`, http.StatusInternalServerError)
-		return
-	}
-
+	// episodeID/dubID нужны заранее — они входят в objectPrefix, под которым
+	// транскод заливается в MinIO (см. ниже).
 	var episodeID int
 	err = db.QueryRow("SELECT id FROM episodes WHERE anime_id = ? AND episode_num = ?", animeID, episodeNum).Scan(&episodeID)
 	if err == sql.ErrNoRows {
-		res, err := db.Exec("INSERT INTO episodes (anime_id, episode_num, title, video_url) VALUES (?, ?, ?, ?)", animeID, episodeNum, title, masterURL)
+		res, err := db.Exec("INSERT INTO episodes (anime_id, episode_num, title) VALUES (?, ?, ?)", animeID, episodeNum, title)
 		if err != nil {
 			http.Error(w, `{"error":"Ошибка записи в БД"}`, http.StatusInternalServerError)
 			return
@@ -6132,13 +6178,54 @@ func adminUploadVideoHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"Ошибка запроса к БД"}`, http.StatusInternalServerError)
 		return
 	} else {
-		if _, err := db.Exec("UPDATE episodes SET video_url = ?, title = ? WHERE id = ?", masterURL, title, episodeID); err != nil {
+		if _, err := db.Exec("UPDATE episodes SET title = ? WHERE id = ?", title, episodeID); err != nil {
 			http.Error(w, `{"error":"Ошибка обновления БД"}`, http.StatusInternalServerError)
 			return
 		}
 	}
 
-	fmt.Fprintf(w, `{"episode_id":%d,"video_url":%q}`, episodeID, masterURL)
+	// Первая озвучка на эпизод автоматически становится дефолтной.
+	res, err := db.Exec(`INSERT INTO episode_dubs (episode_id, label, is_default)
+		VALUES (?, ?, (SELECT * FROM (SELECT COUNT(*) = 0 FROM episode_dubs WHERE episode_id = ?) t))
+		ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)`, episodeID, dubLabel, episodeID)
+	if err != nil {
+		http.Error(w, `{"error":"Ошибка записи озвучки в БД"}`, http.StatusInternalServerError)
+		return
+	}
+	dubID, _ := res.LastInsertId()
+	var isDefault bool
+	db.QueryRow("SELECT is_default FROM episode_dubs WHERE id = ?", dubID).Scan(&isDefault)
+
+	log.Printf("Транскодирую видео anime_id=%d episode_num=%d dub=%q...", animeID, episodeNum, dubLabel)
+	if err := transcodeToHLS(inputPath, outDir); err != nil {
+		log.Println("ffmpeg error:", err)
+		http.Error(w, `{"error":"Ошибка транскодирования"}`, http.StatusInternalServerError)
+		return
+	}
+
+	objectPrefix := fmt.Sprintf("anime/%d/episode/%d/dub/%d", animeID, episodeNum, dubID)
+	masterURL, err := uploadDir(r.Context(), outDir, objectPrefix)
+	if err != nil {
+		log.Println("MinIO upload error:", err)
+		http.Error(w, `{"error":"Ошибка загрузки в MinIO"}`, http.StatusInternalServerError)
+		return
+	}
+
+	if _, err := db.Exec("UPDATE episode_dubs SET video_url = ? WHERE id = ?", masterURL, dubID); err != nil {
+		http.Error(w, `{"error":"Ошибка обновления БД"}`, http.StatusInternalServerError)
+		return
+	}
+	// episodes.video_url остаётся зеркалом дефолтной озвучки — так читают его
+	// все остальные места (watchHandler-фоллбэк, HasVideo в админке и т.п.),
+	// не завязанные на episode_dubs.
+	if isDefault {
+		if _, err := db.Exec("UPDATE episodes SET video_url = ? WHERE id = ?", masterURL, episodeID); err != nil {
+			http.Error(w, `{"error":"Ошибка обновления БД"}`, http.StatusInternalServerError)
+			return
+		}
+	}
+
+	fmt.Fprintf(w, `{"episode_id":%d,"video_url":%q,"dub_id":%d,"dub_label":%q}`, episodeID, masterURL, dubID, dubLabel)
 }
 
 func logoutHandler(w http.ResponseWriter, r *http.Request) {

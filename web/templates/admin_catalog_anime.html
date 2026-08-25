@@ -45,9 +45,12 @@
   .ep-poster-preview{width:40px;height:56px;border-radius:6px;background:var(--card2) center/cover no-repeat;flex-shrink:0;}
   .ep-video-badge{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);}
   .ep-video-badge.on{color:var(--green);}
+  .ep-dub-badge{display:inline-block;margin:4px 4px 0 0;padding:2px 8px;border-radius:10px;font-size:11px;background:var(--card2);color:var(--muted);}
+  .ep-dub-badge.on{color:var(--green);}
+  .ep-dub-label-input{width:110px;background:var(--card2);border:1px solid rgba(255,255,255,.1);border-radius:6px;color:var(--text);font-size:12px;padding:6px 8px;}
   .ep-upload-progress{width:120px;height:4px;background:var(--card2);border-radius:2px;margin-top:6px;overflow:hidden;}
   .ep-upload-progress-bar{height:100%;width:0%;background:var(--accent);transition:width .2s;}
-  .ep-actions{display:flex;gap:8px;white-space:nowrap;}
+  .ep-actions{display:flex;gap:8px;white-space:nowrap;align-items:center;}
   .ep-upload-btn{margin:0;}
   .ep-upload-btn.is-disabled{opacity:.4;pointer-events:none;}
   .empty-row td{text-align:center;color:var(--muted);padding:30px;}
@@ -172,8 +175,10 @@
               <td>
                 <span class="ep-video-badge{{if .HasVideo}} on{{end}}">{{if .HasVideo}}● загружено{{else}}○ нет видео{{end}}</span>
                 <div class="ep-upload-progress" hidden><div class="ep-upload-progress-bar"></div></div>
+                {{range .Dubs}}<span class="ep-dub-badge{{if .HasVideo}} on{{end}}">{{.Label}}</span>{{end}}
               </td>
               <td class="ep-actions">
+                <input type="text" class="ep-dub-label-input" placeholder="Оригинал">
                 <label class="btn-ghost-sm ep-upload-btn">
                   {{if .HasVideo}}Заменить видео{{else}}Загрузить видео{{end}}
                   <input type="file" accept="video/*" class="ep-upload-input" hidden>
@@ -421,10 +426,13 @@
     const progressBar = row.querySelector('.ep-upload-progress-bar');
     const uploadLabel = row.querySelector('.ep-upload-btn');
 
+    const dubLabelInput = row.querySelector('.ep-dub-label-input');
+
     const fd = new FormData();
     fd.append('anime_id', String(animeID));
     fd.append('episode_num', episodeNum);
     fd.append('title', title);
+    fd.append('dub_label', dubLabelInput.value.trim());
     fd.append('video', file);
 
     uploadLabel.classList.add('is-disabled');
@@ -448,9 +456,10 @@
         alert(data.error || 'Ошибка загрузки видео');
         return;
       }
-      badge.textContent = '● загружено';
-      badge.classList.add('on');
-      uploadLabel.childNodes[0].textContent = 'Заменить видео';
+      // Полная перезагрузка страницы, а не точечное обновление бейджа — проще
+      // отрисовать список озвучек заново, чем дублировать эту логику в JS
+      // (страница админская, загрузки нечастые, лишний reload не критичен).
+      location.reload();
     };
     xhr.onerror = () => {
       progressWrap.hidden = true;

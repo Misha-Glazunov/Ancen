@@ -478,6 +478,40 @@
         });
 
         player.controlBar.el().appendChild(select);
+
+        // Селектор озвучки — в отличие от качества (один master.m3u8, разные
+        // битрейты внутри), каждая озвучка — отдельная HLS-раздача, поэтому
+        // переключение идёт через player.src(), а не через qualityLevels.
+        var dubs = [{{range .Dubs}}{id: {{.ID}}, label: {{.Label}}, url: {{.VideoURL}}},{{end}}];
+        if (dubs.length > 1) {
+            var dubSelect = document.createElement('select');
+            dubSelect.className = 'vjs-dub-selector';
+            dubSelect.style.cssText = 'background:#000;color:#fff;border:none;height:3em;cursor:pointer;font-size:1em;';
+            dubs.forEach(function (d) {
+                var opt = document.createElement('option');
+                opt.value = String(d.id);
+                opt.textContent = d.label;
+                dubSelect.appendChild(opt);
+            });
+            dubSelect.addEventListener('change', function () {
+                var dub = dubs.find(function (d) { return String(d.id) === dubSelect.value; });
+                if (!dub) return;
+                var wasPlaying = !player.paused();
+                var resumeAt = player.currentTime();
+                // Селектор качества настроен на master.m3u8 старой озвучки —
+                // без очистки options дублировались бы при каждом переключении
+                // (addqualitylevel файрится заново на новом источнике, но старые
+                // <option> сами не удаляются).
+                select.innerHTML = '';
+                select.appendChild(autoOpt);
+                player.src({ src: dub.url, type: 'application/x-mpegURL' });
+                player.one('loadedmetadata', function () {
+                    player.currentTime(resumeAt);
+                    if (wasPlaying) player.play();
+                });
+            });
+            player.controlBar.el().appendChild(dubSelect);
+        }
     });
 
     // Получаем ID эпизода из URL
