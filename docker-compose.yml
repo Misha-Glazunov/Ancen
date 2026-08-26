@@ -95,6 +95,17 @@ services:
     depends_on:
       - app
 
+  # Публикует animemory.ru наружу без открытия портов (провайдер блокирует
+  # входящие) — токен туннеля из серверного .env (не в git, как остальные
+  # секреты), маршрутизация hostname -> nginx:80 настраивается в дашборде
+  # Cloudflare (Zero Trust -> Networks -> Tunnels -> Public Hostname), не здесь.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - nginx
+
   # ---------- Мониторинг инфраструктуры (Grafana/Prometheus) ----------
   # Не проксируется через nginx/домен намеренно — сайт и так недоступен
   # снаружи напрямую (провайдер блокирует входящие), доступ только по
