@@ -1,0 +1,11 @@
+{
+  "name": "AniMemory",
+  "short_name": "AniMemory",
+  "icons": [
+    { "src": "/static/img/favicon/icon-192.png", "type": "image/png", "sizes": "192x192" },
+    { "src": "/static/img/favicon/icon-512.png", "type": "image/png", "sizes": "512x512" }
+  ],
+  "theme_color": "#1a1a2e",
+  "background_color": "#1a1a2e",
+  "display": "standalone"
+}
