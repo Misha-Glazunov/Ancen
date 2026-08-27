@@ -10,6 +10,21 @@
     <title>{{.Title}} — смотреть с реакциями и комментариями | AniMemory</title>
     <meta name="description" content="Смотри «{{.Title}}» на AniMemory — ставь реакции на любом таймкоде и читай комментарии других зрителей в реальном времени.">
     <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://animemory.ru/watch?episode={{.EpisodeID}}">
+
+    <meta property="og:type" content="video.episode">
+    <meta property="og:title" content="{{.AnimeTitle}} — {{.Title}}">
+    <meta property="og:description" content="Смотри «{{.Title}}» на AniMemory — реакции на любом таймкоде и комментарии зрителей в реальном времени.">
+    <meta property="og:url" content="https://animemory.ru/watch?episode={{.EpisodeID}}">
+    <meta property="og:site_name" content="AniMemory">
+    <meta property="og:image" content="https://animemory.ru/static/img/home/about_banner.jpg">
+    <meta property="og:locale" content="ru_RU">
+
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{.AnimeTitle}} — {{.Title}}">
+    <meta name="twitter:description" content="Смотри «{{.Title}}» на AniMemory — реакции и комментарии зрителей в реальном времени.">
+    <meta name="twitter:image" content="https://animemory.ru/static/img/home/about_banner.jpg">
+
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
