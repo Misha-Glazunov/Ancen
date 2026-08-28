@@ -19,6 +19,7 @@ import (
 	"log"
 	"math"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/smtp"
 	"net/url"
@@ -76,11 +77,50 @@ var (
 	loginAttempts   = make(map[string]*loginAttemptInfo)
 )
 
-// clientIP извлекает IP клиента из запроса (без учёта X-Forwarded-For, чтобы его нельзя было подделать)
+// cloudflareCIDRs — официальные диапазоны Cloudflare (https://www.cloudflare.com/ips/).
+// ponytail: список статический, меняется раз в пару лет — держим захардкоженным,
+// освежать вручную с той же страницы, а не тянуть по сети на старте.
+var cloudflareCIDRs = func() []*net.IPNet {
+	raw := []string{
+		"173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22",
+		"141.101.64.0/18", "108.162.192.0/18", "190.93.240.0/20", "188.114.96.0/20",
+		"197.234.240.0/22", "198.41.128.0/17", "162.158.0.0/15", "104.16.0.0/13",
+		"104.24.0.0/14", "172.64.0.0/13", "131.0.72.0/22",
+		"2400:cb00::/32", "2606:4700::/32", "2803:f800::/32", "2405:b500::/32",
+		"2405:8100::/32", "2a06:98c0::/29", "2c0f:f248::/32",
+	}
+	nets := make([]*net.IPNet, 0, len(raw))
+	for _, c := range raw {
+		if _, n, err := net.ParseCIDR(c); err == nil {
+			nets = append(nets, n)
+		}
+	}
+	return nets
+}()
+
+func isCloudflareIP(ip net.IP) bool {
+	for _, n := range cloudflareCIDRs {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// clientIP извлекает IP клиента. X-Forwarded-For по-прежнему игнорируем (подделывается),
+// но если запрос реально пришёл от Cloudflare (RemoteAddr в их диапазонах), доверяем
+// заголовку CF-Connecting-IP — иначе за прокси Cloudflare у всех был бы один IP
+// и rate-limit по «логин+IP» лочил бы пользователей пачками.
 func clientIP(r *http.Request) string {
-	host := r.RemoteAddr
-	if idx := strings.LastIndex(host, ":"); idx != -1 {
-		host = host[:idx]
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	remoteIP := net.ParseIP(host)
+	if remoteIP != nil && isCloudflareIP(remoteIP) {
+		if cf := net.ParseIP(strings.TrimSpace(r.Header.Get("CF-Connecting-IP"))); cf != nil {
+			return cf.String()
+		}
 	}
 	return host
 }
