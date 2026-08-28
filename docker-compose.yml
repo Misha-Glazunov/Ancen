@@ -102,12 +102,12 @@ services:
   cloudflared:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
-    # --protocol http2: QUIC (протокол по умолчанию, поверх UDP) циклически
-    # рвался с "failed to accept QUIC stream: timeout: no recent network
-    # activity" на этой сети — похоже на блокировку/деградацию UDP у
-    # провайдера (тот же MGTS, что блокирует все входящие соединения).
-    # HTTP/2 работает поверх обычного TCP, не подвержен этой проблеме.
-    command: tunnel --no-autoupdate --protocol http2 run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    # Протокол edge-соединения. http2 (TCP) на сети MGTS периодически
+    # деградирует: DPI/файрвол режет соединения примерно каждые ~45с
+    # (в логах cloudflared — регистрирует 4 connection, теряет все, цикл).
+    # QUIC (UDP) раньше тоже рвался ("failed to accept QUIC stream: timeout"),
+    # но фильтрация плавающая. Откат: вернуть --protocol http2.
+    command: tunnel --no-autoupdate --protocol quic run --token ${CLOUDFLARE_TUNNEL_TOKEN}
     depends_on:
       - nginx
 
