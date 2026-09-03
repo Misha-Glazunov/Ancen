@@ -90,8 +90,17 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
+      # Снаружи проброшен через роутер: внешний 8443 -> 443 (обход DPI
+      # провайдера на 80/443). Origin для Cloudflare proxied.
+      - "443:443"
     volumes:
       - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./deploy/nginx/locations.conf:/etc/nginx/locations.conf:ro
+      # Cloudflare Origin Certificate (cert.pem + key.pem). На проде
+      # NGINX_CERTS_DIR указывает на папку ВНЕ git-дерева
+      # (C:/Users/mishg/ancen-certs) — приватный ключ не попадает в рабочую
+      # копию репозитория. Локально fallback на самоподписанную заглушку.
+      - ${NGINX_CERTS_DIR:-./deploy/nginx/certs}:/etc/nginx/certs:ro
     depends_on:
       - app
 
@@ -107,7 +116,7 @@ services:
     # activity" на этой сети — похоже на блокировку/деградацию UDP у
     # провайдера (тот же MGTS, что блокирует все входящие соединения).
     # HTTP/2 работает поверх обычного TCP, не подвержен этой проблеме.
-    command: tunnel --no-autoupdate --protocol http2 run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    command: tunnel --no-autoupdate --protocol quic --edge-ip-version 4 run --token ${CLOUDFLARE_TUNNEL_TOKEN}
     depends_on:
       - nginx
 

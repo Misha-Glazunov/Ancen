@@ -13,6 +13,11 @@ cmd/server/server
 *.pem
 *.key
 id_rsa*
+# ...кроме самоподписанной заглушки для nginx: она ничего не защищает, нужна
+# только чтобы контейнер стартовал. Реальный Origin-серт кладётся на прод
+# через NGINX_CERTS_DIR (см. deploy/nginx/certs/README.md).
+!deploy/nginx/certs/cert.pem
+!deploy/nginx/certs/key.pem
 
 # IDE
 .vscode/
