@@ -202,3 +202,12 @@ services:
       - "3000:3000"
     depends_on:
       - prometheus
+
+# MTU 1400 на bridge: маршрут Cloudflare -> линия МГТС черно-дырит
+# полноразмерные пакеты (PMTU black hole, ICMP frag-needed режется) —
+# крупные ответы через CF обрывались на ~20 КБ. Меньший MTU -> origin шлёт
+# сегменты, которые проходят битый участок. Парно с MTU роутера (WAN 1400).
+networks:
+  default:
+    driver_opts:
+      com.docker.network.driver.mtu: "1400"
